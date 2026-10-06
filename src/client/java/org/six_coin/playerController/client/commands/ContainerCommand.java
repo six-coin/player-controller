@@ -4,7 +4,6 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.client.MinecraftClient;
@@ -34,38 +33,13 @@ public final class ContainerCommand {
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
         return ClientCommandManager.literal("container")
             .then(ClientCommandManager.argument("position_x", IntegerArgumentType.integer())
-                .suggests(ContainerCommand::suggestX)
+                .suggests(LookSuggestions::x)
                 .then(ClientCommandManager.argument("position_y", IntegerArgumentType.integer())
-                    .suggests(ContainerCommand::suggestY)
+                    .suggests(LookSuggestions::y)
                     .then(ClientCommandManager.argument("position_z", IntegerArgumentType.integer())
-                        .suggests(ContainerCommand::suggestZ)
+                        .suggests(LookSuggestions::z)
                         .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
                             .executes(ContainerCommand::execute)))));
-    }
-
-    // ------------------------------------------------------------------
-    // 坐标自动填充：默认填准星看到的那个方块
-    // ------------------------------------------------------------------
-
-    private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestX(
-        CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
-        BlockPos looked = PlayerUtils.lookedAtBlock();
-        if (looked != null) builder.suggest(looked.getX());
-        return builder.buildFuture();
-    }
-
-    private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestY(
-        CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
-        BlockPos looked = PlayerUtils.lookedAtBlock();
-        if (looked != null) builder.suggest(looked.getY());
-        return builder.buildFuture();
-    }
-
-    private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestZ(
-        CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
-        BlockPos looked = PlayerUtils.lookedAtBlock();
-        if (looked != null) builder.suggest(looked.getZ());
-        return builder.buildFuture();
     }
 
     private static int execute(CommandContext<FabricClientCommandSource> context) {

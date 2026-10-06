@@ -3,9 +3,7 @@
   "package": "org.six_coin.playerController.client.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "ClientConnectionMixin",
-    "MinecraftClientMixin",
-    "PlayerMoveC2SPacketAccessor"
+    "MinecraftClientMixin"
   ],
   "injectors": {
     "defaultRequire": 1

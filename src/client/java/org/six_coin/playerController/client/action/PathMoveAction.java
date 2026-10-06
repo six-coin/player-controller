@@ -1,14 +1,17 @@
 package org.six_coin.playerController.client.action;
 
+import net.minecraft.block.Blocks;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.feature.FlightVelocity;
-import org.six_coin.playerController.client.feature.NoFall;
 import org.six_coin.playerController.client.util.ChatUtils;
+import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
+import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointGraph;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
 
@@ -16,37 +19,61 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * /pc move to：沿着路径点图上的最短路一路飞过去。
+ * /pc move to：沿着路径点图上的最短路一路飞过去，可以跨传送门。
  *
  * <p>和一段一段调用 {@link MoveAction} 的区别：
  * <ul>
- *   <li>整个过程只开关一次飞行和 NoFall，中途不取消飞行；</li>
- *   <li>同轴连续的几段会合并成一步（1 1 1 → 1 1 2 → 1 1 3 直接走 1 1 1 → 1 1 3）。</li>
+ *   <li>整个过程只开关一次飞行，中途不取消飞行；</li>
+ *   <li>同轴连续的几段会合并成一步（1 1 1 → 1 1 2 → 1 1 3 直接走 1 1 1 → 1 1 3）；</li>
+ *   <li>遇到传送门边会自己走进去、等服务端传送、切维度后接着走。</li>
  * </ul>
  */
 public class PathMoveAction extends Action {
 
-    /** 一段同轴移动。 */
-    private record Segment(Direction.Axis axis, int blocks, BlockPos from, BlockPos to) {
+    private enum StepKind {
+        /** 同一维度里沿轴走一段。 */
+        MOVE,
+        /** 下界传送门（记录时是双向的 0 长度边）。 */
+        NETHER_PORTAL,
+        /** 末地传送门（单向边）。 */
+        END_PORTAL
     }
 
-    private final List<BlockPos> path;
-    private final List<Segment> segments = new ArrayList<>();
+    private record Step(StepKind kind, Waypoint from, Waypoint to, Direction.Axis axis, int blocks) {
+    }
+
+    /** 等下界传送门传送的最长时间（原版是 80 tick）。 */
+    private static final int MAX_PORTAL_WAIT_TICKS = 400;
+
+    /** 维度变化后再等几 tick，让服务端把落点坐标同步过来。 */
+    private static final int ARRIVAL_DELAY_TICKS = 5;
+
+    /** 落点偏差超过这个值就认为传送门对不上了。 */
+    private static final int ARRIVAL_TOLERANCE = 2;
+
+    private final List<Waypoint> path;
+    private final List<Step> steps = new ArrayList<>();
 
     private int index;
     private MoveDriver driver;
     private boolean engaged;
     private boolean finishedAll;
 
-    public PathMoveAction(List<BlockPos> path) {
+    // 传送门过程的状态
+    private boolean portalEntered;
+    private int portalWaitTicks;
+    private int arrivalTicks = -1;
+
+    public PathMoveAction(List<Waypoint> path) {
         this.path = path;
     }
 
     @Override
     public String name() {
         if (path.isEmpty()) return "沿路径移动";
-        BlockPos last = path.get(path.size() - 1);
-        return "沿路径移动到 " + last.toShortString() + "（" + Math.max(0, path.size() - 1) + " 段）";
+        Waypoint last = path.get(path.size() - 1);
+        return "沿路径移动到 " + DimensionUtils.display(last.dimension()) + " " + last.coordString()
+            + "（" + Math.max(0, path.size() - 1) + " 段）";
     }
 
     @Override
@@ -68,68 +95,95 @@ public class PathMoveAction extends Action {
             return;
         }
 
+        Waypoint start = path.get(0);
+        if (!DimensionUtils.current().equals(start.dimension())) {
+            fail("你在 " + DimensionUtils.display(DimensionUtils.current())
+                + "，但路径起点在 " + DimensionUtils.display(start.dimension()));
+            return;
+        }
         BlockPos current = BlockPos.ofFloored(player.getEntityPos());
-        if (!current.equals(path.get(0))) {
+        if (!current.equals(start.pos())) {
             fail("当前位置 " + current.toShortString() + " 和路径起点 "
-                + path.get(0).toShortString() + " 不一致");
+                + start.pos().toShortString() + " 不一致");
             return;
         }
 
-        buildSegments();
-        if (segments.isEmpty()) {
+        buildSteps();
+        if (steps.isEmpty()) {
             ChatUtils.debug("起点和终点相同，不需要移动");
             finish();
             return;
         }
 
-        NoFall.acquire();
+        // 终点如果在末地传送门处，编辑模式下先连一条到末地的单向边。
+        // 放在这里是因为路径一旦穿过末地传送门，mc.world 就不是原来的维度了。
+        Waypoint last = path.get(path.size() - 1);
+        if (last.dimension().equals(DimensionUtils.current())) {
+            WaypointManager.get().recordEndPortalLink(last.dimension(), last.pos());
+        }
+
         FlightVelocity.begin();
         engaged = true;
 
-        ChatUtils.debug("开始走路径，共 " + segments.size() + " 步（原始 " + (path.size() - 1)
+        ChatUtils.debug("开始走路径，共 " + steps.size() + " 步（原始 " + (path.size() - 1)
             + " 段），速度 " + PlayerControllerConfig.getMoveSpeed() + " 格/tick，中途不取消飞行");
 
         index = 0;
-        player.setYaw(yawFor(segments.get(0)));
+        player.setYaw(yawFor(steps.get(0)));
     }
 
-    /** 把连续的、同一个轴向上的段合并成一步。 */
-    private void buildSegments() {
-        List<BlockPos> merged = new ArrayList<>();
-        merged.add(path.get(0));
+    private WaypointGraph graph() {
+        return WaypointManager.get().graph();
+    }
 
-        int i = 1;
-        while (i < path.size()) {
-            Direction.Axis axis = WaypointGraph.sharedAxis(path.get(i - 1), path.get(i));
-            if (axis == null) {
-                // 理论上不会发生：图上的边一定是单轴的
-                merged.add(path.get(i));
+    /** 把连续的、同一维度同一个轴向上的段合并成一步；跨维度的那一跳单独成一步。 */
+    private void buildSteps() {
+        int i = 0;
+        while (i < path.size() - 1) {
+            Waypoint a = path.get(i);
+            Waypoint b = path.get(i + 1);
+
+            if (!a.dimension().equals(b.dimension())) {
+                StepKind kind = graph().hasEdge(a.id(), b.id())
+                    ? StepKind.NETHER_PORTAL
+                    : StepKind.END_PORTAL;
+                steps.add(new Step(kind, a, b, null, 0));
                 i++;
                 continue;
             }
-            int j = i;
-            while (j + 1 < path.size() && WaypointGraph.sharedAxis(path.get(j), path.get(j + 1)) == axis) {
+
+            Direction.Axis axis = WaypointGraph.sharedAxis(a.pos(), b.pos());
+            if (axis == null) {
+                // 图上的普通边一定是单轴的，理论上到不了这里
+                i++;
+                continue;
+            }
+
+            int j = i + 1;
+            while (j + 1 < path.size()
+                && path.get(j).dimension().equals(a.dimension())
+                && path.get(j + 1).dimension().equals(a.dimension())
+                && WaypointGraph.sharedAxis(path.get(j).pos(), path.get(j + 1).pos()) == axis) {
                 j++;
             }
-            merged.add(path.get(j));
-            i = j + 1;
-        }
 
-        for (int k = 0; k + 1 < merged.size(); k++) {
-            BlockPos from = merged.get(k);
-            BlockPos to = merged.get(k + 1);
-            Direction.Axis axis = WaypointGraph.sharedAxis(from, to);
-            if (axis == null) continue;
-            int blocks = WaypointGraph.coord(to, axis) - WaypointGraph.coord(from, axis);
-            if (blocks == 0) continue;
-            segments.add(new Segment(axis, blocks, from, to));
+            Waypoint end = path.get(j);
+            int blocks = WaypointGraph.coord(end.pos(), axis) - WaypointGraph.coord(a.pos(), axis);
+            if (blocks != 0) {
+                steps.add(new Step(StepKind.MOVE, a, end, axis, blocks));
+            }
+            i = j;
         }
     }
 
-    private float yawFor(Segment segment) {
-        return switch (segment.axis()) {
-            case X -> segment.blocks() > 0 ? -90.0f : 90.0f;
-            case Z -> segment.blocks() > 0 ? 0.0f : 180.0f;
+    private float yawFor(Step step) {
+        if (step.kind() != StepKind.MOVE) {
+            ClientPlayerEntity player = PlayerUtils.player();
+            return player == null ? 0.0f : player.getYaw();
+        }
+        return switch (step.axis()) {
+            case X -> step.blocks() > 0 ? -90.0f : 90.0f;
+            case Z -> step.blocks() > 0 ? 0.0f : 180.0f;
             case Y -> PlayerUtils.player() == null ? 0.0f : PlayerUtils.player().getYaw();
         };
     }
@@ -138,39 +192,59 @@ public class PathMoveAction extends Action {
 
     @Override
     protected void tick() {
+        if (PlayerUtils.player() == null) {
+            fail("玩家不存在");
+            return;
+        }
+
+        if (index >= steps.size()) {
+            if (!finishedAll) {
+                finishedAll = true;
+                ClientPlayerEntity player = PlayerUtils.player();
+                if (player != null) {
+                    snapIfNeeded(player, path.get(path.size() - 1).pos());
+                }
+            }
+            finish();
+            return;
+        }
+
+        Step step = steps.get(index);
+        if (step.kind() == StepKind.MOVE) {
+            tickMove(step);
+        } else {
+            tickPortal(step);
+        }
+    }
+
+    private void tickMove(Step step) {
+        if (!DimensionUtils.current().equals(step.from().dimension())) {
+            fail("移动过程中维度变了（应该在 " + DimensionUtils.display(step.from().dimension()) + "）");
+            return;
+        }
+
         ClientPlayerEntity player = PlayerUtils.player();
         if (player == null) {
             fail("玩家不存在");
             return;
         }
 
-        if (index >= segments.size()) {
-            if (!finishedAll) {
-                // 全部走完，把最后一点浮点误差抹掉，精确停在终点方块中心
-                finishedAll = true;
-                snapIfNeeded(player, path.get(path.size() - 1));
-            }
-            finish();
-            return;
-        }
-
-        Segment segment = segments.get(index);
-
         if (driver == null) {
             // 每段开始前精确对齐到起点方块中心，避免浮点误差累积。
             // 注意这里不能 return：这一 tick 必须马上写入速度，否则上一 tick 残留的重力
             // 会让玩家在拐角处往下掉一点。
-            snapIfNeeded(player, segment.from());
-            driver = new MoveDriver(segment.axis(), PlayerUtils.axisValue(segment.axis(), player) + segment.blocks(), segment.blocks());
-            ChatUtils.debug("第 " + (index + 1) + "/" + segments.size() + " 步："
-                + segment.from().toShortString() + " → " + segment.to().toShortString()
-                + "（" + MoveAction.axisName(segment.axis()) + " " + segment.blocks() + "）");
+            snapIfNeeded(player, step.from().pos());
+            driver = new MoveDriver(step.axis(),
+                PlayerUtils.axisValue(step.axis(), player) + step.blocks(), step.blocks());
+            ChatUtils.debug("第 " + (index + 1) + "/" + steps.size() + " 步："
+                + step.from().coordString() + " → " + step.to().coordString()
+                + "（" + MoveAction.axisName(step.axis()) + " " + step.blocks() + "）");
         }
 
-        double coord = PlayerUtils.axisValue(segment.axis(), player);
+        double coord = PlayerUtils.axisValue(step.axis(), player);
         switch (driver.tick(coord)) {
             case ARRIVED -> {
-                ChatUtils.debug("到达 " + segment.to().toShortString());
+                ChatUtils.debug("到达 " + step.to().coordString());
                 driver = null;
                 index++;
             }
@@ -182,20 +256,129 @@ public class PathMoveAction extends Action {
         }
     }
 
+    // ------------------------------------------------------------------
+
+    private void tickPortal(Step step) {
+        ClientPlayerEntity player = PlayerUtils.player();
+        if (player == null) {
+            fail("玩家不存在");
+            return;
+        }
+
+        String fromDimension = step.from().dimension();
+
+        // 阶段一：先站进传送门方块里
+        if (!portalEntered) {
+            portalEntered = true;
+            portalWaitTicks = 0;
+            driver = null;
+
+            BlockPos source = step.from().pos();
+            if (step.kind() == StepKind.END_PORTAL) {
+                if (isEndPortal(source)) {
+                    PlayerUtils.snapToBlockCenter(source);
+                } else if (isEndPortal(source.down())) {
+                    ChatUtils.debug("向下走 1 格进入末地传送门方块 " + source.down().toShortString());
+                    PlayerUtils.snapToBlockCenter(source.down());
+                } else {
+                    fail("传送门点 " + source.toShortString() + " 处没有末地传送门方块");
+                    return;
+                }
+            } else {
+                if (!isNetherPortal(source)) {
+                    fail("传送门点 " + source.toShortString() + " 不是下界传送门方块");
+                    return;
+                }
+                PlayerUtils.snapToBlockCenter(source);
+            }
+
+            ChatUtils.debug("已进入传送门（" + DimensionUtils.display(fromDimension) + " "
+                + source.toShortString() + "），等待服务端传送…");
+        }
+
+        // 阶段二：悬停在传送门里等维度变化
+        if (arrivalTicks < 0) {
+            FlightVelocity.apply(Vec3d.ZERO);
+            portalWaitTicks++;
+
+            if (!DimensionUtils.current().equals(fromDimension)) {
+                arrivalTicks = 0;
+                ChatUtils.info("已传送到 " + DimensionUtils.display(DimensionUtils.current()));
+                return;
+            }
+            if (portalWaitTicks > MAX_PORTAL_WAIT_TICKS) {
+                fail("等待传送超时（" + portalWaitTicks + " tick）");
+            }
+            return;
+        }
+
+        // 阶段三：等落点坐标同步，然后校验并继续
+        arrivalTicks++;
+        FlightVelocity.apply(Vec3d.ZERO);
+        if (arrivalTicks < ARRIVAL_DELAY_TICKS) return;
+
+        String nowDimension = DimensionUtils.current();
+        if (!nowDimension.equals(step.to().dimension())) {
+            fail("传送后到了 " + DimensionUtils.display(nowDimension)
+                + "，期望 " + DimensionUtils.display(step.to().dimension()));
+            return;
+        }
+
+        ClientPlayerEntity arrived = PlayerUtils.player();
+        if (arrived == null) {
+            fail("传送后玩家不存在");
+            return;
+        }
+
+        BlockPos actual = BlockPos.ofFloored(arrived.getEntityPos());
+        if (!actual.equals(step.to().pos())) {
+            int dx = Math.abs(actual.getX() - step.to().pos().getX());
+            int dy = Math.abs(actual.getY() - step.to().pos().getY());
+            int dz = Math.abs(actual.getZ() - step.to().pos().getZ());
+            if (Math.max(dx, Math.max(dy, dz)) > ARRIVAL_TOLERANCE) {
+                fail("落点 " + actual.toShortString() + " 和记录的路径点 "
+                    + step.to().pos().toShortString() + " 对不上");
+                return;
+            }
+            ChatUtils.debug("落点 " + actual.toShortString() + " 和记录的 "
+                + step.to().pos().toShortString() + " 略有偏差，已对齐");
+            PlayerUtils.snapToBlockCenter(step.to().pos());
+        }
+
+        portalEntered = false;
+        arrivalTicks = -1;
+        portalWaitTicks = 0;
+        driver = null;
+        index++;
+        ChatUtils.debug("传送完成，继续走剩下的路");
+    }
+
+    private static boolean isEndPortal(BlockPos pos) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        return mc.world != null && mc.world.getBlockState(pos).isOf(Blocks.END_PORTAL);
+    }
+
+    private static boolean isNetherPortal(BlockPos pos) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        return mc.world != null && mc.world.getBlockState(pos).isOf(Blocks.NETHER_PORTAL);
+    }
+
+    // ------------------------------------------------------------------
+
     @Override
     protected void onEnd() {
         if (engaged) {
             FlightVelocity.end();
-            NoFall.release();
             engaged = false;
         }
 
         WaypointManager manager = WaypointManager.get();
         // 失败 / 被取消时不要记录边，避免写下实际没走通的路
-        if (failureReason() == null && manager.isEditMode()) {
-            for (Segment segment : segments) {
-                manager.recordMove(segment.from(), segment.to());
-            }
+        if (failureReason() != null || !manager.isEditMode()) return;
+
+        for (Step step : steps) {
+            if (step.kind() != StepKind.MOVE) continue;
+            manager.recordMove(step.from().dimension(), step.from().pos(), step.to().pos());
         }
     }
 

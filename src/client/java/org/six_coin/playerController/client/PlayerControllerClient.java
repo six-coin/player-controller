@@ -6,6 +6,7 @@ import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.commands.PcCommand;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
+import org.six_coin.playerController.client.waypoint.PortalTracker;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
 import org.six_coin.playerController.client.waypoint.WaypointRenderer;
 
@@ -20,6 +21,9 @@ public class PlayerControllerClient implements ClientModInitializer {
 
         // 在原版 tick 世界之前驱动动作队列，移动类动作写入的速度才能在当 tick 生效
         ClientTickEvents.START_CLIENT_TICK.register(ActionManager.get()::tick);
+
+        // 编辑模式下监听下界传送门（要一直在跑，不能只在有动作时跑）
+        ClientTickEvents.END_CLIENT_TICK.register(PortalTracker::tick);
 
         ChatUtils.debug("Player Controller 已加载，使用 /pc 查看命令；当前 debug="
             + PlayerControllerConfig.isDebug());

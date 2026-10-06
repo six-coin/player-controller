@@ -14,6 +14,7 @@ import org.six_coin.playerController.client.action.MoveAction;
 import org.six_coin.playerController.client.action.PathMoveAction;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
+import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointGraph;
@@ -89,9 +90,10 @@ public final class MoveCommand {
 
     private static int moveToBlock(FabricClientCommandSource source, BlockPos target) {
         WaypointGraph graph = WaypointManager.get().graph();
-        Waypoint to = graph.at(target);
+        Waypoint to = graph.at(DimensionUtils.current(), target);
         if (to == null) {
-            source.sendError(Text.literal(target.toShortString() + " 不是路径点"));
+            source.sendError(Text.literal("当前维度（" + DimensionUtils.display(DimensionUtils.current())
+                + "）的 " + target.toShortString() + " 不是路径点"));
             return 0;
         }
         return startPath(source, to);
@@ -113,6 +115,7 @@ public final class MoveCommand {
         }
 
         WaypointGraph graph = WaypointManager.get().graph();
+        String dimension = DimensionUtils.current();
 
         // 条件一：当前所在位置（取整后）本身必须是路径点
         BlockPos here = PlayerUtils.currentBlockPos();
@@ -120,7 +123,7 @@ public final class MoveCommand {
             source.sendError(Text.literal("拿不到玩家位置"));
             return 0;
         }
-        Waypoint from = graph.at(here);
+        Waypoint from = graph.at(dimension, here);
         if (from == null) {
             source.sendError(Text.literal("你现在所在的 " + here.toShortString()
                 + " 不是路径点，先用 /pc waypoints add_waypoint 加一个"));
@@ -133,15 +136,17 @@ public final class MoveCommand {
         }
 
         // 条件二：必须找得到路
-        List<BlockPos> path = graph.shortestPath(from.id(), target.id());
+        List<Waypoint> path = graph.shortestPath(from.id(), target.id());
         if (path == null || path.size() < 2) {
-            source.sendError(Text.literal("从 " + here.toShortString() + " 到 "
-                + target.pos().toShortString() + " 找不到路径"));
+            source.sendError(Text.literal("从 " + DimensionUtils.display(dimension) + " " + here.toShortString()
+                + " 到 " + DimensionUtils.display(target.dimension()) + " " + target.pos().toShortString()
+                + " 找不到路径"));
             return 0;
         }
 
         ActionManager.get().submit(new PathMoveAction(path));
-        source.sendFeedback(Text.literal("已提交任务：从 " + here.toShortString() + " 走到 "
+        source.sendFeedback(Text.literal("已提交任务：从 " + DimensionUtils.display(dimension) + " "
+            + here.toShortString() + " 走到 " + DimensionUtils.display(target.dimension()) + " "
             + target.pos().toShortString() + "（" + (path.size() - 1) + " 段）"));
         return 1;
     }

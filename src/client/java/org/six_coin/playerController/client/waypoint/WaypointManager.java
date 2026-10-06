@@ -2,9 +2,12 @@ package org.six_coin.playerController.client.waypoint;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import net.minecraft.block.Blocks;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.BlockPos;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
+import org.six_coin.playerController.client.util.DimensionUtils;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -14,7 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * 路径点管理器：负责当前 world 编号的读写、显示开关、编辑模式。
+ * 路径点管理器：负责当前 world 编号的读写、显示开关、编辑模式、传送门边的记录。
  *
  * <p>数据文件：{@code config/player-controller/world_<num>/waypoints.json}
  */
@@ -111,7 +114,8 @@ public final class WaypointManager {
             graph = loaded == null ? new WaypointGraph() : loaded;
             graph.rebuildIndex();
             ChatUtils.debug("已加载 world_" + world + " 的路径点: "
-                + graph.size() + " 个点，" + graph.edgeCount() + " 条边");
+                + graph.size() + " 个点，" + graph.normalEdgeCount() + " 条普通边，"
+                + graph.oneWayEdgeCount() + " 条单向边");
         } catch (Exception e) {
             graph = new WaypointGraph();
             ChatUtils.error("读取路径点失败，已使用空图: " + e.getMessage());
@@ -150,14 +154,66 @@ public final class WaypointManager {
      *
      * @return 是否真的记录了（不在编辑模式 / 两端相同 / 不合法时返回 false）
      */
-    public boolean recordMove(BlockPos from, BlockPos to) {
+    public boolean recordMove(String dimension, BlockPos from, BlockPos to) {
         if (!editMode) return false;
         if (from.equals(to)) return false;
         if (WaypointGraph.sharedAxis(from, to) == null) return false;
 
-        graph.addSegment(from, to);
+        graph.addSegment(dimension, from, to);
         save();
         ChatUtils.debug("编辑模式：已记录 " + from.toShortString() + " <-> " + to.toShortString());
+        return true;
+    }
+
+    /**
+     * 编辑模式下：把终端在末地传送门的那一格和末地出生平台连一条单向边。
+     *
+     * <p>「终点下方 1 格是末地传送门方块」或者「终点本身就是末地传送门方块」都算。
+     * 这条边只加不减，不会动别的边。
+     *
+     * @return 是否新建了单向边
+     */
+    public boolean recordEndPortalLink(String dimension, BlockPos endPos) {
+        if (!editMode) return false;
+
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.world == null) return false;
+
+        boolean portalHere = mc.world.getBlockState(endPos).isOf(Blocks.END_PORTAL);
+        boolean portalBelow = mc.world.getBlockState(endPos.down()).isOf(Blocks.END_PORTAL);
+        if (!portalHere && !portalBelow) return false;
+
+        Waypoint from = graph.ensureWaypoint(dimension, endPos);
+        Waypoint to = graph.ensureWaypoint(DimensionUtils.END, DimensionUtils.endSpawnPos());
+        if (!graph.addOneWayEdge(from.id(), to.id())) {
+            return false;
+        }
+
+        save();
+        ChatUtils.debug("编辑模式：末地传送门 " + endPos.toShortString()
+            + " → 末地 " + DimensionUtils.endSpawnPos().toShortString() + " 单向边");
+        return true;
+    }
+
+    /**
+     * 编辑模式下：玩家穿过下界传送门后，把传送前所在的路径点和落地方块连一条 0 长度传送门边。
+     *
+     * @return 是否新建了传送门边
+     */
+    public boolean recordPortalLink(Waypoint source, String arrivalDimension, BlockPos arrivalPos) {
+        if (!editMode) return false;
+        if (source == null) return false;
+        if (source.dimension().equals(arrivalDimension)) return false;
+
+        Waypoint arrival = graph.ensureWaypoint(arrivalDimension, arrivalPos);
+        if (!graph.addPortalEdge(source.id(), arrival.id())) {
+            return false;
+        }
+
+        save();
+        ChatUtils.info("编辑模式：记录传送门 " + DimensionUtils.display(source.dimension())
+            + " " + source.coordString() + " <-> " + DimensionUtils.display(arrivalDimension)
+            + " " + arrival.coordString() + "（长度 0，紫色）");
         return true;
     }
 }

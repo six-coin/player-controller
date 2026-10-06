@@ -1,5 +1,7 @@
 package org.six_coin.playerController.client.waypoint;
 
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.RenderLayers;
 import net.minecraft.client.render.VertexConsumer;
@@ -8,14 +10,21 @@ import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShapes;
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
+import org.six_coin.playerController.client.util.DimensionUtils;
 
-/** 把路径点画成红色描边、边画成黄色描边。 */
+/**
+ * 把路径点画成方块描边、边上的每个方块也画描边。
+ *
+ * <p>普通路径点红色、普通边黄色；和传送门有关的路径点紫色。
+ * 只画玩家当前维度里的东西（否则下界的点会叠在主世界同样的坐标上）。
+ */
 public final class WaypointRenderer {
 
-    /** 路径点：红色。 */
+    /** 普通路径点：红色。 */
     private static final int WAYPOINT_COLOR = 0xFFFF3030;
+
+    /** 和传送门有关的路径点：紫色。 */
+    private static final int PORTAL_COLOR = 0xFFB040FF;
 
     /** 边：黄色。 */
     private static final int EDGE_COLOR = 0xFFFFE030;
@@ -53,13 +62,16 @@ public final class WaypointRenderer {
             VertexConsumer buffer = context.consumers().getBuffer(RenderLayers.lines());
 
             WaypointGraph graph = manager.graph();
+            String dimension = DimensionUtils.current();
             int budget = MAX_BOXES;
 
-            // 先画边，再画路径点，这样红点在黄线上面
+            // 先画边，再画路径点，这样点在线的上面
             for (Edge edge : graph.allEdges()) {
                 Waypoint a = graph.get(edge.a());
                 Waypoint b = graph.get(edge.b());
                 if (a == null || b == null) continue;
+                // 跨维度的传送门边不画线（画出来没有意义）
+                if (!a.dimension().equals(dimension) || !b.dimension().equals(dimension)) continue;
                 if (!segmentNear(a.pos(), b.pos(), camera)) continue;
 
                 for (BlockPos pos : WaypointGraph.blocksAlong(a.pos(), b.pos())) {
@@ -72,8 +84,10 @@ public final class WaypointRenderer {
 
             for (Waypoint waypoint : graph.allWaypoints()) {
                 if (budget <= 0) break;
+                if (!waypoint.dimension().equals(dimension)) continue;
                 if (tooFar(waypoint.pos(), camera)) continue;
-                drawBox(matrices, buffer, waypoint.pos(), camera, WAYPOINT_COLOR);
+                drawBox(matrices, buffer, waypoint.pos(), camera,
+                    graph.isPortalWaypoint(waypoint.id()) ? PORTAL_COLOR : WAYPOINT_COLOR);
                 budget--;
             }
         } catch (Exception e) {
