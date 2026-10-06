@@ -437,7 +437,6 @@ public final class WaypointsCommand {
     private static int list(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
         WaypointGraph graph = WaypointManager.get().graph();
-        String here = DimensionUtils.current();
 
         source.sendFeedback(Text.literal("§8[§bPC§8]§r §7所有路径点："));
 
@@ -453,7 +452,7 @@ public final class WaypointsCommand {
                     source.sendFeedback(Text.literal("  §8… 还有 " + (normal.size() - LIST_LIMIT) + " 个没有显示"));
                     break;
                 }
-                source.sendFeedback(waypointLine(waypoint, waypoint.dimension().equals(here)));
+                source.sendFeedback(waypointLine(waypoint));
             }
         }
 
@@ -483,19 +482,15 @@ public final class WaypointsCommand {
     }
 
     /** {@code {id} [设置名称] [删除] [主] [1 1 1] (name)} */
-    private static Text waypointLine(Waypoint waypoint, boolean manageable) {
+    private static Text waypointLine(Waypoint waypoint) {
         MutableText line = Text.literal(" " + waypoint.id() + " ").formatted(Formatting.GRAY);
 
-        if (!manageable) {
-            line.append(Text.literal("[其他维度]").formatted(Formatting.DARK_GRAY));
-        } else {
-            line.append(actionButton(waypoint.hasName() ? "修改名称" : "设置名称",
-                ROOT + "waypoint_name " + waypoint.id() + " ",
-                "点击把命令填到聊天栏（" + ROOT + "waypoint_name <id> <name>）"));
-            line.append(Text.literal(" "));
-            line.append(actionButton("删除", ROOT + "del " + waypoint.id(),
-                "点击把删除命令填到聊天栏"));
-        }
+        line.append(actionButton(waypoint.hasName() ? "修改名称" : "设置名称",
+            ROOT + "waypoint_name " + waypoint.id() + " ",
+            "点击把命令填到聊天栏（" + ROOT + "waypoint_name <id> <name>）"));
+        line.append(Text.literal(" "));
+        line.append(actionButton("删除", ROOT + "del " + waypoint.id(),
+            "点击把删除命令填到聊天栏"));
 
         line.append(Text.literal(" "));
         line.append(dimensionTag(waypoint.dimension()));
@@ -508,10 +503,9 @@ public final class WaypointsCommand {
         return line;
     }
 
-    /** {@code [当前] [主] [1 1 1] (name)} */
+    /** {@code {id} [主] [1 1 1] (name)} —— 只有一个出生点，所以不用标「当前」 */
     private static Text spawnLine(Waypoint spawn) {
-        MutableText line = Text.literal(" [当前]").formatted(Formatting.GREEN);
-        line.append(Text.literal(" "));
+        MutableText line = Text.literal(" " + spawn.id() + " ").formatted(Formatting.GRAY);
         line.append(dimensionTag(spawn.dimension()));
         line.append(Text.literal(" "));
         line.append(clickableCoord(spawn.pos()));

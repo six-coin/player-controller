@@ -68,6 +68,7 @@ public final class WaypointGraph {
     public void rebuildIndex() {
         syncSpawnWaypoint();
         syncSpawnEdge();
+        normalizeEndReturnEdges();
 
         byPos.clear();
         byName.clear();
@@ -157,10 +158,32 @@ public final class WaypointGraph {
         edges.put(nextEdgeId(), new Edge(SPAWN_ID, target.id(), false));
     }
 
+    /**
+     * 末地回主世界的边必须指向出生点节点（0 号），不能指向出生点那个普通路径点。
+     *
+     * <p>旧存档迁移过来、或者手工改过文件时可能会出现指错的情况，这里统一掰正：
+     * 一条<b>单向</b>的<b>跨维度</b>边，如果终点正好是出生点的普通路径点，就改成指向 0 号。
+     */
+    private void normalizeEndReturnEdges() {
+        Waypoint target = spawnWaypointTarget();
+        if (target == null) return;
+
+        for (Edge e : edges.values()) {
+            if (e.bi()) continue;                 // 双向的跨维度边是下界传送门，不动
+            if (e.from() == SPAWN_ID) continue;   // 出生点自己的出口边
+            if (e.to() != target.id()) continue;
+
+            Waypoint from = waypoints.get(e.from());
+            if (from == null) continue;
+            if (from.dimension().equals(target.dimension())) continue;
+
+            e.remap(e.from(), SPAWN_ID);
+        }
+    }
+
     /** 当前出生点对应的那个普通路径点。 */
     @Nullable
-    public Waypoint spawnWaypointTarget() {
-        if (spawn == null) return null;
+    public Waypoint spawnWaypointTarget() {        if (spawn == null) return null;
         Waypoint w = waypoints.get(spawn);
         if (w == null || w.isSpawn()) return null;
         return w;
@@ -452,10 +475,20 @@ public final class WaypointGraph {
             if (Math.min(ehi, hi) > Math.max(elo, lo)) overlapping.add(entry.getKey());
         }
 
-        // 2. 收集切点
+        // 2. 收集切点：新线段两端、落在它内部的已有路径点、以及重叠边的端点
         TreeSet<Integer> cuts = new TreeSet<>();
         cuts.add(lo);
         cuts.add(hi);
+
+        // 线上已经存在的路径点也要把新边切开（哪怕它身上一条边都没有）
+        for (Waypoint w : new ArrayList<>(waypoints.values())) {
+            if (w.isSpawn()) continue;
+            if (!w.dimension().equals(dimension)) continue;
+            if (!onLine(w.pos(), pa, axis)) continue;
+            int c = coord(w, axis);
+            if (c > lo && c < hi) cuts.add(c);
+        }
+
         for (int edgeId : overlapping) {
             Edge e = edges.get(edgeId);
             if (e == null) continue;

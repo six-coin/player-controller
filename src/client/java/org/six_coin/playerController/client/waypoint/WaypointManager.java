@@ -194,7 +194,7 @@ public final class WaypointManager {
             byOldId.put(oldId, w);
         }
 
-        // 旧的 -1 号：出生点，位置对应的普通路径点就是新的出生点目标
+        // 旧的 -1 号：出生点。它对应的普通路径点就是新的出生点目标
         Waypoint spawnTarget = null;
         String oldSpawnName = null;
         for (int oldId : oldIds) {
@@ -206,7 +206,6 @@ public final class WaypointManager {
                 optString(o, "dimension", DimensionUtils.OVERWORLD),
                 new BlockPos(optInt(o, "x"), optInt(o, "y"), optInt(o, "z")));
             oldSpawnName = optString(o, "name", null);
-            byOldId.put(oldId, spawnTarget);
         }
         if (spawnTarget != null) {
             if (oldSpawnName != null && !spawnTarget.hasName()
@@ -214,6 +213,15 @@ public final class WaypointManager {
                 graph.setName(spawnTarget.id(), oldSpawnName);
             }
             graph.setSpawn(spawnTarget.id());
+        }
+
+        // 关键：边里引用旧 -1 的，要映射到新的出生点节点（0 号），
+        // 而不是映射到出生点那个普通路径点 —— 末地回主世界的边必须指向 0 号。
+        Waypoint spawnNode = graph.spawnNode();
+        if (spawnNode != null) {
+            for (int oldId : oldIds) {
+                if (oldId < 0) byOldId.put(oldId, spawnNode);
+            }
         }
 
         // 无向边
