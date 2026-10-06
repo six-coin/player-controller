@@ -234,7 +234,8 @@ public final class WaypointGraph {
         for (Map.Entry<Integer, Edge> entry : edges.entrySet()) {
             list.add(new EdgeEntry(entry.getKey(), entry.getValue()));
         }
-        list.sort(Comparator.comparingInt(EdgeEntry::id));
+        // 倒序：-1, -2, -3 ...
+        list.sort(Comparator.comparingInt(EdgeEntry::id).reversed());
         return list;
     }
 
@@ -588,6 +589,8 @@ public final class WaypointGraph {
             for (Waypoint w : allWaypoints()) {
                 if (w.hasName()) continue; // 有名字的点是用户指定的，保留
                 if (w.isSpawn()) continue;
+                // 连着传送门的点也不能删：删了点会连带把传送门边一起去掉
+                if (isPortalWaypoint(w.id())) continue;
                 List<Integer> ns = new ArrayList<>(neighbours(w.id()));
                 if (ns.size() != 2) continue;
 

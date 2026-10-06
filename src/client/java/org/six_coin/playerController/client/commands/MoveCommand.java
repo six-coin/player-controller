@@ -5,10 +5,12 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.command.CommandSource;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.action.MoveAction;
 import org.six_coin.playerController.client.action.PathMoveAction;
@@ -43,9 +45,48 @@ public final class MoveCommand {
         node.then(axis("y", Direction.Axis.Y));
         node.then(axis("z", Direction.Axis.Z));
         node.then(moveTo());
+        node.then(ClientCommandManager.literal("face")
+            .then(ClientCommandManager.argument("blocks", IntegerArgumentType.integer(1))
+                .executes(context -> face(context.getSource(),
+                    IntegerArgumentType.getInteger(context, "blocks")))));
         node.then(ClientCommandManager.literal("cancel")
             .executes(context -> cancel(context.getSource())));
         return node;
+    }
+
+    /**
+     * 朝当前朝向走 num 格。
+     *
+     * <p>用视线向量取最近的六个正方向之一，所以抬头 / 低头就是上下（走 y 轴），
+     * 平视就是东西南北。
+     */
+    private static int face(FabricClientCommandSource source, int blocks) {
+        ClientPlayerEntity player = source.getPlayer();
+        if (player == null) {
+            source.sendError(Text.literal("没有玩家"));
+            return 0;
+        }
+
+        Vec3d look = player.getRotationVec(1.0f);
+        Direction direction = Direction.getFacing(look);
+        int sign = direction.getDirection().offset();
+
+        ActionManager.get().submit(new MoveAction(direction.getAxis(), blocks * sign));
+
+        ChatUtils.info("已提交任务：朝 " + directionName(direction) + " 移动 " + blocks + " 格"
+            + "（速度 " + PlayerControllerConfig.getMoveSpeed() + " 格/tick）");
+        return 1;
+    }
+
+    private static String directionName(Direction direction) {
+        return switch (direction) {
+            case UP -> "上";
+            case DOWN -> "下";
+            case NORTH -> "北";
+            case SOUTH -> "南";
+            case EAST -> "东";
+            case WEST -> "西";
+        };
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> axis(String name, Direction.Axis axis) {

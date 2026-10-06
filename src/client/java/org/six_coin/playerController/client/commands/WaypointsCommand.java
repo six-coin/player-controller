@@ -73,6 +73,8 @@ public final class WaypointsCommand {
             .then(ClientCommandManager.literal("waypoint_name_here")
                 .then(ClientCommandManager.argument("name", StringArgumentType.word())
                     .executes(WaypointsCommand::waypointNameHere)))
+            .then(ClientCommandManager.literal("waypoint_del_target")
+                .executes(WaypointsCommand::waypointDelTarget))
             .then(ClientCommandManager.literal("spawn_set_by_name")
                 .then(ClientCommandManager.argument("name", StringArgumentType.word())
                     .suggests((context, builder) -> net.minecraft.command.CommandSource
@@ -83,10 +85,10 @@ public final class WaypointsCommand {
                     .executes(WaypointsCommand::spawnSetById)))
             .then(ClientCommandManager.literal("spawn_del")
                 .executes(WaypointsCommand::spawnDel))
-            .then(ClientCommandManager.literal("side_add")
+            .then(ClientCommandManager.literal("edge_add")
                 .then(ClientCommandManager.argument("id1", IntegerArgumentType.integer())
                     .then(ClientCommandManager.argument("id2", IntegerArgumentType.integer())
-                        .executes(WaypointsCommand::sideAdd))))
+                        .executes(WaypointsCommand::edgeAdd))))
             .then(ClientCommandManager.literal("del")
                 .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
                     .executes(WaypointsCommand::delete)))
@@ -261,7 +263,7 @@ public final class WaypointsCommand {
     // 边
     // ------------------------------------------------------------------
 
-    private static int sideAdd(CommandContext<FabricClientCommandSource> context) {
+    private static int edgeAdd(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
         int id1 = IntegerArgumentType.getInteger(context, "id1");
         int id2 = IntegerArgumentType.getInteger(context, "id2");
@@ -359,11 +361,35 @@ public final class WaypointsCommand {
     // 删除
     // ------------------------------------------------------------------
 
+    private static int waypointDelTarget(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+
+        BlockPos pos = PlayerUtils.lookedAtBlock();
+        if (pos == null) {
+            source.sendError(Text.literal("你没有看向任何方块"));
+            return 0;
+        }
+
+        String dimension = DimensionUtils.current();
+        Waypoint waypoint = WaypointManager.get().graph().at(dimension, pos);
+        if (waypoint == null) {
+            source.sendError(Text.literal("你看向的 " + DimensionUtils.display(dimension) + " "
+                + pos.toShortString() + " 不是路径点"));
+            return 0;
+        }
+        return deleteWaypoint(source, waypoint);
+    }
+
     private static int delete(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
         int id = IntegerArgumentType.getInteger(context, "id");
 
         WaypointGraph graph = WaypointManager.get().graph();
+
+        if (id == 0) {
+            source.sendError(Text.literal("0 号是出生点节点，不能删；要取消出生点用 /pc w spawn_del"));
+            return 0;
+        }
 
         if (id > 0) {
             Waypoint waypoint = graph.get(id);
@@ -371,28 +397,7 @@ public final class WaypointsCommand {
                 source.sendError(Text.literal("没有 #" + id + " 这个路径点"));
                 return 0;
             }
-            Waypoint spawn = graph.spawnWaypointTarget();
-            if (spawn != null && spawn.id() == id) {
-                source.sendError(Text.literal("#" + id + " 是当前出生点，不能删；先用 spawn_set_* 换一个"));
-                return 0;
-            }
-            BlockPos endPlatform = DimensionUtils.endSpawnPos();
-            if (waypoint.dimension().equals(DimensionUtils.END) && waypoint.pos().equals(endPlatform)) {
-                source.sendError(Text.literal("#" + id + " 是末地初始平台，不能删"));
-                return 0;
-            }
-
-            BlockPos pos = waypoint.pos();
-            graph.removeWaypoint(id);
-            WaypointManager.get().save();
-            source.sendFeedback(Text.literal("已删除路径点 #" + id + " " + pos.toShortString()
-                + " 以及和它相连的所有边"));
-            return 1;
-        }
-
-        if (id == 0) {
-            source.sendError(Text.literal("0 号是出生点节点，不能删"));
-            return 0;
+            return deleteWaypoint(source, waypoint);
         }
 
         Edge edge = graph.edge(id);
@@ -409,6 +414,37 @@ public final class WaypointsCommand {
         graph.removeEdge(id);
         WaypointManager.get().save();
         source.sendFeedback(Text.literal("已删除边 #" + id + " " + describe));
+        return 1;
+    }
+
+    /** 删除一个路径点，带各种保护。 */
+    private static int deleteWaypoint(FabricClientCommandSource source, Waypoint waypoint) {
+        WaypointGraph graph = WaypointManager.get().graph();
+        int id = waypoint.id();
+
+        if (waypoint.isSpawn()) {
+            source.sendError(Text.literal("这里是出生点节点，不能删；要取消出生点用 /pc w spawn_del"));
+            return 0;
+        }
+
+        Waypoint spawn = graph.spawnWaypointTarget();
+        if (spawn != null && spawn.id() == id) {
+            source.sendError(Text.literal("#" + id + " 是当前出生点，不能删；先用 spawn_set_* 换一个"));
+            return 0;
+        }
+
+        BlockPos endPlatform = DimensionUtils.endSpawnPos();
+        if (waypoint.dimension().equals(DimensionUtils.END) && waypoint.pos().equals(endPlatform)) {
+            source.sendError(Text.literal("#" + id + " 是末地初始平台，不能删"));
+            return 0;
+        }
+
+        BlockPos pos = waypoint.pos();
+        graph.removeWaypoint(id);
+        WaypointManager.get().save();
+        source.sendFeedback(Text.literal("已删除路径点 #" + id + " "
+            + DimensionUtils.display(waypoint.dimension()) + " " + pos.toShortString()
+            + " 以及和它相连的所有边"));
         return 1;
     }
 
@@ -517,7 +553,7 @@ public final class WaypointsCommand {
     }
 
     /**
-     * {@code {edge_id} [删除] [主] {point_id} (name) <-> [下] {point_id} (name)}
+     * {@code {edge_id} [删除] {from_id} <符号> {to_id} / [主] [0 0 0] (name) <符号> [下] [0 0 0] (name)}
      *
      * <p>双向符号用绿色，单向符号用黄色。
      */
@@ -535,13 +571,29 @@ public final class WaypointsCommand {
         line.append(actionButton("删除", ROOT + "del " + entry.id(),
             "点击把删除命令填到聊天栏"));
         line.append(Text.literal(" "));
+
+        // 前半段：两个路径点的编号
+        line.append(Text.literal(String.valueOf(from.id())).formatted(Formatting.AQUA));
+        line.append(Text.literal(" "));
+        line.append(edgeSymbol(edge));
+        line.append(Text.literal(" "));
+        line.append(Text.literal(String.valueOf(to.id())).formatted(Formatting.AQUA));
+
+        line.append(Text.literal(" / ").formatted(Formatting.DARK_GRAY));
+
+        // 后半段：维度 + 坐标 + 名字
         line.append(endpointText(from));
         line.append(Text.literal(" "));
-        line.append(Text.literal(edge.bi() ? "<->" : "-->")
-            .setStyle(Style.EMPTY.withColor(edge.bi() ? Formatting.GREEN : Formatting.YELLOW)));
+        line.append(edgeSymbol(edge));
         line.append(Text.literal(" "));
         line.append(endpointText(to));
         return line;
+    }
+
+    /** 双向 {@code <->} 绿色，单向 {@code -->} 黄色。 */
+    private static MutableText edgeSymbol(Edge edge) {
+        return Text.literal(edge.bi() ? "<->" : "-->")
+            .setStyle(Style.EMPTY.withColor(edge.bi() ? Formatting.GREEN : Formatting.YELLOW));
     }
 
     /** {@code [主] {point_id} (name)} */
