@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "player-controller",
+  "version": "${version}",
+  "name": "player-controller",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/player-controller/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-datagen": [
+      "org.six_coin.playerController.client.PlayerControllerDataGenerator"
+    ],
+    "client": [
+      "org.six_coin.playerController.client.PlayerControllerClient"
+    ],
+    "main": [
+      "org.six_coin.playerController.PlayerController"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
