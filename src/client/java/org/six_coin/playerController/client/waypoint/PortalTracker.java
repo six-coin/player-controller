@@ -6,6 +6,7 @@ import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
+import org.six_coin.playerController.client.util.PortalUtils;
 
 /**
  * 编辑模式下监听下界传送门。
@@ -61,7 +62,7 @@ public final class PortalTracker {
                 if (source != null) {
                     BlockPos arrival = BlockPos.ofFloored(client.player.getEntityPos());
                     // 落点本身也得在下界传送门里，否则可能是死亡重生之类的维度变化
-                    if (!insideNetherPortal(client, arrival)) {
+                    if (!PortalUtils.netherPortalNear(arrival)) {
                         ChatUtils.debug("维度变化了，但落点 " + arrival.toShortString()
                             + " 不在下界传送门里，不记录传送门边");
                     } else {
@@ -79,7 +80,7 @@ public final class PortalTracker {
 
         // 只有「站在下界传送门方块里 + 这个方块是路径点」才记
         BlockPos here = BlockPos.ofFloored(client.player.getEntityPos());
-        if (!insideNetherPortal(client, here)) {
+        if (!PortalUtils.isNetherPortal(here)) {
             pendingSource = null;
             return;
         }
@@ -94,13 +95,5 @@ public final class PortalTracker {
             ChatUtils.debug("检测到站在下界传送门路径点 " + here.toShortString() + " 里，等待传送…");
         }
         pendingSource = waypoint;
-    }
-
-    /** 这个方块（或者它上下 1 格）是不是下界传送门方块。 */
-    private static boolean insideNetherPortal(MinecraftClient client, BlockPos pos) {
-        if (client.world == null) return false;
-        return client.world.getBlockState(pos).isOf(Blocks.NETHER_PORTAL)
-            || client.world.getBlockState(pos.up()).isOf(Blocks.NETHER_PORTAL)
-            || client.world.getBlockState(pos.down()).isOf(Blocks.NETHER_PORTAL);
     }
 }

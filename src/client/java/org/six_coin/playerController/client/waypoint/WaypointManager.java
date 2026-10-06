@@ -8,6 +8,7 @@ import net.minecraft.util.math.BlockPos;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
+import org.six_coin.playerController.client.util.PortalUtils;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -185,9 +186,9 @@ public final class WaypointManager {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.world == null) return false;
 
-        boolean portalHere = mc.world.getBlockState(endPos).isOf(Blocks.END_PORTAL);
-        boolean portalBelow = mc.world.getBlockState(endPos.down()).isOf(Blocks.END_PORTAL);
-        if (!portalHere && !portalBelow) return false;
+        // 和穿越时用的是同一套判断（自己 / 下方 / 上方 / 四周），
+        // 否则会出现「边建出来了但走不过去」
+        if (!PortalUtils.endPortalNear(endPos)) return false;
 
         Waypoint from = graph.ensureWaypoint(dimension, endPos);
         Waypoint to;

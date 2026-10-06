@@ -65,6 +65,7 @@ public final class WaypointGraph {
     /** 读档之后调用，重建所有索引。 */
     public void rebuildIndex() {
         syncSpawnWaypoint();
+        syncSpawnOverlapEdges();
 
         byPos.clear();
         byName.clear();
@@ -72,12 +73,25 @@ public final class WaypointGraph {
         outgoing.clear();
 
         int maxId = SPAWN_ID;
+        // 先登记普通路径点：位置索引优先给它们，
+        // 这样出生点 -1 和某个路径点重合时，at()/ensureWaypoint() 拿到的还是原来那个点，
+        // 不会把新边挂到会到处跑的出生点上。
         for (Waypoint w : waypoints.values()) {
+            if (w.isSpawn()) continue;
             byPos.put(new DimPos(w.dimension(), w.pos().asLong()), w.id());
             if (w.hasName()) byName.put(w.name(), w.id());
             adjacency.computeIfAbsent(w.id(), k -> new LinkedHashSet<>());
             outgoing.computeIfAbsent(w.id(), k -> new LinkedHashSet<>());
             if (w.id() > maxId) maxId = w.id();
+        }
+
+        // 出生点本身也要能被查到（位置没被占的话）
+        Waypoint spawn = waypoints.get(SPAWN_ID);
+        if (spawn != null) {
+            if (spawn.hasName()) byName.put(spawn.name(), SPAWN_ID);
+            adjacency.computeIfAbsent(SPAWN_ID, k -> new LinkedHashSet<>());
+            outgoing.computeIfAbsent(SPAWN_ID, k -> new LinkedHashSet<>());
+            byPos.putIfAbsent(new DimPos(spawn.dimension(), spawn.pos().asLong()), SPAWN_ID);
         }
         if (nextId <= maxId) nextId = maxId + 1;
 
@@ -118,6 +132,29 @@ public final class WaypointGraph {
         } else {
             node.moveTo(spawn.dimension(), spawn.pos());
             node.name(spawn.name());
+        }
+    }
+
+    /**
+     * 出生点和普通路径点重合时，连一条 {@code -1 -> 那个点} 的单向边。
+     *
+     * <p>两个点**共存**：原来的点不动（它身上还挂着别的边），只是让出生点多一条
+     * 0 长度的出口，这样从末地回到出生点之后还能接着走。
+     *
+     * <p>这些边是派生出来的，所以每次先全部清掉再按当前重合情况重建，
+     * 免得出生点搬走之后留下一条跨半张地图的假边。
+     */
+    private void syncSpawnOverlapEdges() {
+        oneWayEdges.removeIf(e -> e.from() == SPAWN_ID);
+
+        Waypoint spawn = waypoints.get(SPAWN_ID);
+        if (spawn == null) return;
+
+        for (Waypoint w : waypoints.values()) {
+            if (w.isSpawn()) continue;
+            if (!w.dimension().equals(spawn.dimension())) continue;
+            if (!w.pos().equals(spawn.pos())) continue;
+            oneWayEdges.add(new DirectedEdge(SPAWN_ID, w.id()));
         }
     }
 
@@ -391,11 +428,18 @@ public final class WaypointGraph {
             removed++;
         }
         for (DirectedEdge e : new ArrayList<>(oneWayEdges)) {
+            // from == 出生点的那些是「出生点和路径点重合」自动维护的，不在这里删
+            if (e.from() == SPAWN_ID) continue;
             if (e.from() != id && e.to() != id) continue;
             removeOneWayEdge(e.from(), e.to());
             removed++;
         }
         return removed;
+    }
+
+    /** 这条单向边是不是「出生点和路径点重合」自动生成的那种。 */
+    public static boolean isSpawnOverlapEdge(DirectedEdge edge) {
+        return edge.from() == SPAWN_ID;
     }
 
     /** 直接连一条普通边（两个端点必须同维度且在同一轴向上），没有路径点就建。 */

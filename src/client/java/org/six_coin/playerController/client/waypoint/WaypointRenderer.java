@@ -87,10 +87,19 @@ public final class WaypointRenderer {
 
             for (Waypoint waypoint : graph.allWaypoints()) {
                 if (budget <= 0) break;
+                // 出生点最后单独画，保证和普通路径点重合时绿色在最上面
+                if (waypoint.isSpawn()) continue;
                 if (!waypoint.dimension().equals(dimension)) continue;
                 if (tooFar(waypoint.pos(), camera)) continue;
                 drawBox(matrices, buffer, waypoint.pos(), camera, colorFor(graph, waypoint));
                 budget--;
+            }
+
+            Waypoint spawn = graph.spawnWaypoint();
+            if (budget > 0 && spawn != null
+                && spawn.dimension().equals(dimension)
+                && !tooFar(spawn.pos(), camera)) {
+                drawBox(matrices, buffer, spawn.pos(), camera, SPAWN_COLOR);
             }
         } catch (Exception e) {
             // 渲染出错就不要拖垮整个游戏
@@ -105,6 +114,7 @@ public final class WaypointRenderer {
         if (graph.isPortalWaypoint(waypoint.id())) return PORTAL_COLOR;
         return WAYPOINT_COLOR;
     }
+
 
     private static boolean tooFar(BlockPos pos, Vec3d camera) {        double dx = pos.getX() + 0.5 - camera.x;
         double dy = pos.getY() + 0.5 - camera.y;

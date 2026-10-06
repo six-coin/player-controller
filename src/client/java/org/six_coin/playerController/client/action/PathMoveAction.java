@@ -3,14 +3,17 @@ package org.six_coin.playerController.client.action;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
+import org.six_coin.playerController.client.util.PortalUtils;
 import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointGraph;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
@@ -219,6 +222,16 @@ public class PathMoveAction extends Action {
 
     private void tickMove(Step step) {
         if (!DimensionUtils.current().equals(step.from().dimension())) {
+            // 传送门方块没有碰撞，走到那格会立刻被服务端传走，
+            // 可能这一段还没判定「到达」就已经换维度了。
+            // 如果后面紧跟着一个传送门步骤，就当成已经到达，交给它处理。
+            if (index + 1 < steps.size() && steps.get(index + 1).kind() != StepKind.MOVE) {
+                ChatUtils.debug("这一段还没走完就被传送到了 "
+                    + DimensionUtils.display(DimensionUtils.current()) + "，直接进入传送门步骤");
+                driver = null;
+                index++;
+                return;
+            }
             fail("移动过程中维度变了（应该在 " + DimensionUtils.display(step.from().dimension()) + "）");
             return;
         }
@@ -274,26 +287,39 @@ public class PathMoveAction extends Action {
             driver = null;
 
             BlockPos source = step.from().pos();
-            if (step.kind() == StepKind.END_PORTAL) {
-                if (isEndPortal(source)) {
-                    PlayerUtils.snapToBlockCenter(source);
-                } else if (isEndPortal(source.down())) {
-                    ChatUtils.debug("向下走 1 格进入末地传送门方块 " + source.down().toShortString());
-                    PlayerUtils.snapToBlockCenter(source.down());
-                } else {
-                    fail("传送门点 " + source.toShortString() + " 处没有末地传送门方块");
-                    return;
-                }
-            } else {
-                if (!isNetherPortal(source)) {
-                    fail("传送门点 " + source.toShortString() + " 不是下界传送门方块");
-                    return;
-                }
-                PlayerUtils.snapToBlockCenter(source);
+            boolean nether = step.kind() == StepKind.NETHER_PORTAL;
+
+            // 传送可能在上一步结束时就已经触发了（踩进传送门方块会被立刻传走），
+            // 这时候 mc.world 已经是目标维度了，再去源维度找传送门方块肯定找不到。
+            if (!DimensionUtils.current().equals(fromDimension)) {
+                ChatUtils.debug("进入传送门步骤时已经在 "
+                    + DimensionUtils.display(DimensionUtils.current())
+                    + " 了（上一步结束时就被传送了），直接校验落点");
+                arrivalTicks = 0;
+                return;
             }
 
-            ChatUtils.debug("已进入传送门（" + DimensionUtils.display(fromDimension) + " "
-                + source.toShortString() + "），等待服务端传送…");
+            // 方块本身、下面 1 格、上面 1 格、四周都找一遍。
+            // 末地回主世界的祭坛经常是「站在传送门方块上方」或者「站在边上」，
+            // 只看自己和下面会找不到。
+            BlockPos portalPos = PortalUtils.findNear(source, nether);
+            if (portalPos == null) {
+                fail("传送门点 " + DimensionUtils.display(fromDimension) + " " + source.toShortString()
+                    + " 附近没有" + (nether ? "下界" : "末地") + "传送门方块"
+                    + "（该处是 " + PortalUtils.blockId(source)
+                    + "，下方是 " + PortalUtils.blockId(source.down()) + "）");
+                return;
+            }
+
+            if (!portalPos.equals(source)) {
+                ChatUtils.debug("从 " + source.toShortString()
+                    + " 对齐到传送门方块 " + portalPos.toShortString());
+            }
+            PlayerUtils.snapToBlockCenter(portalPos);
+
+            ChatUtils.debug("已进入" + (nether ? "下界" : "末地") + "传送门（"
+                + DimensionUtils.display(fromDimension) + " " + portalPos.toShortString()
+                + "），等待服务端传送…");
         }
 
         // 阶段二：悬停在传送门里等维度变化
@@ -361,13 +387,11 @@ public class PathMoveAction extends Action {
     }
 
     private static boolean isEndPortal(BlockPos pos) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        return mc.world != null && mc.world.getBlockState(pos).isOf(Blocks.END_PORTAL);
+        return PortalUtils.isEndPortal(pos);
     }
 
     private static boolean isNetherPortal(BlockPos pos) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        return mc.world != null && mc.world.getBlockState(pos).isOf(Blocks.NETHER_PORTAL);
+        return PortalUtils.isNetherPortal(pos);
     }
 
     // ------------------------------------------------------------------

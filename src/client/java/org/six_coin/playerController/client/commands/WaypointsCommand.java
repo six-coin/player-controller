@@ -112,19 +112,28 @@ public final class WaypointsCommand {
     private static LiteralArgumentBuilder<FabricClientCommandSource> addSide() {
         return ClientCommandManager.literal("add_side")
             .then(ClientCommandManager.argument("x1", IntegerArgumentType.integer())
+                .suggests(LookSuggestions::x)
                 .then(ClientCommandManager.argument("y1", IntegerArgumentType.integer())
+                    .suggests(LookSuggestions::y)
                     .then(ClientCommandManager.argument("z1", IntegerArgumentType.integer())
+                        .suggests(LookSuggestions::z)
                         .then(ClientCommandManager.argument("x2", IntegerArgumentType.integer())
+                            .suggests(LookSuggestions::x)
                             .then(ClientCommandManager.argument("y2", IntegerArgumentType.integer())
+                                .suggests(LookSuggestions::y)
                                 .then(ClientCommandManager.argument("z2", IntegerArgumentType.integer())
+                                    .suggests(LookSuggestions::z)
                                     .executes(WaypointsCommand::addSide)))))));
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> delWaypoint() {
         return ClientCommandManager.literal("del_waypoint")
             .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
+                .suggests(LookSuggestions::x)
                 .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+                    .suggests(LookSuggestions::y)
                     .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                        .suggests(LookSuggestions::z)
                         .executes(WaypointsCommand::delWaypoint))));
     }
 
@@ -137,19 +146,28 @@ public final class WaypointsCommand {
     private static LiteralArgumentBuilder<FabricClientCommandSource> delSide() {
         return ClientCommandManager.literal("del_side")
             .then(ClientCommandManager.argument("x1", IntegerArgumentType.integer())
+                .suggests(LookSuggestions::x)
                 .then(ClientCommandManager.argument("y1", IntegerArgumentType.integer())
+                    .suggests(LookSuggestions::y)
                     .then(ClientCommandManager.argument("z1", IntegerArgumentType.integer())
+                        .suggests(LookSuggestions::z)
                         .then(ClientCommandManager.argument("x2", IntegerArgumentType.integer())
+                            .suggests(LookSuggestions::x)
                             .then(ClientCommandManager.argument("y2", IntegerArgumentType.integer())
+                                .suggests(LookSuggestions::y)
                                 .then(ClientCommandManager.argument("z2", IntegerArgumentType.integer())
+                                    .suggests(LookSuggestions::z)
                                     .executes(WaypointsCommand::delSide)))))));
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> setName() {
         return ClientCommandManager.literal("set_name")
             .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
+                .suggests(LookSuggestions::x)
                 .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+                    .suggests(LookSuggestions::y)
                     .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                        .suggests(LookSuggestions::z)
                         .then(ClientCommandManager.argument("name", StringArgumentType.word())
                             .executes(WaypointsCommand::setName)))));
     }
@@ -723,6 +741,12 @@ public final class WaypointsCommand {
         line.append(Text.literal(" "));
         line.append(clickableCoord(to.pos()));
         line.append(Text.literal(" §8单向").formatted(Formatting.GRAY));
+
+        // 出生点和普通路径点重合时自动连的那条，不用手动删
+        if (WaypointGraph.isSpawnOverlapEdge(edge)) {
+            line.append(Text.literal(" §8（出生点重合，自动维护）"));
+            return line;
+        }
 
         if (from.dimension().equals(here)) {
             line.append(Text.literal(" "));
