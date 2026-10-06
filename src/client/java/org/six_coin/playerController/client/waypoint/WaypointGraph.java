@@ -17,145 +17,162 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
- * 路径点图：一堆路径点 + 一堆边。
+ * 路径点图。
  *
- * <p>每个路径点带一个维度，所以「同一个方块坐标」在不同维度是两个不同的点；
- * 所有跟坐标有关的查找 / 切分 / 合并都只在同一维度内进行。
- *
- * <p>边的种类：
+ * <p>编号规则：
  * <ul>
- *   <li>普通边：同一维度、沿单一轴向，长度 = 方块距离；</li>
- *   <li>传送门边（无向）：两端在不同维度，长度算 0，就是下界传送门；</li>
- *   <li>单向边：只有 from -&gt; to，目前是末地传送门，也单独存在 {@code oneWayEdges} 里。</li>
+ *   <li>普通路径点：1, 2, 3, ...（{@code optimize} 会按 x y z 递增重排）；</li>
+ *   <li>出生点节点：固定 {@link #SPAWN_ID}（0），自动跟随「当前出生点」那个普通路径点；</li>
+ *   <li>边：-1, -2, -3, ...（{@code optimize} 会按两端 id 重排）。</li>
  * </ul>
+ *
+ * <p>边的种类：{@code bi = true} 双向（普通走路边、下界传送门边），
+ * {@code bi = false} 单向（末地传送门、出生点重合边）。
+ *
+ * <p>每个路径点带一个维度，所有跟坐标有关的查找 / 切分 / 合并都只在同一维度内进行。
  */
 public final class WaypointGraph {
 
     private static final Pattern NAME_PATTERN = Pattern.compile("[A-Za-z0-9_]+");
 
-    /** 出生点路径点的固定 id（不是数字编号里的那种，是个特殊值）。 */
-    public static final int SPAWN_ID = -1;
+    /** 出生点节点的固定编号。 */
+    public static final int SPAWN_ID = 0;
 
     // ---- 存档内容 ----
-    private int nextId = 0;
+    private int nextId = 1;
     private final Map<Integer, Waypoint> waypoints = new LinkedHashMap<>();
-    private final List<Edge> edges = new ArrayList<>();
-    private final List<DirectedEdge> oneWayEdges = new ArrayList<>();
+    private final Map<Integer, Edge> edges = new LinkedHashMap<>();
 
-    /** 候选出生点。 */
-    private final List<SpawnPoint> spawns = new ArrayList<>();
-
-    /** 当前出生点的名字。 */
+    /** 当前出生点对应的**普通**路径点 id；没有出生点时是 null。 */
     @Nullable
-    private String currentSpawn;
+    private Integer spawn;
 
     // ---- 运行时索引（不存档）----
     private transient final Map<DimPos, Integer> byPos = new HashMap<>();
     private transient final Map<String, Integer> byName = new HashMap<>();
-    private transient final Map<Integer, Set<Integer>> adjacency = new HashMap<>();
+    private transient final Map<Integer, Set<Integer>> neighbours = new HashMap<>();
     private transient final Map<Integer, Set<Integer>> outgoing = new HashMap<>();
 
     /** 维度 + 方块坐标，作为查找的键。 */
     private record DimPos(String dimension, long pos) {
     }
 
+    /** 带编号的边，给列表和渲染用。 */
+    public record EdgeEntry(int id, Edge edge) {
+    }
+
     public WaypointGraph() {
     }
 
-    /** 读档之后调用，重建所有索引。 */
+    /** 读档之后（以及每次改动之后）调用，重建所有索引。 */
     public void rebuildIndex() {
         syncSpawnWaypoint();
-        syncSpawnOverlapEdges();
+        syncSpawnEdge();
 
         byPos.clear();
         byName.clear();
-        adjacency.clear();
+        neighbours.clear();
         outgoing.clear();
 
         int maxId = SPAWN_ID;
         // 先登记普通路径点：位置索引优先给它们，
-        // 这样出生点 -1 和某个路径点重合时，at()/ensureWaypoint() 拿到的还是原来那个点，
-        // 不会把新边挂到会到处跑的出生点上。
+        // 这样出生点节点和某个路径点重合时，at()/ensureWaypoint() 拿到的还是原来那个点。
         for (Waypoint w : waypoints.values()) {
             if (w.isSpawn()) continue;
             byPos.put(new DimPos(w.dimension(), w.pos().asLong()), w.id());
             if (w.hasName()) byName.put(w.name(), w.id());
-            adjacency.computeIfAbsent(w.id(), k -> new LinkedHashSet<>());
+            neighbours.computeIfAbsent(w.id(), k -> new LinkedHashSet<>());
             outgoing.computeIfAbsent(w.id(), k -> new LinkedHashSet<>());
             if (w.id() > maxId) maxId = w.id();
         }
 
-        // 出生点本身也要能被查到（位置没被占的话）
-        Waypoint spawn = waypoints.get(SPAWN_ID);
-        if (spawn != null) {
-            if (spawn.hasName()) byName.put(spawn.name(), SPAWN_ID);
-            adjacency.computeIfAbsent(SPAWN_ID, k -> new LinkedHashSet<>());
+        Waypoint spawnNode = waypoints.get(SPAWN_ID);
+        if (spawnNode != null) {
+            neighbours.computeIfAbsent(SPAWN_ID, k -> new LinkedHashSet<>());
             outgoing.computeIfAbsent(SPAWN_ID, k -> new LinkedHashSet<>());
-            byPos.putIfAbsent(new DimPos(spawn.dimension(), spawn.pos().asLong()), SPAWN_ID);
+            byPos.putIfAbsent(new DimPos(spawnNode.dimension(), spawnNode.pos().asLong()), SPAWN_ID);
         }
         if (nextId <= maxId) nextId = maxId + 1;
 
-        edges.removeIf(e -> !waypoints.containsKey(e.a()) || !waypoints.containsKey(e.b()));
-        for (Edge e : edges) {
-            adjacency.get(e.a()).add(e.b());
-            adjacency.get(e.b()).add(e.a());
-            outgoing.get(e.a()).add(e.b());
-            outgoing.get(e.b()).add(e.a());
-        }
-
-        oneWayEdges.removeIf(e -> !waypoints.containsKey(e.from()) || !waypoints.containsKey(e.to()));
-        for (DirectedEdge e : oneWayEdges) {
+        edges.values().removeIf(e -> !waypoints.containsKey(e.from()) || !waypoints.containsKey(e.to()));
+        for (Map.Entry<Integer, Edge> entry : edges.entrySet()) {
+            Edge e = entry.getValue();
             outgoing.get(e.from()).add(e.to());
+            if (e.bi()) {
+                outgoing.get(e.to()).add(e.from());
+                neighbours.get(e.from()).add(e.to());
+                neighbours.get(e.to()).add(e.from());
+            }
         }
     }
 
     /**
-     * 让 -1 号路径点跟着「当前出生点」走。
+     * 让出生点节点（0 号）跟着「当前出生点」那个普通路径点走。
      *
      * <p>只改 {@code waypoints} 这张表，索引由 {@link #rebuildIndex()} 之后统一重建。
      */
     private void syncSpawnWaypoint() {
-        SpawnPoint spawn = currentSpawnPoint();
+        Waypoint target = spawnWaypointTarget();
         Waypoint node = waypoints.get(SPAWN_ID);
 
-        if (spawn == null) {
+        if (target == null) {
             if (node != null) {
                 waypoints.remove(SPAWN_ID);
-                edges.removeIf(e -> e.a() == SPAWN_ID || e.b() == SPAWN_ID);
-                oneWayEdges.removeIf(e -> e.from() == SPAWN_ID || e.to() == SPAWN_ID);
+                edges.values().removeIf(e -> e.touches(SPAWN_ID));
             }
             return;
         }
 
         if (node == null) {
-            waypoints.put(SPAWN_ID, new Waypoint(SPAWN_ID, spawn.dimension(), spawn.pos(), spawn.name()));
+            // 出生点节点没有名字：显示的时候用那个普通路径点的 id 和名字
+            waypoints.put(SPAWN_ID, new Waypoint(SPAWN_ID, target.dimension(), target.pos(), null));
         } else {
-            node.moveTo(spawn.dimension(), spawn.pos());
-            node.name(spawn.name());
+            node.moveTo(target.dimension(), target.pos());
+            node.name(null);
         }
     }
 
     /**
-     * 出生点和普通路径点重合时，连一条 {@code -1 -> 那个点} 的单向边。
+     * 出生点节点和「当前出生点」那个普通路径点之间的单向边：{@code 0 -> 那个点}。
      *
-     * <p>两个点**共存**：原来的点不动（它身上还挂着别的边），只是让出生点多一条
-     * 0 长度的出口，这样从末地回到出生点之后还能接着走。
-     *
-     * <p>这些边是派生出来的，所以每次先全部清掉再按当前重合情况重建，
-     * 免得出生点搬走之后留下一条跨半张地图的假边。
+     * <p>两个点**共存**：原来的点不动（它身上还挂着别的边），只是让出生点有个出口，
+     * 这样从末地回到出生点之后还能接着走。
      */
-    private void syncSpawnOverlapEdges() {
-        oneWayEdges.removeIf(e -> e.from() == SPAWN_ID);
+    private void syncSpawnEdge() {
+        Waypoint target = spawnWaypointTarget();
 
-        Waypoint spawn = waypoints.get(SPAWN_ID);
-        if (spawn == null) return;
-
-        for (Waypoint w : waypoints.values()) {
-            if (w.isSpawn()) continue;
-            if (!w.dimension().equals(spawn.dimension())) continue;
-            if (!w.pos().equals(spawn.pos())) continue;
-            oneWayEdges.add(new DirectedEdge(SPAWN_ID, w.id()));
+        List<Integer> existing = new ArrayList<>();
+        for (Map.Entry<Integer, Edge> entry : edges.entrySet()) {
+            if (entry.getValue().from() == SPAWN_ID) existing.add(entry.getKey());
         }
+
+        // 已经有一条正好对的就什么都不做，免得边的编号每次重建都变
+        if (target != null && existing.size() == 1) {
+            Edge only = edges.get(existing.get(0));
+            if (only != null && only.to() == target.id() && !only.bi()) return;
+        }
+
+        for (int id : existing) edges.remove(id);
+        if (target == null) return;
+        edges.put(nextEdgeId(), new Edge(SPAWN_ID, target.id(), false));
+    }
+
+    /** 当前出生点对应的那个普通路径点。 */
+    @Nullable
+    public Waypoint spawnWaypointTarget() {
+        if (spawn == null) return null;
+        Waypoint w = waypoints.get(spawn);
+        if (w == null || w.isSpawn()) return null;
+        return w;
+    }
+
+    /** 下一个可用的边编号（-1, -2, -3 ...）。 */
+    private int nextEdgeId() {
+        int min = 0;
+        for (int id : edges.keySet()) {
+            if (id < min) min = id;
+        }
+        return min - 1;
     }
 
     // ------------------------------------------------------------------
@@ -166,20 +183,21 @@ public final class WaypointGraph {
         return waypoints.size();
     }
 
-    public int edgeCount() {
-        return edges.size() + oneWayEdges.size();
+    /** 不含出生点节点的普通路径点数量。 */
+    public int normalCount() {
+        int n = 0;
+        for (Waypoint w : waypoints.values()) {
+            if (!w.isSpawn()) n++;
+        }
+        return n;
     }
 
-    public int normalEdgeCount() {
+    public int edgeCount() {
         return edges.size();
     }
 
-    public int oneWayEdgeCount() {
-        return oneWayEdges.size();
-    }
-
     public boolean isEmpty() {
-        return waypoints.isEmpty();
+        return normalCount() == 0;
     }
 
     public List<Waypoint> allWaypoints() {
@@ -188,17 +206,23 @@ public final class WaypointGraph {
         return list;
     }
 
-    public List<Edge> allEdges() {
-        return new ArrayList<>(edges);
-    }
-
-    public List<DirectedEdge> allOneWayEdges() {
-        return new ArrayList<>(oneWayEdges);
+    public List<EdgeEntry> allEdges() {
+        List<EdgeEntry> list = new ArrayList<>();
+        for (Map.Entry<Integer, Edge> entry : edges.entrySet()) {
+            list.add(new EdgeEntry(entry.getKey(), entry.getValue()));
+        }
+        list.sort(Comparator.comparingInt(EdgeEntry::id));
+        return list;
     }
 
     @Nullable
     public Waypoint get(int id) {
         return waypoints.get(id);
+    }
+
+    @Nullable
+    public Edge edge(int id) {
+        return edges.get(id);
     }
 
     @Nullable
@@ -213,122 +237,47 @@ public final class WaypointGraph {
         return id == null ? null : waypoints.get(id);
     }
 
-    /** 无向邻居（普通边 + 传送门边）。 */
-    public Set<Integer> neighbors(int id) {
-        return adjacency.getOrDefault(id, Set.of());
+    /** 双向邻居（只有 bi 边算）。 */
+    public Set<Integer> neighbours(int id) {
+        return neighbours.getOrDefault(id, Set.of());
     }
 
-    /** 从这一点出发能直接到的点（无向边两端都算 + 单向边只算 from）。 */
+    /** 从这一点出发能直接到的点。 */
     public Set<Integer> outgoing(int id) {
         return outgoing.getOrDefault(id, Set.of());
     }
 
-    public int degree(int id) {
-        return neighbors(id).size();
-    }
-
-    /** 这条边两端是不是在不同维度（是的话就是传送门边，长度算 0）。 */
+    /** 这条边是不是跨维度的（传送门）。 */
     public boolean isPortalEdge(Edge e) {
-        Waypoint a = get(e.a());
-        Waypoint b = get(e.b());
+        Waypoint a = get(e.from());
+        Waypoint b = get(e.to());
         if (a == null || b == null) return false;
         return !a.dimension().equals(b.dimension());
     }
 
-    /** 这个路径点是不是和传送门有关（下界传送门边或末地单向边），用来画紫色。 */
+    /** 这个路径点是不是和传送门有关（跨维度边），用来画紫色。 */
     public boolean isPortalWaypoint(int id) {
-        for (Edge e : edges) {
-            if (e.a() != id && e.b() != id) continue;
+        for (Edge e : edges.values()) {
+            if (!e.touches(id)) continue;
             if (isPortalEdge(e)) return true;
         }
-        for (DirectedEdge e : oneWayEdges) {
-            if (e.from() == id || e.to() == id) return true;
-        }
         return false;
-    }
-
-    // ------------------------------------------------------------------
-    // 出生点
-    // ------------------------------------------------------------------
-
-    public List<SpawnPoint> allSpawns() {
-        return new ArrayList<>(spawns);
-    }
-
-    @Nullable
-    public String currentSpawnName() {
-        return currentSpawn;
-    }
-
-    @Nullable
-    public SpawnPoint currentSpawnPoint() {
-        if (currentSpawn == null) return null;
-        for (SpawnPoint spawn : spawns) {
-            if (currentSpawn.equals(spawn.name())) return spawn;
-        }
-        return null;
-    }
-
-    @Nullable
-    public SpawnPoint spawnByName(String name) {
-        for (SpawnPoint spawn : spawns) {
-            if (spawn.name().equals(name)) return spawn;
-        }
-        return null;
-    }
-
-    /** 那个特殊的出生点路径点（id = -1），没有登记出生点时返回 null。 */
-    @Nullable
-    public Waypoint spawnWaypoint() {
-        return waypoints.get(SPAWN_ID);
-    }
-
-    public boolean hasSpawn() {
-        return spawnWaypoint() != null;
-    }
-
-    /**
-     * 登记一个候选出生点并设为当前出生点。同名的话就地更新位置。
-     *
-     * @return 名字已被别的路径点占用时返回 false
-     */
-    public boolean addSpawn(String name, String dimension, BlockPos pos) {
-        if (!isValidName(name)) return false;
-
-        Integer owner = byName.get(name);
-        if (owner != null && owner != SPAWN_ID) return false;
-
-        SpawnPoint existing = spawnByName(name);
-        if (existing != null) {
-            existing.moveTo(dimension, pos);
-        } else {
-            spawns.add(new SpawnPoint(name, dimension, pos));
-        }
-        currentSpawn = name;
-        rebuildIndex();
-        return true;
-    }
-
-    /** 把当前出生点切到已经登记过的某个名字上。 */
-    public boolean setCurrentSpawn(String name) {
-        if (spawnByName(name) == null) return false;
-        currentSpawn = name;
-        rebuildIndex();
-        return true;
     }
 
     public boolean hasEdge(int a, int b) {
-        for (Edge e : edges) {
-            if (e.connects(a, b)) return true;
+        for (Edge e : edges.values()) {
+            if (e.between(a, b)) return true;
         }
         return false;
     }
 
-    public boolean hasOneWayEdge(int from, int to) {
-        for (DirectedEdge e : oneWayEdges) {
-            if (e.from() == from && e.to() == to) return true;
+    /** 找一条能从 from 走到 to 的边（返回它的编号）。 */
+    @Nullable
+    public Integer findEdge(int from, int to) {
+        for (Map.Entry<Integer, Edge> entry : edges.entrySet()) {
+            if (entry.getValue().canTraverse(from, to)) return entry.getKey();
         }
-        return false;
+        return null;
     }
 
     /** 边的通行代价：跨维度（传送门）算 0，同维度按方块距离。 */
@@ -337,20 +286,55 @@ public final class WaypointGraph {
         Waypoint b = get(toId);
         if (a == null || b == null) return Double.MAX_VALUE;
         if (!a.dimension().equals(b.dimension())) return 0.0;
-        if (hasOneWayEdge(fromId, toId)) return 0.0;
         return Math.abs(a.x() - b.x()) + Math.abs(a.y() - b.y()) + Math.abs(a.z() - b.z());
     }
 
-    /** 无向边的长度（只对同维度的普通边有意义）。 */
+    /** 一条边的长度（只对同维度有意义，跨维度是 0）。 */
     public int edgeLength(Edge e) {
-        Waypoint a = get(e.a());
-        Waypoint b = get(e.b());
+        Waypoint a = get(e.from());
+        Waypoint b = get(e.to());
         if (a == null || b == null) return 0;
+        if (!a.dimension().equals(b.dimension())) return 0;
         return Math.abs(a.x() - b.x()) + Math.abs(a.y() - b.y()) + Math.abs(a.z() - b.z());
     }
 
     public static boolean isValidName(@Nullable String name) {
         return name != null && NAME_PATTERN.matcher(name).matches();
+    }
+
+    // ------------------------------------------------------------------
+    // 出生点
+    // ------------------------------------------------------------------
+
+    @Nullable
+    public Integer spawnId() {
+        return spawn;
+    }
+
+    @Nullable
+    public Waypoint spawnNode() {
+        return waypoints.get(SPAWN_ID);
+    }
+
+    public boolean hasSpawn() {
+        return spawnWaypointTarget() != null;
+    }
+
+    /** 把一个普通路径点设为当前出生点。 */
+    public boolean setSpawn(int id) {
+        Waypoint w = waypoints.get(id);
+        if (w == null || w.isSpawn()) return false;
+        spawn = id;
+        rebuildIndex();
+        return true;
+    }
+
+    /** 取消出生点设置。 */
+    public boolean clearSpawn() {
+        if (spawn == null) return false;
+        spawn = null;
+        rebuildIndex();
+        return true;
     }
 
     // ------------------------------------------------------------------
@@ -368,7 +352,7 @@ public final class WaypointGraph {
         return created;
     }
 
-    /** 给路径点改名字。名字被别的点占用时返回 false。出生点不允许改名字。 */
+    /** 给路径点改名字。名字被别的点占用时返回 false。出生点节点不允许改。 */
     public boolean setName(int id, @Nullable String name) {
         Waypoint waypoint = waypoints.get(id);
         if (waypoint == null) return false;
@@ -382,99 +366,51 @@ public final class WaypointGraph {
         return true;
     }
 
-    /** 删除路径点，同时删掉所有和它相连的边。出生点不能删。 */
+    /**
+     * 删除一个路径点，同时删掉所有和它相连的边。
+     *
+     * <p>出生点节点、当前出生点、末地初始平台都不能删，这些由调用方判断。
+     */
     public boolean removeWaypoint(int id) {
         if (id == SPAWN_ID) return false;
         if (waypoints.remove(id) == null) return false;
-        edges.removeIf(e -> e.a() == id || e.b() == id);
-        oneWayEdges.removeIf(e -> e.from() == id || e.to() == id);
+        edges.values().removeIf(e -> e.touches(id));
+        if (spawn != null && spawn == id) spawn = null;
         rebuildIndex();
         return true;
     }
 
-    public boolean removeEdge(int a, int b) {
-        boolean removed = edges.removeIf(e -> e.connects(a, b));
-        if (removed) rebuildIndex();
-        return removed;
+    public boolean removeEdge(int edgeId) {
+        if (edges.remove(edgeId) == null) return false;
+        rebuildIndex();
+        return true;
     }
 
-    public boolean removeOneWayEdge(int from, int to) {
-        boolean removed = oneWayEdges.removeIf(e -> e.from() == from && e.to() == to);
-        if (removed) rebuildIndex();
-        return removed;
-    }
+    /** 加一条边，返回它的编号；和已有的重复时返回 null。 */
+    @Nullable
+    public Integer addEdge(int from, int to, boolean bi) {
+        if (from == to) return null;
+        if (!waypoints.containsKey(from) || !waypoints.containsKey(to)) return null;
 
-    public boolean removeEdgeAt(String dimension, BlockPos pa, BlockPos pb) {
-        Waypoint a = at(dimension, pa);
-        Waypoint b = at(dimension, pb);
-        if (a == null || b == null) return false;
-        boolean removed = removeEdge(a.id(), b.id());
-        if (!removed) removed = removeOneWayEdge(a.id(), b.id());
-        if (!removed) removed = removeOneWayEdge(b.id(), a.id());
-        return removed;
-    }
-
-    /** 删掉挂在某个路径点上的所有跨维度边（下界传送门边 + 末地单向边）。 */
-    public int removePortalEdgesAt(String dimension, BlockPos pos) {
-        Waypoint waypoint = at(dimension, pos);
-        if (waypoint == null) return 0;
-        int id = waypoint.id();
-        int removed = 0;
-
-        for (Edge e : new ArrayList<>(edges)) {
-            if (e.a() != id && e.b() != id) continue;
-            if (!isPortalEdge(e)) continue;
-            removeEdge(e.a(), e.b());
-            removed++;
+        for (Edge e : edges.values()) {
+            if (e.from() == from && e.to() == to && e.bi() == bi) return null;
+            if (bi && e.bi() && e.between(from, to)) return null;
         }
-        for (DirectedEdge e : new ArrayList<>(oneWayEdges)) {
-            // from == 出生点的那些是「出生点和路径点重合」自动维护的，不在这里删
-            if (e.from() == SPAWN_ID) continue;
-            if (e.from() != id && e.to() != id) continue;
-            removeOneWayEdge(e.from(), e.to());
-            removed++;
-        }
-        return removed;
+
+        int id = nextEdgeId();
+        edges.put(id, new Edge(from, to, bi));
+        rebuildIndex();
+        return id;
     }
 
-    /** 这条单向边是不是「出生点和路径点重合」自动生成的那种。 */
-    public static boolean isSpawnOverlapEdge(DirectedEdge edge) {
-        return edge.from() == SPAWN_ID;
-    }
-
-    /** 直接连一条普通边（两个端点必须同维度且在同一轴向上），没有路径点就建。 */
-    public boolean addEdgeRaw(String dimension, BlockPos p, BlockPos q) {
+    /** 直接连一条双向走路边（两个端点必须同维度且在同一轴向上），没有路径点就建。 */
+    public boolean addWalkEdge(String dimension, BlockPos p, BlockPos q) {
         if (p.equals(q)) return false;
         if (sharedAxis(p, q) == null) return false;
 
         Waypoint a = ensureWaypoint(dimension, p);
         Waypoint b = ensureWaypoint(dimension, q);
-        if (a.id() == b.id()) return false;
-        if (hasEdge(a.id(), b.id())) return false;
-
-        edges.add(new Edge(a.id(), b.id()));
-        rebuildIndex();
-        return true;
-    }
-
-    /** 建一条传送门边（下界传送门），两端通常在不同维度，长度算 0。 */
-    public boolean addPortalEdge(int a, int b) {
-        if (a == b) return false;
-        if (!waypoints.containsKey(a) || !waypoints.containsKey(b)) return false;
-        if (hasEdge(a, b)) return false;
-        edges.add(new Edge(a, b));
-        rebuildIndex();
-        return true;
-    }
-
-    /** 建一条单向边（末地传送门），只有 from -&gt; to。 */
-    public boolean addOneWayEdge(int from, int to) {
-        if (from == to) return false;
-        if (!waypoints.containsKey(from) || !waypoints.containsKey(to)) return false;
-        if (hasOneWayEdge(from, to)) return false;
-        oneWayEdges.add(new DirectedEdge(from, to));
-        rebuildIndex();
-        return true;
+        return addEdge(a.id(), b.id(), true) != null;
     }
 
     // ------------------------------------------------------------------
@@ -482,15 +418,9 @@ public final class WaypointGraph {
     // ------------------------------------------------------------------
 
     /**
-     * 加入一段轴向移动，并按重叠情况切开已有边（只看同一维度、同一条线上的边）。
+     * 加入一段轴向移动，并按重叠情况切开已有边（只看同一维度、同一条线上的双向边）。
      *
-     * <p>例：已有 1 1 1 &lt;-&gt; 5 1 1，现在加 3 1 1 &lt;-&gt; 8 1 1，
-     * 结果是 1 1 1 &lt;-&gt; 3 1 1、3 1 1 &lt;-&gt; 5 1 1、5 1 1 &lt;-&gt; 8 1 1。
-     *
-     * <p>另外，如果起点或终点落在别的边的中间（不管那条边朝哪个轴），
-     * 会先把那条边从中间拆开。
-     *
-     * @return 这次操作涉及到的切点（用于日志）
+     * @return 这次操作涉及到的切点
      */
     public List<BlockPos> addSegment(String dimension, BlockPos pa, BlockPos pb) {
         Direction.Axis axis = sharedAxis(pa, pb);
@@ -498,7 +428,6 @@ public final class WaypointGraph {
             throw new IllegalArgumentException("两个路径点必须有两个坐标相等（只能沿一个轴移动）");
         }
 
-        // 0. 起点 / 终点如果正好落在别的边的内部，先把那些边拆开
         splitEdgeAt(dimension, pa);
         splitEdgeAt(dimension, pb);
 
@@ -508,46 +437,50 @@ public final class WaypointGraph {
             throw new IllegalArgumentException("两个路径点不能是同一个位置");
         }
 
-        // 1. 找出同一条线上、和新线段有正长度重叠的边
-        List<Edge> overlapping = new ArrayList<>();
-        for (Edge e : new ArrayList<>(edges)) {
-            Waypoint wa = get(e.a());
-            Waypoint wb = get(e.b());
+        // 1. 找出同一条线上、和新线段有正长度重叠的双向边
+        List<Integer> overlapping = new ArrayList<>();
+        for (Map.Entry<Integer, Edge> entry : new ArrayList<>(edges.entrySet())) {
+            Edge e = entry.getValue();
+            if (!e.bi()) continue;
+            Waypoint wa = get(e.from());
+            Waypoint wb = get(e.to());
             if (wa == null || wb == null) continue;
             if (!wa.dimension().equals(dimension) || !wb.dimension().equals(dimension)) continue;
             if (!onLine(wa.pos(), pa, axis) || !onLine(wb.pos(), pa, axis)) continue;
             int elo = Math.min(coord(wa, axis), coord(wb, axis));
             int ehi = Math.max(coord(wa, axis), coord(wb, axis));
-            if (Math.min(ehi, hi) > Math.max(elo, lo)) overlapping.add(e);
+            if (Math.min(ehi, hi) > Math.max(elo, lo)) overlapping.add(entry.getKey());
         }
 
-        // 2. 收集切点：新线段两端，加上落在它内部的、重叠边的端点
+        // 2. 收集切点
         TreeSet<Integer> cuts = new TreeSet<>();
         cuts.add(lo);
         cuts.add(hi);
-        for (Edge e : overlapping) {
-            Waypoint wa = get(e.a());
-            Waypoint wb = get(e.b());
-            for (int c : new int[]{coord(wa, axis), coord(wb, axis)}) {
+        for (int edgeId : overlapping) {
+            Edge e = edges.get(edgeId);
+            if (e == null) continue;
+            for (int c : new int[]{coord(get(e.from()), axis), coord(get(e.to()), axis)}) {
                 if (c > lo && c < hi) cuts.add(c);
             }
         }
 
         // 3. 拆掉重叠边，把落在新线段外面的部分补回去
-        for (Edge e : overlapping) {
-            Waypoint wa = get(e.a());
-            Waypoint wb = get(e.b());
+        for (int edgeId : overlapping) {
+            Edge e = edges.get(edgeId);
+            if (e == null) continue;
+            Waypoint wa = get(e.from());
+            Waypoint wb = get(e.to());
             int elo = Math.min(coord(wa, axis), coord(wb, axis));
             int ehi = Math.max(coord(wa, axis), coord(wb, axis));
-            removeEdge(e.a(), e.b());
-            if (elo < lo) addEdgeRaw(dimension, pointAt(pa, axis, elo), pointAt(pa, axis, lo));
-            if (ehi > hi) addEdgeRaw(dimension, pointAt(pa, axis, hi), pointAt(pa, axis, ehi));
+            removeEdge(edgeId);
+            if (elo < lo) addWalkEdge(dimension, pointAt(pa, axis, elo), pointAt(pa, axis, lo));
+            if (ehi > hi) addWalkEdge(dimension, pointAt(pa, axis, hi), pointAt(pa, axis, ehi));
         }
 
         // 4. 相邻切点两两连边
         Integer prev = null;
         for (int c : cuts) {
-            if (prev != null) addEdgeRaw(dimension, pointAt(pa, axis, prev), pointAt(pa, axis, c));
+            if (prev != null) addWalkEdge(dimension, pointAt(pa, axis, prev), pointAt(pa, axis, c));
             prev = c;
         }
         rebuildIndex();
@@ -558,19 +491,18 @@ public final class WaypointGraph {
     }
 
     /**
-     * 如果这个位置落在某条边的内部（不是端点），就把那条边从中间断开。
-     *
-     * <p>「起点 / 终点在某条边上时把那条边拆成两份」靠的就是这个，
-     * 和那条边本身朝哪个轴无关，但只在同一维度内找。
+     * 如果这个位置落在某条双向边的内部（不是端点），就把那条边从中间断开。
      *
      * @return 拆掉了几条边
      */
     public int splitEdgeAt(String dimension, BlockPos pos) {
         int split = 0;
 
-        for (Edge e : new ArrayList<>(edges)) {
-            Waypoint a = get(e.a());
-            Waypoint b = get(e.b());
+        for (Map.Entry<Integer, Edge> entry : new ArrayList<>(edges.entrySet())) {
+            Edge e = entry.getValue();
+            if (!e.bi()) continue;
+            Waypoint a = get(e.from());
+            Waypoint b = get(e.to());
             if (a == null || b == null) continue;
             if (!a.dimension().equals(dimension) || !b.dimension().equals(dimension)) continue;
 
@@ -583,11 +515,11 @@ public final class WaypointGraph {
             int cp = coord(pos, axis);
             int elo = Math.min(ca, cb);
             int ehi = Math.max(ca, cb);
-            if (cp <= elo || cp >= ehi) continue; // 是端点，或者在边外面
+            if (cp <= elo || cp >= ehi) continue;
 
-            removeEdge(a.id(), b.id());
-            addEdgeRaw(dimension, a.pos(), pos);
-            addEdgeRaw(dimension, pos, b.pos());
+            removeEdge(entry.getKey());
+            addWalkEdge(dimension, a.pos(), pos);
+            addWalkEdge(dimension, pos, b.pos());
             split++;
         }
         return split;
@@ -598,27 +530,37 @@ public final class WaypointGraph {
     // ------------------------------------------------------------------
 
     /**
-     * 合并“中间点”：如果一个路径点没有名字、只有两条边、两个邻居和它同维度、
-     * 而且两条边在同一条直线上，就把这个点和两条边删掉，换成一条直接相连的边。
+     * 先合并“中间点”，再重新编号。
      *
-     * @return 合并掉的数量
+     * <p>合并：一个路径点没有名字、只有两条双向边、两个邻居和它同维度、
+     * 而且两条边在同一条直线上（它在中间），就把这个点和两条边删掉，换成一条直接相连的边。
+     *
+     * <p>重新编号：0 号以外的路径点按 x, y, z 递增排成 1, 2, 3, ...；
+     * 边按两端 id 排序后重新编成 -1, -2, -3, ...；出生点记录跟着一起改。
+     *
+     * @return 合并掉的中间点数量
      */
     public int optimize() {
+        int merged = mergeMiddlePoints();
+        renumber();
+        return merged;
+    }
+
+    private int mergeMiddlePoints() {
         int merged = 0;
         boolean changed = true;
 
         while (changed) {
             changed = false;
             for (Waypoint w : allWaypoints()) {
-                if (w.hasName()) continue; // 有名字的点是用户指定的，保留（出生点也有名字）
+                if (w.hasName()) continue; // 有名字的点是用户指定的，保留
                 if (w.isSpawn()) continue;
-                List<Integer> ns = new ArrayList<>(neighbors(w.id()));
+                List<Integer> ns = new ArrayList<>(neighbours(w.id()));
                 if (ns.size() != 2) continue;
 
                 Waypoint a = get(ns.get(0));
                 Waypoint b = get(ns.get(1));
                 if (a == null || b == null || a.id() == b.id()) continue;
-                // 传送门边不能用几何关系合并
                 if (!a.dimension().equals(w.dimension())) continue;
                 if (!b.dimension().equals(w.dimension())) continue;
 
@@ -632,16 +574,77 @@ public final class WaypointGraph {
                 boolean between = (ca < cw && cw < cb) || (cb < cw && cw < ca);
                 if (!between) continue;
 
-                removeEdge(a.id(), w.id());
-                removeEdge(w.id(), b.id());
+                removeEdgeOf(a.id(), w.id());
+                removeEdgeOf(w.id(), b.id());
                 removeWaypoint(w.id());
-                addEdgeRaw(w.dimension(), a.pos(), b.pos());
+                addWalkEdge(w.dimension(), a.pos(), b.pos());
                 merged++;
                 changed = true;
                 break;
             }
         }
         return merged;
+    }
+
+    /**
+     * 把所有普通路径点按 x, y, z 递增重新编号成 1, 2, 3, ...，
+     * 边按两端 id 排序后重新编成 -1, -2, -3, ...，出生点记录一起改。
+     */
+    public void renumber() {
+        List<Waypoint> normal = new ArrayList<>();
+        for (Waypoint w : waypoints.values()) {
+            if (!w.isSpawn()) normal.add(w);
+        }
+        normal.sort(Comparator.comparingInt(Waypoint::x)
+            .thenComparingInt(Waypoint::y)
+            .thenComparingInt(Waypoint::z));
+
+        Map<Integer, Integer> remap = new HashMap<>();
+        int id = 1;
+        for (Waypoint w : normal) {
+            remap.put(w.id(), id);
+            w.id(id);
+            id++;
+        }
+        nextId = id;
+
+        if (spawn != null) {
+            Integer mapped = remap.get(spawn);
+            spawn = mapped;
+        }
+
+        // 重建 waypoints 表（0 号保持 0）
+        Map<Integer, Waypoint> rebuilt = new LinkedHashMap<>();
+        Waypoint spawnNode = waypoints.get(SPAWN_ID);
+        if (spawnNode != null) rebuilt.put(SPAWN_ID, spawnNode);
+        for (Waypoint w : normal) {
+            rebuilt.put(w.id(), w);
+        }
+        waypoints.clear();
+        waypoints.putAll(rebuilt);
+
+        // 边跟着改端点，然后按两端 id 排序重新编号
+        for (Edge e : edges.values()) {
+            int from = e.from() == SPAWN_ID ? SPAWN_ID : remap.getOrDefault(e.from(), e.from());
+            int to = e.to() == SPAWN_ID ? SPAWN_ID : remap.getOrDefault(e.to(), e.to());
+            e.remap(from, to);
+        }
+
+        List<Edge> sorted = new ArrayList<>(edges.values());
+        sorted.sort(Comparator.comparingInt(Edge::from).thenComparingInt(Edge::to));
+        edges.clear();
+        int edgeId = -1;
+        for (Edge e : sorted) {
+            edges.put(edgeId--, e);
+        }
+
+        rebuildIndex();
+    }
+
+    /** 只删边，不动路径点。 */
+    private void removeEdgeOf(int a, int b) {
+        edges.values().removeIf(e -> e.between(a, b));
+        rebuildIndex();
     }
 
     // ------------------------------------------------------------------

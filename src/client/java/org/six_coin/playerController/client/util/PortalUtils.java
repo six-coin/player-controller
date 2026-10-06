@@ -4,7 +4,6 @@ import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -13,8 +12,12 @@ import org.jetbrains.annotations.Nullable;
  * <p>「记录传送门边」和「穿越传送门」必须用同一套判断，否则会出现
  * 「边建出来了但走不过去」这种对不上的情况。
  *
- * <p>找的时候不只看方块自己，还会看**下方 1 格**（站在传送门上方的情况）、
- * 上方 1 格、以及四个水平邻居 —— 末地回主世界的祭坛就经常站得和传送门方块差一格。
+ * <p>规则：
+ * <ul>
+ *   <li><b>末地传送门</b>：只看<b>下面一格</b>（站在传送门上方的情况），
+ *       外加方块自己那一格；</li>
+ *   <li><b>下界传送门</b>：那一格本身必须就是下界传送门方块，不看旁边。</li>
+ * </ul>
  */
 public final class PortalUtils {
 
@@ -31,44 +34,28 @@ public final class PortalUtils {
         return mc.world != null && mc.world.getBlockState(pos).isOf(Blocks.NETHER_PORTAL);
     }
 
-    /** 附近有没有末地传送门方块。 */
+    /**
+     * 这个位置（或者它下面一格）是不是末地传送门方块。
+     *
+     * <p>末地传送门是「站在传送门方块上方」放路径点的，所以下面那一格是主要判断依据。
+     */
     public static boolean endPortalNear(BlockPos pos) {
-        return findNear(pos, false) != null;
-    }
-
-    /** 附近有没有下界传送门方块。 */
-    public static boolean netherPortalNear(BlockPos pos) {
-        return findNear(pos, true) != null;
+        return endPortalFor(pos) != null;
     }
 
     /**
-     * 在这个方块自己、下方、上方、四个水平邻居里找传送门方块。
+     * 这个位置对应的末地传送门方块。
      *
-     * <p>顺序有讲究：先看自己，再看下面（站在传送门上方），然后上面，最后四周。
+     * <p>先看自己那一格，没有再看下面一格。
      *
-     * @param nether true 找下界传送门，false 找末地传送门
-     * @return 找到的传送门方块，没有返回 null
+     * @return 传送门方块的位置，没有返回 null
      */
     @Nullable
-    public static BlockPos findNear(BlockPos pos, boolean nether) {
-        if (isPortalAt(pos, nether)) return pos;
-
+    public static BlockPos endPortalFor(BlockPos pos) {
+        if (isEndPortal(pos)) return pos;
         BlockPos below = pos.down();
-        if (isPortalAt(below, nether)) return below;
-
-        BlockPos above = pos.up();
-        if (isPortalAt(above, nether)) return above;
-
-        for (Direction direction : new Direction[]{
-            Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST}) {
-            BlockPos neighbour = pos.offset(direction);
-            if (isPortalAt(neighbour, nether)) return neighbour;
-        }
+        if (isEndPortal(below)) return below;
         return null;
-    }
-
-    private static boolean isPortalAt(BlockPos pos, boolean nether) {
-        return nether ? isNetherPortal(pos) : isEndPortal(pos);
     }
 
     /** 出错信息里用：这个位置实际是什么方块。 */

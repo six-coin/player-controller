@@ -14,11 +14,10 @@ public final class DimensionUtils {
     /**
      * 通过末地传送门后固定落地的方块。
      *
-     * <p>等价于原版常量 {@code ServerWorld.END_SPAWN_POS}（值就是 100, 50, 0），
-     * 到达时用的是 {@code refreshPositionAndAngles}，也就是 x.5 / y.n / z.5，
-     * 正好和我们的「方块中心」约定一致。
+     * <p>原版常量 {@code ServerWorld.END_SPAWN_POS} 是 (100, 50, 0)，观测下来实际要记录的是
+     * 它下面一格，所以这里是 (100, 49, 0)。
      */
-    private static final BlockPos END_SPAWN_POS = new BlockPos(100, 50, 0);
+    private static final BlockPos END_SPAWN_POS = new BlockPos(100, 49, 0);
 
     private DimensionUtils() {
     }

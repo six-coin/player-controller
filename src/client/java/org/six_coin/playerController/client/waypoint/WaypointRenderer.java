@@ -69,11 +69,13 @@ public final class WaypointRenderer {
             int budget = MAX_BOXES;
 
             // 先画边，再画路径点，这样点在线的上面
-            for (Edge edge : graph.allEdges()) {
-                Waypoint a = graph.get(edge.a());
-                Waypoint b = graph.get(edge.b());
+            for (WaypointGraph.EdgeEntry entry : graph.allEdges()) {
+                Edge edge = entry.edge();
+                // 单向边要么是跨维度的传送门（画线没意义），要么是出生点重合（同坐标，退化），都不画
+                if (!edge.bi()) continue;
+                Waypoint a = graph.get(edge.from());
+                Waypoint b = graph.get(edge.to());
                 if (a == null || b == null) continue;
-                // 跨维度的传送门边不画线（画出来没有意义）
                 if (!a.dimension().equals(dimension) || !b.dimension().equals(dimension)) continue;
                 if (!segmentNear(a.pos(), b.pos(), camera)) continue;
 
@@ -95,7 +97,7 @@ public final class WaypointRenderer {
                 budget--;
             }
 
-            Waypoint spawn = graph.spawnWaypoint();
+            Waypoint spawn = graph.spawnNode();
             if (budget > 0 && spawn != null
                 && spawn.dimension().equals(dimension)
                 && !tooFar(spawn.pos(), camera)) {

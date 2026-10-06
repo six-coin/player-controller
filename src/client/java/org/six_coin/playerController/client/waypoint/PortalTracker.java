@@ -61,10 +61,10 @@ public final class PortalTracker {
                 pendingSource = null;
                 if (source != null) {
                     BlockPos arrival = BlockPos.ofFloored(client.player.getEntityPos());
-                    // 落点本身也得在下界传送门里，否则可能是死亡重生之类的维度变化
-                    if (!PortalUtils.netherPortalNear(arrival)) {
+                    // 落点本身也得在下界传送门方块里，否则可能是死亡重生之类的维度变化
+                    if (!PortalUtils.isNetherPortal(arrival)) {
                         ChatUtils.debug("维度变化了，但落点 " + arrival.toShortString()
-                            + " 不在下界传送门里，不记录传送门边");
+                            + " 不是下界传送门方块，不记录传送门边");
                     } else {
                         WaypointManager.get().recordPortalLink(source, dimension, arrival);
                     }
@@ -84,7 +84,6 @@ public final class PortalTracker {
             pendingSource = null;
             return;
         }
-
         Waypoint waypoint = WaypointManager.get().graph().at(dimension, here);
         if (waypoint == null) {
             pendingSource = null;

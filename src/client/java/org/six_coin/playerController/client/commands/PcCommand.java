@@ -32,8 +32,7 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " move to <x y z|name> §8- §7沿路径点图走过去"));
                 source.sendFeedback(Text.literal("§7  /" + name + " move cancel §8- §7取消所有移动任务"));
                 source.sendFeedback(Text.literal("§7  /" + name + " container <x> <y> <z> <item_list> §8- §7从容器取物品"));
-                source.sendFeedback(Text.literal("§7  /" + name + " waypoints ... §8- §7路径点管理（add_waypoint / add_side / list / show / edit / optimize ...）"));
-                source.sendFeedback(Text.literal("§7  /" + name + " waypoints spawn ... §8- §7出生点（add_here / add / list / set）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " w ... §8- §7路径点 / 边 / 出生点（waypoint_add、side_add、spawn_set_by_id、del、optimize、list ...）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " config ... §8- §7配置（debug / world / actions move_speed）"));
                 source.sendFeedback(Text.literal("§7  item_list 例：§fstone=64,dirt=32,oak_log"));
                 return 1;

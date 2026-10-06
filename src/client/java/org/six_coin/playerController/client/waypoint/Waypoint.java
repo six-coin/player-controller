@@ -33,6 +33,11 @@ public final class Waypoint {
         return id;
     }
 
+    /** optimize 重新编号时用。 */
+    void id(int id) {
+        this.id = id;
+    }
+
     /** 维度 id，例如 minecraft:overworld。老存档里没有这个字段时补成主世界。 */
     public String dimension() {
         if (dimension == null || dimension.isEmpty()) dimension = DimensionUtils.OVERWORLD;
@@ -60,7 +65,7 @@ public final class Waypoint {
         return name != null && !name.isEmpty();
     }
 
-    /** 是不是那个特殊的出生点路径点（id 固定为 -1）。 */
+    /** 是不是那个特殊的出生点路径点（id 固定为 0）。 */
     public boolean isSpawn() {
         return id == WaypointGraph.SPAWN_ID;
     }

@@ -14,6 +14,7 @@ import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.PortalUtils;
+import org.six_coin.playerController.client.waypoint.Edge;
 import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointGraph;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
@@ -147,7 +148,10 @@ public class PathMoveAction extends Action {
             Waypoint b = path.get(i + 1);
 
             if (!a.dimension().equals(b.dimension())) {
-                StepKind kind = graph().hasEdge(a.id(), b.id())
+                Integer edgeId = graph().findEdge(a.id(), b.id());
+                Edge edge = edgeId == null ? null : graph().edge(edgeId);
+                // 双向的跨维度边 = 下界传送门；单向的 = 末地传送门
+                StepKind kind = (edge != null && edge.bi())
                     ? StepKind.NETHER_PORTAL
                     : StepKind.END_PORTAL;
                 steps.add(new Step(kind, a, b, null, 0));
@@ -299,13 +303,17 @@ public class PathMoveAction extends Action {
                 return;
             }
 
-            // 方块本身、下面 1 格、上面 1 格、四周都找一遍。
-            // 末地回主世界的祭坛经常是「站在传送门方块上方」或者「站在边上」，
-            // 只看自己和下面会找不到。
-            BlockPos portalPos = PortalUtils.findNear(source, nether);
+            // 末地传送门：看自己那一格和下面一格；
+            // 下界传送门：那一格本身必须就是下界传送门方块。
+            BlockPos portalPos;
+            if (nether) {
+                portalPos = PortalUtils.isNetherPortal(source) ? source : null;
+            } else {
+                portalPos = PortalUtils.endPortalFor(source);
+            }
             if (portalPos == null) {
                 fail("传送门点 " + DimensionUtils.display(fromDimension) + " " + source.toShortString()
-                    + " 附近没有" + (nether ? "下界" : "末地") + "传送门方块"
+                    + (nether ? " 不是下界传送门方块" : " 及其下方都不是末地传送门方块")
                     + "（该处是 " + PortalUtils.blockId(source)
                     + "，下方是 " + PortalUtils.blockId(source.down()) + "）");
                 return;
@@ -388,10 +396,6 @@ public class PathMoveAction extends Action {
 
     private static boolean isEndPortal(BlockPos pos) {
         return PortalUtils.isEndPortal(pos);
-    }
-
-    private static boolean isNetherPortal(BlockPos pos) {
-        return PortalUtils.isNetherPortal(pos);
     }
 
     // ------------------------------------------------------------------

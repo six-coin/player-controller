@@ -2,9 +2,12 @@ package org.six_coin.playerController.client.waypoint;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import net.minecraft.block.Blocks;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.BlockPos;
+import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
@@ -16,9 +19,13 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
- * 路径点管理器：负责当前 world 编号的读写、显示开关、编辑模式、传送门边的记录。
+ * 路径点管理器：负责当前 world 编号的读写、显示开关、编辑模式、各种边的记录。
  *
  * <p>数据文件：{@code config/player-controller/world_<num>/waypoints.json}
  */
@@ -33,6 +40,9 @@ public final class WaypointManager {
 
     private WaypointGraph graph = new WaypointGraph();
     private int loadedWorld = -1;
+
+    /** 读档是否成功；失败时不允许写回，免得把原文件覆盖成空图。 */
+    private boolean loadedOk = false;
 
     /** 是否高亮显示路径点与边。 */
     private boolean show = false;
@@ -94,7 +104,6 @@ public final class WaypointManager {
         return worldFile(PlayerControllerConfig.getWorld());
     }
 
-    /** 按当前配置里的 world 编号加载。 */
     public void load() {
         load(PlayerControllerConfig.getWorld());
     }
@@ -102,25 +111,153 @@ public final class WaypointManager {
     public void load(int world) {
         world = Math.max(1, world);
         loadedWorld = world;
+        loadedOk = false;
         Path path = worldFile(world);
 
         if (!Files.exists(path)) {
             graph = new WaypointGraph();
+            loadedOk = true;
             ChatUtils.debug("世界配置 world_" + world + " 还没有路径点文件，使用空图: " + path);
             return;
         }
 
         try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-            WaypointGraph loaded = GSON.fromJson(reader, WaypointGraph.class);
-            graph = loaded == null ? new WaypointGraph() : loaded;
-            graph.rebuildIndex();
+            JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
+
+            // 旧格式的 edges 是一个数组；新格式是「编号 -> 边」的对象
+            boolean oldFormat = root.has("edges") && root.get("edges").isJsonArray();
+
+            if (oldFormat) {
+                graph = migrateOldFormat(root);
+                loadedOk = true;
+                graph.rebuildIndex();
+                save();
+                ChatUtils.info("已把旧格式的 waypoints.json 迁移成新格式"
+                    + "（路径点重新编号为 1,2,3...，边合并成带编号的对象）");
+            } else {
+                WaypointGraph loaded = GSON.fromJson(root, WaypointGraph.class);
+                graph = loaded == null ? new WaypointGraph() : loaded;
+                loadedOk = true;
+                graph.rebuildIndex();
+            }
+
             ChatUtils.debug("已加载 world_" + world + " 的路径点: "
-                + graph.size() + " 个点，" + graph.normalEdgeCount() + " 条普通边，"
-                + graph.oneWayEdgeCount() + " 条单向边");
+                + graph.normalCount() + " 个点，" + graph.edgeCount() + " 条边");
         } catch (Exception e) {
             graph = new WaypointGraph();
-            ChatUtils.error("读取路径点失败，已使用空图: " + e.getMessage());
+            loadedOk = false;
+            ChatUtils.error("读取路径点失败：" + e.getMessage()
+                + " —— 这一轮不会覆盖原文件，请把文件发给我看看");
         }
+    }
+
+    /**
+     * 把上一版的格式迁移过来。
+     *
+     * <p>旧格式：{@code edges} 是数组（{@code {a,b}}），{@code oneWayEdges} 是数组（{@code {from,to}}），
+     * 出生点节点编号是 -1，另有 {@code spawns} / {@code currentSpawn}。
+     *
+     * <p>新格式：路径点 1,2,3...（出生点节点 0），边是「编号 -1,-2,-3... -&gt; {from,to,bi}」的对象，
+     * 出生点用顶层的 {@code spawn} 记录对应的普通路径点。
+     */
+    private static WaypointGraph migrateOldFormat(JsonObject root) {
+        WaypointGraph graph = new WaypointGraph();
+        Map<Integer, Waypoint> byOldId = new HashMap<>();
+
+        JsonObject oldWaypoints = root.has("waypoints") && root.get("waypoints").isJsonObject()
+            ? root.getAsJsonObject("waypoints")
+            : new JsonObject();
+
+        List<Integer> oldIds = new ArrayList<>();
+        for (String key : oldWaypoints.keySet()) {
+            try {
+                oldIds.add(Integer.parseInt(key));
+            } catch (NumberFormatException ignored) {
+                // 忽略不是数字的键
+            }
+        }
+        oldIds.sort(Integer::compareTo);
+
+        // 普通路径点：按旧编号升序建，新编号自然就是 1,2,3...
+        for (int oldId : oldIds) {
+            if (oldId < 0) continue;
+            JsonObject o = oldWaypoints.getAsJsonObject(String.valueOf(oldId));
+            if (o == null) continue;
+
+            Waypoint w = graph.ensureWaypoint(
+                optString(o, "dimension", DimensionUtils.OVERWORLD),
+                new BlockPos(optInt(o, "x"), optInt(o, "y"), optInt(o, "z")));
+            String name = optString(o, "name", null);
+            if (name != null && WaypointGraph.isValidName(name)) {
+                graph.setName(w.id(), name);
+            }
+            byOldId.put(oldId, w);
+        }
+
+        // 旧的 -1 号：出生点，位置对应的普通路径点就是新的出生点目标
+        Waypoint spawnTarget = null;
+        String oldSpawnName = null;
+        for (int oldId : oldIds) {
+            if (oldId >= 0) continue;
+            JsonObject o = oldWaypoints.getAsJsonObject(String.valueOf(oldId));
+            if (o == null) continue;
+
+            spawnTarget = graph.ensureWaypoint(
+                optString(o, "dimension", DimensionUtils.OVERWORLD),
+                new BlockPos(optInt(o, "x"), optInt(o, "y"), optInt(o, "z")));
+            oldSpawnName = optString(o, "name", null);
+            byOldId.put(oldId, spawnTarget);
+        }
+        if (spawnTarget != null) {
+            if (oldSpawnName != null && !spawnTarget.hasName()
+                && WaypointGraph.isValidName(oldSpawnName)) {
+                graph.setName(spawnTarget.id(), oldSpawnName);
+            }
+            graph.setSpawn(spawnTarget.id());
+        }
+
+        // 无向边
+        if (root.has("edges") && root.get("edges").isJsonArray()) {
+            for (JsonElement element : root.getAsJsonArray("edges")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject o = element.getAsJsonObject();
+                Waypoint a = byOldId.get(optInt(o, "a"));
+                Waypoint b = byOldId.get(optInt(o, "b"));
+                if (a == null || b == null || a.id() == b.id()) continue;
+                graph.addEdge(a.id(), b.id(), true);
+            }
+        }
+
+        // 单向边
+        if (root.has("oneWayEdges") && root.get("oneWayEdges").isJsonArray()) {
+            for (JsonElement element : root.getAsJsonArray("oneWayEdges")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject o = element.getAsJsonObject();
+                Waypoint a = byOldId.get(optInt(o, "from"));
+                Waypoint b = byOldId.get(optInt(o, "to"));
+                if (a == null || b == null || a.id() == b.id()) continue;
+                graph.addEdge(a.id(), b.id(), false);
+            }
+        }
+
+        return graph;
+    }
+
+    private static int optInt(JsonObject object, String key) {
+        JsonElement element = object.get(key);
+        if (element == null || !element.isJsonPrimitive()) return 0;
+        try {
+            return element.getAsInt();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    @Nullable
+    private static String optString(JsonObject object, String key, @Nullable String fallback) {
+        JsonElement element = object.get(key);
+        if (element == null || element.isJsonNull() || !element.isJsonPrimitive()) return fallback;
+        return element.getAsString();
     }
 
     /** 切换世界配置：先把旧的存起来，再读新的。 */
@@ -129,11 +266,11 @@ public final class WaypointManager {
         PlayerControllerConfig.setWorld(world);
         load(world);
         ChatUtils.info("已切换到世界配置 world_" + world
-            + "（" + graph.size() + " 个路径点，" + graph.edgeCount() + " 条边）");
+            + "（" + graph.normalCount() + " 个路径点，" + graph.edgeCount() + " 条边）");
     }
 
     public void save() {
-        if (loadedWorld < 0) return;
+        if (loadedWorld < 0 || !loadedOk) return;
 
         Path path = worldFile(loadedWorld);
         try {
@@ -151,9 +288,9 @@ public final class WaypointManager {
     // ------------------------------------------------------------------
 
     /**
-     * 编辑模式下把一段移动记录成边（会把重叠的边切开）。
+     * 编辑模式下把一段移动记录成双向边（会把重叠的边切开）。
      *
-     * @return 是否真的记录了（不在编辑模式 / 两端相同 / 不合法时返回 false）
+     * @return 是否真的记录了
      */
     public boolean recordMove(String dimension, BlockPos from, BlockPos to) {
         if (!editMode) return false;
@@ -167,46 +304,39 @@ public final class WaypointManager {
     }
 
     /**
-     * 编辑模式下：把终端在末地传送门的那一格，和它真正会去的地方连一条单向边。
+     * 编辑模式下：终点在末地传送门处时，连一条单边过去。
      *
      * <p>末地传送门方块两个方向用的是同一个方块，所以必须按维度区分：
      * <ul>
-     *   <li>在主世界（或非末地维度）：去末地出生平台 (100, 50, 0) @ the_end；</li>
-     *   <li>在末地：那是回主世界的祭坛，落点是玩家的重生点 —— 连到当前的出生点路径点（id = -1）。</li>
+     *   <li>在主世界（或非末地维度）：去末地出生平台 (100, 49, 0) @ the_end；</li>
+     *   <li>在末地：那是回主世界的祭坛，落点是玩家的重生点 —— 连到出生点节点（0 号）。</li>
      * </ul>
-     *
-     * <p>「终点下方 1 格是末地传送门方块」或者「终点本身就是末地传送门方块」都算。
-     * 这条边只加不减，不会动别的边。
      *
      * @return 是否新建了单向边
      */
     public boolean recordEndPortalLink(String dimension, BlockPos endPos) {
         if (!editMode) return false;
+        if (MinecraftClient.getInstance().world == null) return false;
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return false;
-
-        // 和穿越时用的是同一套判断（自己 / 下方 / 上方 / 四周），
-        // 否则会出现「边建出来了但走不过去」
+        // 只看自己那一格和下面一格
         if (!PortalUtils.endPortalNear(endPos)) return false;
 
         Waypoint from = graph.ensureWaypoint(dimension, endPos);
         Waypoint to;
 
         if (DimensionUtils.END.equals(dimension)) {
-            // 末地里的祭坛：回主世界 / 下界的重生点
-            to = graph.spawnWaypoint();
+            to = graph.spawnNode();
             if (to == null) {
                 ChatUtils.error("末地祭坛 + " + endPos.toShortString()
                     + " 需要连到出生点，但你还没有设置出生点；"
-                    + "请先用 /pc waypoints spawn add_here <name> 登记一个");
+                    + "请先用 /pc w spawn_set_by_id 或在出生点的路径点上用 /pc w spawn_set_by_name");
                 return false;
             }
         } else {
             to = graph.ensureWaypoint(DimensionUtils.END, DimensionUtils.endSpawnPos());
         }
 
-        if (!graph.addOneWayEdge(from.id(), to.id())) {
+        if (graph.addEdge(from.id(), to.id(), false) == null) {
             return false;
         }
 
@@ -218,7 +348,7 @@ public final class WaypointManager {
     }
 
     /**
-     * 编辑模式下：玩家穿过下界传送门后，把传送前所在的路径点和落地方块连一条 0 长度传送门边。
+     * 编辑模式下：玩家穿过下界传送门后，把传送前所在的路径点和落地方块连一条 0 长度双向边。
      *
      * @return 是否新建了传送门边
      */
@@ -228,12 +358,12 @@ public final class WaypointManager {
         if (source.dimension().equals(arrivalDimension)) return false;
 
         Waypoint arrival = graph.ensureWaypoint(arrivalDimension, arrivalPos);
-        if (!graph.addPortalEdge(source.id(), arrival.id())) {
+        if (graph.addEdge(source.id(), arrival.id(), true) == null) {
             return false;
         }
 
         save();
-        ChatUtils.info("编辑模式：记录传送门 " + DimensionUtils.display(source.dimension())
+        ChatUtils.info("编辑模式：记录下界传送门 " + DimensionUtils.display(source.dimension())
             + " " + source.coordString() + " <-> " + DimensionUtils.display(arrivalDimension)
             + " " + arrival.coordString() + "（长度 0，紫色）");
         return true;
@@ -243,24 +373,23 @@ public final class WaypointManager {
     // 出生点
     // ------------------------------------------------------------------
 
-    /** 登记一个候选出生点并设为当前出生点。 */
-    public boolean addSpawn(String name, String dimension, BlockPos pos) {
-        if (!graph.addSpawn(name, dimension, pos)) return false;
+    /** 把一个普通路径点设为当前出生点。 */
+    public boolean setSpawn(int id) {
+        if (!graph.setSpawn(id)) return false;
         save();
-        ChatUtils.debug("已登记出生点 " + name + " -> " + DimensionUtils.display(dimension)
-            + " " + pos.toShortString() + "，并设为当前出生点");
+        Waypoint w = graph.get(id);
+        if (w != null) {
+            ChatUtils.debug("当前出生点已设为 #" + id + " "
+                + DimensionUtils.display(w.dimension()) + " " + w.coordString());
+        }
         return true;
     }
 
-    /** 把当前出生点切到已经登记过的某个名字上。 */
-    public boolean setCurrentSpawn(String name) {
-        if (!graph.setCurrentSpawn(name)) return false;
+    /** 取消出生点设置。 */
+    public boolean clearSpawn() {
+        if (!graph.clearSpawn()) return false;
         save();
-        SpawnPoint spawn = graph.currentSpawnPoint();
-        if (spawn != null) {
-            ChatUtils.debug("当前出生点已设为 " + name + " -> "
-                + DimensionUtils.display(spawn.dimension()) + " " + spawn.coordString());
-        }
+        ChatUtils.debug("已取消出生点设置");
         return true;
     }
 }
