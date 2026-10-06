@@ -166,7 +166,13 @@ public final class WaypointManager {
     }
 
     /**
-     * 编辑模式下：把终端在末地传送门的那一格和末地出生平台连一条单向边。
+     * 编辑模式下：把终端在末地传送门的那一格，和它真正会去的地方连一条单向边。
+     *
+     * <p>末地传送门方块两个方向用的是同一个方块，所以必须按维度区分：
+     * <ul>
+     *   <li>在主世界（或非末地维度）：去末地出生平台 (100, 50, 0) @ the_end；</li>
+     *   <li>在末地：那是回主世界的祭坛，落点是玩家的重生点 —— 连到当前的出生点路径点（id = -1）。</li>
+     * </ul>
      *
      * <p>「终点下方 1 格是末地传送门方块」或者「终点本身就是末地传送门方块」都算。
      * 这条边只加不减，不会动别的边。
@@ -184,14 +190,29 @@ public final class WaypointManager {
         if (!portalHere && !portalBelow) return false;
 
         Waypoint from = graph.ensureWaypoint(dimension, endPos);
-        Waypoint to = graph.ensureWaypoint(DimensionUtils.END, DimensionUtils.endSpawnPos());
+        Waypoint to;
+
+        if (DimensionUtils.END.equals(dimension)) {
+            // 末地里的祭坛：回主世界 / 下界的重生点
+            to = graph.spawnWaypoint();
+            if (to == null) {
+                ChatUtils.error("末地祭坛 + " + endPos.toShortString()
+                    + " 需要连到出生点，但你还没有设置出生点；"
+                    + "请先用 /pc waypoints spawn add_here <name> 登记一个");
+                return false;
+            }
+        } else {
+            to = graph.ensureWaypoint(DimensionUtils.END, DimensionUtils.endSpawnPos());
+        }
+
         if (!graph.addOneWayEdge(from.id(), to.id())) {
             return false;
         }
 
         save();
-        ChatUtils.debug("编辑模式：末地传送门 " + endPos.toShortString()
-            + " → 末地 " + DimensionUtils.endSpawnPos().toShortString() + " 单向边");
+        ChatUtils.debug("编辑模式：末地传送门 " + DimensionUtils.display(dimension) + " "
+            + endPos.toShortString() + " → " + DimensionUtils.display(to.dimension()) + " "
+            + to.coordString() + " 单向边");
         return true;
     }
 
@@ -214,6 +235,31 @@ public final class WaypointManager {
         ChatUtils.info("编辑模式：记录传送门 " + DimensionUtils.display(source.dimension())
             + " " + source.coordString() + " <-> " + DimensionUtils.display(arrivalDimension)
             + " " + arrival.coordString() + "（长度 0，紫色）");
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // 出生点
+    // ------------------------------------------------------------------
+
+    /** 登记一个候选出生点并设为当前出生点。 */
+    public boolean addSpawn(String name, String dimension, BlockPos pos) {
+        if (!graph.addSpawn(name, dimension, pos)) return false;
+        save();
+        ChatUtils.debug("已登记出生点 " + name + " -> " + DimensionUtils.display(dimension)
+            + " " + pos.toShortString() + "，并设为当前出生点");
+        return true;
+    }
+
+    /** 把当前出生点切到已经登记过的某个名字上。 */
+    public boolean setCurrentSpawn(String name) {
+        if (!graph.setCurrentSpawn(name)) return false;
+        save();
+        SpawnPoint spawn = graph.currentSpawnPoint();
+        if (spawn != null) {
+            ChatUtils.debug("当前出生点已设为 " + name + " -> "
+                + DimensionUtils.display(spawn.dimension()) + " " + spawn.coordString());
+        }
         return true;
     }
 }

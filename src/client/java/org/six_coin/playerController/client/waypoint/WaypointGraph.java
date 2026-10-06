@@ -33,11 +33,21 @@ public final class WaypointGraph {
 
     private static final Pattern NAME_PATTERN = Pattern.compile("[A-Za-z0-9_]+");
 
+    /** 出生点路径点的固定 id（不是数字编号里的那种，是个特殊值）。 */
+    public static final int SPAWN_ID = -1;
+
     // ---- 存档内容 ----
     private int nextId = 0;
     private final Map<Integer, Waypoint> waypoints = new LinkedHashMap<>();
     private final List<Edge> edges = new ArrayList<>();
     private final List<DirectedEdge> oneWayEdges = new ArrayList<>();
+
+    /** 候选出生点。 */
+    private final List<SpawnPoint> spawns = new ArrayList<>();
+
+    /** 当前出生点的名字。 */
+    @Nullable
+    private String currentSpawn;
 
     // ---- 运行时索引（不存档）----
     private transient final Map<DimPos, Integer> byPos = new HashMap<>();
@@ -54,12 +64,14 @@ public final class WaypointGraph {
 
     /** 读档之后调用，重建所有索引。 */
     public void rebuildIndex() {
+        syncSpawnWaypoint();
+
         byPos.clear();
         byName.clear();
         adjacency.clear();
         outgoing.clear();
 
-        int maxId = -1;
+        int maxId = SPAWN_ID;
         for (Waypoint w : waypoints.values()) {
             byPos.put(new DimPos(w.dimension(), w.pos().asLong()), w.id());
             if (w.hasName()) byName.put(w.name(), w.id());
@@ -80,6 +92,32 @@ public final class WaypointGraph {
         oneWayEdges.removeIf(e -> !waypoints.containsKey(e.from()) || !waypoints.containsKey(e.to()));
         for (DirectedEdge e : oneWayEdges) {
             outgoing.get(e.from()).add(e.to());
+        }
+    }
+
+    /**
+     * 让 -1 号路径点跟着「当前出生点」走。
+     *
+     * <p>只改 {@code waypoints} 这张表，索引由 {@link #rebuildIndex()} 之后统一重建。
+     */
+    private void syncSpawnWaypoint() {
+        SpawnPoint spawn = currentSpawnPoint();
+        Waypoint node = waypoints.get(SPAWN_ID);
+
+        if (spawn == null) {
+            if (node != null) {
+                waypoints.remove(SPAWN_ID);
+                edges.removeIf(e -> e.a() == SPAWN_ID || e.b() == SPAWN_ID);
+                oneWayEdges.removeIf(e -> e.from() == SPAWN_ID || e.to() == SPAWN_ID);
+            }
+            return;
+        }
+
+        if (node == null) {
+            waypoints.put(SPAWN_ID, new Waypoint(SPAWN_ID, spawn.dimension(), spawn.pos(), spawn.name()));
+        } else {
+            node.moveTo(spawn.dimension(), spawn.pos());
+            node.name(spawn.name());
         }
     }
 
@@ -172,6 +210,76 @@ public final class WaypointGraph {
         return false;
     }
 
+    // ------------------------------------------------------------------
+    // 出生点
+    // ------------------------------------------------------------------
+
+    public List<SpawnPoint> allSpawns() {
+        return new ArrayList<>(spawns);
+    }
+
+    @Nullable
+    public String currentSpawnName() {
+        return currentSpawn;
+    }
+
+    @Nullable
+    public SpawnPoint currentSpawnPoint() {
+        if (currentSpawn == null) return null;
+        for (SpawnPoint spawn : spawns) {
+            if (currentSpawn.equals(spawn.name())) return spawn;
+        }
+        return null;
+    }
+
+    @Nullable
+    public SpawnPoint spawnByName(String name) {
+        for (SpawnPoint spawn : spawns) {
+            if (spawn.name().equals(name)) return spawn;
+        }
+        return null;
+    }
+
+    /** 那个特殊的出生点路径点（id = -1），没有登记出生点时返回 null。 */
+    @Nullable
+    public Waypoint spawnWaypoint() {
+        return waypoints.get(SPAWN_ID);
+    }
+
+    public boolean hasSpawn() {
+        return spawnWaypoint() != null;
+    }
+
+    /**
+     * 登记一个候选出生点并设为当前出生点。同名的话就地更新位置。
+     *
+     * @return 名字已被别的路径点占用时返回 false
+     */
+    public boolean addSpawn(String name, String dimension, BlockPos pos) {
+        if (!isValidName(name)) return false;
+
+        Integer owner = byName.get(name);
+        if (owner != null && owner != SPAWN_ID) return false;
+
+        SpawnPoint existing = spawnByName(name);
+        if (existing != null) {
+            existing.moveTo(dimension, pos);
+        } else {
+            spawns.add(new SpawnPoint(name, dimension, pos));
+        }
+        currentSpawn = name;
+        rebuildIndex();
+        return true;
+    }
+
+    /** 把当前出生点切到已经登记过的某个名字上。 */
+    public boolean setCurrentSpawn(String name) {
+        if (spawnByName(name) == null) return false;
+        currentSpawn = name;
+        rebuildIndex();
+        return true;
+    }
+
     public boolean hasEdge(int a, int b) {
         for (Edge e : edges) {
             if (e.connects(a, b)) return true;
@@ -223,10 +331,11 @@ public final class WaypointGraph {
         return created;
     }
 
-    /** 给路径点改名字。名字被别的点占用时返回 false。 */
+    /** 给路径点改名字。名字被别的点占用时返回 false。出生点不允许改名字。 */
     public boolean setName(int id, @Nullable String name) {
         Waypoint waypoint = waypoints.get(id);
         if (waypoint == null) return false;
+        if (waypoint.isSpawn()) return false;
         if (name != null) {
             Integer owner = byName.get(name);
             if (owner != null && owner != id) return false;
@@ -236,8 +345,9 @@ public final class WaypointGraph {
         return true;
     }
 
-    /** 删除路径点，同时删掉所有和它相连的边。 */
+    /** 删除路径点，同时删掉所有和它相连的边。出生点不能删。 */
     public boolean removeWaypoint(int id) {
+        if (id == SPAWN_ID) return false;
         if (waypoints.remove(id) == null) return false;
         edges.removeIf(e -> e.a() == id || e.b() == id);
         oneWayEdges.removeIf(e -> e.from() == id || e.to() == id);
@@ -456,7 +566,8 @@ public final class WaypointGraph {
         while (changed) {
             changed = false;
             for (Waypoint w : allWaypoints()) {
-                if (w.hasName()) continue; // 有名字的点是用户指定的，保留
+                if (w.hasName()) continue; // 有名字的点是用户指定的，保留（出生点也有名字）
+                if (w.isSpawn()) continue;
                 List<Integer> ns = new ArrayList<>(neighbors(w.id()));
                 if (ns.size() != 2) continue;
 

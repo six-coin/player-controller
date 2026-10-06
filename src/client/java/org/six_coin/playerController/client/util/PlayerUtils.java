@@ -17,6 +17,16 @@ public final class PlayerUtils {
     /** 判断“已经在方块中心”的误差。 */
     private static final double CENTER_EPSILON = 0.001;
 
+    /**
+     * 对齐时 y 相对方块底面的偏移。
+     *
+     * <p>x/z 用 n.5（方块正中心），y 用 n + 这个值：稍微离地一点点，
+     * 这样不会因为站在地面边缘或者台阶上而被卡住。
+     *
+     * <p>注意这个偏移必须小于 1，否则 {@code BlockPos.ofFloored} 会算到上一格去。
+     */
+    public static final double CENTER_Y_OFFSET = 0.2;
+
     private PlayerUtils() {
     }
 
@@ -58,12 +68,12 @@ public final class PlayerUtils {
     // ------------------------------------------------------------------
 
     /**
-     * 方块中心：x/z 为 n.5，y 为 n.0。
+     * 方块中心：x/z 为 n.5，y 为 n + {@link #CENTER_Y_OFFSET}。
      *
      * <p>因为路径点存的是方块坐标，y 用方块自身的高度（也就是站在这块地上时脚的位置）。
      */
     public static Vec3d blockCenter(BlockPos pos) {
-        return new Vec3d(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
+        return new Vec3d(pos.getX() + 0.5, pos.getY() + CENTER_Y_OFFSET, pos.getZ() + 0.5);
     }
 
     /** 玩家是否已经在所在方块的中心。 */

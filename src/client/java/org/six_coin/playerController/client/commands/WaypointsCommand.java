@@ -6,6 +6,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
+import net.minecraft.command.CommandSource;
 import net.minecraft.text.ClickEvent;
 import net.minecraft.text.HoverEvent;
 import net.minecraft.text.MutableText;
@@ -18,6 +19,7 @@ import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.waypoint.DirectedEdge;
 import org.six_coin.playerController.client.waypoint.Edge;
+import org.six_coin.playerController.client.waypoint.SpawnPoint;
 import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointGraph;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
@@ -61,8 +63,33 @@ public final class WaypointsCommand {
                 .then(ClientCommandManager.argument("name", StringArgumentType.word())
                     .executes(WaypointsCommand::setHereName)))
             .then(setName())
+            .then(spawn())
             .then(ClientCommandManager.literal("list")
                 .executes(WaypointsCommand::list));
+    }
+
+    /** {@code /pc waypoints spawn ...} —— 出生点登记与切换。 */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> spawn() {
+        return ClientCommandManager.literal("spawn")
+            .executes(WaypointsCommand::spawnStatus)
+            .then(ClientCommandManager.literal("add_here")
+                .then(ClientCommandManager.argument("name", StringArgumentType.word())
+                    .executes(WaypointsCommand::spawnAddHere)))
+            .then(ClientCommandManager.literal("add")
+                .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
+                    .suggests(LookSuggestions::x)
+                    .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+                        .suggests(LookSuggestions::y)
+                        .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                            .suggests(LookSuggestions::z)
+                            .then(ClientCommandManager.argument("name", StringArgumentType.word())
+                                .executes(WaypointsCommand::spawnAdd))))))
+            .then(ClientCommandManager.literal("list")
+                .executes(WaypointsCommand::spawnList))
+            .then(ClientCommandManager.literal("set")
+                .then(ClientCommandManager.argument("name", StringArgumentType.word())
+                    .suggests((context, builder) -> CommandSource.suggestMatching(spawnNames(), builder))
+                    .executes(WaypointsCommand::spawnSet)));
     }
 
     // ------------------------------------------------------------------
@@ -142,6 +169,11 @@ public final class WaypointsCommand {
             + graph.oneWayEdgeCount() + " 条单向边"));
         source.sendFeedback(Text.literal("  显示: " + (manager.isShowing() ? "§a开" : "§c关")
             + "§r  编辑模式: " + (manager.isEditMode() ? "§a开" : "§c关")));
+        SpawnPoint spawn = graph.currentSpawnPoint();
+        source.sendFeedback(Text.literal("  当前出生点: " + (spawn == null
+            ? "§c未设置"
+            : "§a" + spawn.name() + "§r " + DimensionUtils.display(spawn.dimension())
+                + " " + spawn.coordString())));
         source.sendFeedback(Text.literal("  文件: " + manager.currentFile()));
         return 1;
     }
@@ -223,6 +255,10 @@ public final class WaypointsCommand {
         if (waypoint == null) {
             source.sendError(Text.literal("当前维度（" + DimensionUtils.display(dimension) + "）的 "
                 + pos.toShortString() + " 没有路径点"));
+            return 0;
+        }
+        if (waypoint.isSpawn()) {
+            source.sendError(Text.literal("那是出生点路径点，不能这样删；请用 /pc waypoints spawn 管理"));
             return 0;
         }
 
@@ -345,6 +381,10 @@ public final class WaypointsCommand {
             source.sendError(Text.literal("你现在站的 " + pos.toShortString() + " 不是路径点"));
             return 0;
         }
+        if (waypoint.isSpawn()) {
+            source.sendError(Text.literal("那是出生点路径点，名字由 /pc waypoints spawn 决定"));
+            return 0;
+        }
         if (!graph.setName(waypoint.id(), name)) {
             source.sendError(Text.literal("名字 " + name + " 已经被别的路径点占用了"));
             return 0;
@@ -371,6 +411,10 @@ public final class WaypointsCommand {
                 + "）的 " + pos.toShortString() + " 没有路径点"));
             return 0;
         }
+        if (waypoint.isSpawn()) {
+            source.sendError(Text.literal("那是出生点路径点，名字由 /pc waypoints spawn 决定"));
+            return 0;
+        }
         if (!graph.setName(waypoint.id(), name)) {
             source.sendError(Text.literal("名字 " + name + " 已经被别的路径点占用了"));
             return 0;
@@ -378,6 +422,129 @@ public final class WaypointsCommand {
         WaypointManager.get().save();
         source.sendFeedback(Text.literal("已把 " + pos.toShortString() + " 命名为 " + name));
         return 1;
+    }
+
+    // ------------------------------------------------------------------
+    // spawn
+    // ------------------------------------------------------------------
+
+    private static int spawnStatus(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        WaypointGraph graph = WaypointManager.get().graph();
+        SpawnPoint current = graph.currentSpawnPoint();
+
+        if (current == null) {
+            source.sendFeedback(Text.literal("§8[§bPC§8]§r §7还没有设置出生点，"
+                + "用 /pc waypoints spawn add_here <name> 登记一个"));
+        } else {
+            source.sendFeedback(spawnLine(graph, current, true));
+        }
+        return 1;
+    }
+
+    private static int spawnAddHere(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        String name = StringArgumentType.getString(context, "name");
+
+        if (!WaypointGraph.isValidName(name)) {
+            source.sendError(Text.literal("名字只能用大小写字母、数字和下划线"));
+            return 0;
+        }
+
+        BlockPos pos = PlayerUtils.currentBlockPos();
+        if (pos == null) {
+            source.sendError(Text.literal("拿不到玩家位置"));
+            return 0;
+        }
+        String dimension = DimensionUtils.current();
+
+        if (!WaypointManager.get().addSpawn(name, dimension, pos)) {
+            source.sendError(Text.literal("名字 " + name + " 已经被别的路径点占用了"));
+            return 0;
+        }
+        source.sendFeedback(Text.literal("已登记出生点 " + name + "（"
+            + DimensionUtils.display(dimension) + " " + pos.toShortString() + "），并设为当前出生点"));
+        return 1;
+    }
+
+    private static int spawnAdd(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        BlockPos pos = readPos(context, "x", "y", "z");
+        String name = StringArgumentType.getString(context, "name");
+
+        if (!WaypointGraph.isValidName(name)) {
+            source.sendError(Text.literal("名字只能用大小写字母、数字和下划线"));
+            return 0;
+        }
+
+        String dimension = DimensionUtils.current();
+        if (!WaypointManager.get().addSpawn(name, dimension, pos)) {
+            source.sendError(Text.literal("名字 " + name + " 已经被别的路径点占用了"));
+            return 0;
+        }
+        source.sendFeedback(Text.literal("已登记出生点 " + name + "（"
+            + DimensionUtils.display(dimension) + " " + pos.toShortString() + "），并设为当前出生点"));
+        return 1;
+    }
+
+    private static int spawnSet(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        String name = StringArgumentType.getString(context, "name");
+
+        if (!WaypointManager.get().setCurrentSpawn(name)) {
+            source.sendError(Text.literal("没有登记过叫 " + name + " 的出生点"));
+            return 0;
+        }
+        source.sendFeedback(Text.literal("当前出生点已设为 " + name));
+        return 1;
+    }
+
+    private static int spawnList(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        WaypointGraph graph = WaypointManager.get().graph();
+
+        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7出生点列表（绿色 = 当前）："));
+        if (graph.allSpawns().isEmpty()) {
+            source.sendFeedback(Text.literal("  §8（空，用 /pc waypoints spawn add_here <name> 登记）"));
+            return 1;
+        }
+        for (SpawnPoint spawn : graph.allSpawns()) {
+            source.sendFeedback(spawnLine(graph, spawn, spawn == graph.currentSpawnPoint()));
+        }
+        return 1;
+    }
+
+    private static Text spawnLine(WaypointGraph graph, SpawnPoint spawn, boolean current) {
+        MutableText line = Text.literal(" ").formatted(Formatting.GRAY);
+        if (current) {
+            line.append(Text.literal("[当前]")
+                .setStyle(Style.EMPTY.withColor(Formatting.GREEN)));
+        } else {
+            line.append(Text.literal("[    ]")
+                .setStyle(Style.EMPTY.withColor(Formatting.DARK_GRAY)));
+        }
+        line.append(Text.literal(" "));
+        line.append(dimensionTag(spawn.dimension()));
+        line.append(Text.literal(" "));
+        line.append(clickableCoord(spawn.pos()));
+        line.append(Text.literal(" "));
+        line.append(Text.literal("[" + spawn.name() + "]")
+            .setStyle(Style.EMPTY
+                .withColor(Formatting.GREEN)
+                .withClickEvent(new ClickEvent.CopyToClipboard(spawn.name()))
+                .withHoverEvent(new HoverEvent.ShowText(Text.literal("点击复制名字")))));
+        if (!current) {
+            line.append(Text.literal(" "));
+            line.append(actionButton("设为当前", ROOT + "spawn set " + spawn.name(),
+                "点击把命令填到聊天栏"));
+        }
+        return line;
+    }
+
+    private static List<String> spawnNames() {
+        return WaypointManager.get().graph().allSpawns().stream()
+            .map(SpawnPoint::name)
+            .toList();
     }
 
     // ------------------------------------------------------------------
@@ -404,6 +571,16 @@ public final class WaypointsCommand {
                 }
                 source.sendFeedback(waypointLine(graph, waypoint, waypoint.dimension().equals(here)));
             }
+        }
+
+        source.sendFeedback(Text.literal("§7出生点（绿色 = 当前）："));
+        int spawns = 0;
+        for (SpawnPoint spawn : graph.allSpawns()) {
+            if (spawns++ >= LIST_LIMIT) break;
+            source.sendFeedback(spawnLine(graph, spawn, spawn == graph.currentSpawnPoint()));
+        }
+        if (spawns == 0) {
+            source.sendFeedback(Text.literal("  §8（空，用 /pc waypoints spawn add_here <name> 登记）"));
         }
 
         source.sendFeedback(Text.literal("§7所有边："));
@@ -436,6 +613,10 @@ public final class WaypointsCommand {
 
     private static Text waypointLine(WaypointGraph graph, Waypoint waypoint, boolean manageable) {
         MutableText line = Text.literal(" 坐标：").formatted(Formatting.GRAY);
+        if (waypoint.isSpawn()) {
+            line.append(Text.literal("[出生点]").setStyle(Style.EMPTY.withColor(Formatting.GREEN)));
+            line.append(Text.literal(" "));
+        }
         line.append(dimensionTag(waypoint.dimension()));
         line.append(Text.literal(" "));
         line.append(clickableCoord(waypoint.pos()));
@@ -444,9 +625,15 @@ public final class WaypointsCommand {
             line.append(Text.literal("；名称：").formatted(Formatting.GRAY));
             line.append(Text.literal("[" + waypoint.name() + "]")
                 .setStyle(Style.EMPTY
-                    .withColor(Formatting.GREEN)
+                    .withColor(waypoint.isSpawn() ? Formatting.GREEN : Formatting.GREEN)
                     .withClickEvent(new ClickEvent.CopyToClipboard(waypoint.name()))
                     .withHoverEvent(new HoverEvent.ShowText(Text.literal("点击复制名称")))));
+        }
+
+        // 出生点是特殊点，不能改名 / 删除
+        if (waypoint.isSpawn()) {
+            line.append(Text.literal(" §8（出生点，用 /pc waypoints spawn 管理）"));
+            return line;
         }
 
         if (!manageable) {

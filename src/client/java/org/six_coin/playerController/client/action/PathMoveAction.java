@@ -336,8 +336,15 @@ public class PathMoveAction extends Action {
             int dy = Math.abs(actual.getY() - step.to().pos().getY());
             int dz = Math.abs(actual.getZ() - step.to().pos().getZ());
             if (Math.max(dx, Math.max(dy, dz)) > ARRIVAL_TOLERANCE) {
-                fail("落点 " + actual.toShortString() + " 和记录的路径点 "
-                    + step.to().pos().toShortString() + " 对不上");
+                if (step.to().isSpawn()) {
+                    // 从末地回来必须落在当前出生点，否则直接停下
+                    fail("从末地回来没有落在当前出生点（实际 " + actual.toShortString()
+                        + "，当前出生点 " + step.to().coordString() + "），已停止任务；"
+                        + "用 /pc waypoints spawn add_here <name> 把实际落点登记成出生点再试");
+                } else {
+                    fail("落点 " + actual.toShortString() + " 和记录的路径点 "
+                        + step.to().pos().toShortString() + " 对不上");
+                }
                 return;
             }
             ChatUtils.debug("落点 " + actual.toShortString() + " 和记录的 "

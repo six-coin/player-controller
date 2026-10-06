@@ -26,6 +26,9 @@ public final class WaypointRenderer {
     /** 和传送门有关的路径点：紫色。 */
     private static final int PORTAL_COLOR = 0xFFB040FF;
 
+    /** 出生点：绿色。 */
+    private static final int SPAWN_COLOR = 0xFF40FF40;
+
     /** 边：黄色。 */
     private static final int EDGE_COLOR = 0xFFFFE030;
 
@@ -86,8 +89,7 @@ public final class WaypointRenderer {
                 if (budget <= 0) break;
                 if (!waypoint.dimension().equals(dimension)) continue;
                 if (tooFar(waypoint.pos(), camera)) continue;
-                drawBox(matrices, buffer, waypoint.pos(), camera,
-                    graph.isPortalWaypoint(waypoint.id()) ? PORTAL_COLOR : WAYPOINT_COLOR);
+                drawBox(matrices, buffer, waypoint.pos(), camera, colorFor(graph, waypoint));
                 budget--;
             }
         } catch (Exception e) {
@@ -97,8 +99,14 @@ public final class WaypointRenderer {
         }
     }
 
-    private static boolean tooFar(BlockPos pos, Vec3d camera) {
-        double dx = pos.getX() + 0.5 - camera.x;
+    /** 出生点绿色，传送门相关的紫色，其余红色。 */
+    private static int colorFor(WaypointGraph graph, Waypoint waypoint) {
+        if (waypoint.isSpawn()) return SPAWN_COLOR;
+        if (graph.isPortalWaypoint(waypoint.id())) return PORTAL_COLOR;
+        return WAYPOINT_COLOR;
+    }
+
+    private static boolean tooFar(BlockPos pos, Vec3d camera) {        double dx = pos.getX() + 0.5 - camera.x;
         double dy = pos.getY() + 0.5 - camera.y;
         double dz = pos.getZ() + 0.5 - camera.z;
         return dx * dx + dy * dy + dz * dz > MAX_DISTANCE * MAX_DISTANCE;

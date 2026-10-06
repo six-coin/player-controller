@@ -60,17 +60,30 @@ public final class Waypoint {
         return name != null && !name.isEmpty();
     }
 
+    /** 是不是那个特殊的出生点路径点（id 固定为 -1）。 */
+    public boolean isSpawn() {
+        return id == WaypointGraph.SPAWN_ID;
+    }
+
     void name(@Nullable String name) {
         this.name = name;
+    }
+
+    /** 出生点路径点跟着当前出生点移动时用。 */
+    void moveTo(String dimension, BlockPos pos) {
+        this.dimension = dimension;
+        this.x = pos.getX();
+        this.y = pos.getY();
+        this.z = pos.getZ();
     }
 
     public BlockPos pos() {
         return new BlockPos(x, y, z);
     }
 
-    /** 玩家站在这个路径点方块里时，应该对齐到的精确位置（x/z 为 n.5，y 为 n.0）。 */
+    /** 玩家站在这个路径点方块里时，应该对齐到的精确位置（x/z 为 n.5，y 为 n + 0.2）。 */
     public Vec3d center() {
-        return new Vec3d(x + 0.5, y, z + 0.5);
+        return org.six_coin.playerController.client.util.PlayerUtils.blockCenter(pos());
     }
 
     public String coordString() {
