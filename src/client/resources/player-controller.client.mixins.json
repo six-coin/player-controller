@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "org.six_coin.playerController.client.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ClientConnectionMixin",
+    "PlayerMoveC2SPacketAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -9,6 +9,12 @@
   "license": "All-Rights-Reserved",
   "icon": "assets/player-controller/icon.png",
   "environment": "client",
+  "mixins": [
+    {
+      "config": "player-controller.client.mixins.json",
+      "environment": "client"
+    }
+  ],
   "entrypoints": {
     "fabric-datagen": [
       "org.six_coin.playerController.client.PlayerControllerDataGenerator"
