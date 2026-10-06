@@ -4,6 +4,7 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "ClientConnectionMixin",
+    "MinecraftClientMixin",
     "PlayerMoveC2SPacketAccessor"
   ],
   "injectors": {

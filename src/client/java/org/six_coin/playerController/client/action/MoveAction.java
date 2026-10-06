@@ -1,36 +1,31 @@
 package org.six_coin.playerController.client.action;
 
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.feature.NoFall;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
+import org.six_coin.playerController.client.waypoint.WaypointManager;
 
 /**
  * 沿着某个轴移动指定格数。
  *
- * <p>移动方式使用 Meteor Flight 的 velocity 模式（见 {@link FlightVelocity}），
- * 速度为 {@link FlightVelocity#SPEED}；移动期间自动开启 NoFall。
+ * <p>开始之前必须先对齐到玩家所在方块的中心（x/z 为 n.5，y 为 n.0），
+ * 移动方式用 Meteor Flight 的 velocity 模式，速度取配置里的 {@code actions.move_speed}，
+ * 移动期间自动开启 NoFall。
+ *
+ * <p>如果处于路径点编辑模式，结束后会把起点和终点记成路径点和一条边。
  */
 public class MoveAction extends Action {
-
-    /** 认为“已经到达”的误差。 */
-    private static final double ARRIVE_EPSILON = 0.02;
-
-    /** 连续这么多 tick 没有位移就认为被挡住了。 */
-    private static final int MAX_STALL_TICKS = 20;
 
     private final Direction.Axis axis;
     private final int blocks;
 
-    private double start;
-    private double target;
-    private int maxTicks;
-    private int ticks;
-    private int stalledTicks;
-    private double lastCoord = Double.NaN;
+    private BlockPos startBlock;
+    private MoveDriver driver;
 
     public MoveAction(Direction.Axis axis, int blocks) {
         this.axis = axis;
@@ -43,6 +38,11 @@ public class MoveAction extends Action {
     }
 
     @Override
+    public boolean isMovement() {
+        return true;
+    }
+
+    @Override
     protected void onStart() {
         ClientPlayerEntity player = PlayerUtils.player();
         if (player == null) {
@@ -50,6 +50,7 @@ public class MoveAction extends Action {
             return;
         }
 
+        // 1. 先把身体转过去（好看，也让服务端朝向合理）
         float yaw = switch (axis) {
             case X -> blocks > 0 ? -90.0f : 90.0f;
             case Z -> blocks > 0 ? 0.0f : 180.0f;
@@ -57,19 +58,25 @@ public class MoveAction extends Action {
         };
         player.setYaw(yaw);
 
-        start = PlayerUtils.axisValue(axis, player);
-        target = start + blocks;
-        maxTicks = Math.max(60, (int) Math.ceil(Math.abs(blocks) / FlightVelocity.SPEED) * 4 + 60);
-        lastCoord = Double.NaN;
-        stalledTicks = 0;
-        ticks = 0;
+        // 2. 对齐到所在方块的中心
+        BlockPos block = BlockPos.ofFloored(player.getEntityPos());
+        if (!PlayerUtils.isAtBlockCenter()) {
+            ChatUtils.debug("先对齐到方块中心 " + block.toShortString()
+                + "（当前位置 " + String.format("%.3f, %.3f, %.3f", player.getX(), player.getY(), player.getZ()) + "）");
+            PlayerUtils.snapToBlockCenter(block);
+        }
+        startBlock = block;
 
-        // 移动期间自动开启 NoFall
+        // 3. 确定这一段的起止
+        double start = PlayerUtils.axisValue(axis, player);
+        double target = start + blocks;
+        driver = new MoveDriver(axis, target, blocks);
+
         NoFall.acquire();
         FlightVelocity.begin();
 
         ChatUtils.debug("起点 %s=%.3f，目标 %.3f，速度 %.2f 格/tick，NoFall 已开启",
-            axisName(axis), start, target, FlightVelocity.SPEED);
+            axisName(axis), start, target, PlayerControllerConfig.getMoveSpeed());
     }
 
     @Override
@@ -79,37 +86,23 @@ public class MoveAction extends Action {
             fail("玩家不存在");
             return;
         }
+        if (driver == null) {
+            fail("没有初始化");
+            return;
+        }
 
         double coord = PlayerUtils.axisValue(axis, player);
-        double remaining = target - coord;
-
-        if (Math.abs(remaining) <= ARRIVE_EPSILON) {
-            FlightVelocity.apply(Vec3d.ZERO);
-            ChatUtils.debug("已到达 %s=%.3f", axisName(axis), coord);
-            finish();
-            return;
-        }
-
-        if (ticks >= maxTicks) {
-            fail("超时，停留在 " + axisName(axis) + "=" + String.format("%.3f", coord) + "（目标 " + target + "）");
-            return;
-        }
-
-        // 最后一步用剩余距离，避免冲过头
-        double step = Math.min(FlightVelocity.SPEED, Math.abs(remaining)) * Math.signum(remaining);
-        FlightVelocity.apply(FlightVelocity.velocityFor(axis, step));
-
-        if (!Double.isNaN(lastCoord) && Math.abs(coord - lastCoord) < 1.0E-4) {
-            stalledTicks++;
-            if (stalledTicks >= MAX_STALL_TICKS) {
-                fail("被挡住，无法继续移动（卡在 " + axisName(axis) + "=" + String.format("%.3f", coord) + "）");
-                return;
+        switch (driver.tick(coord)) {
+            case ARRIVED -> {
+                ChatUtils.debug("已到达 %s=%.3f", axisName(axis), coord);
+                finish();
             }
-        } else {
-            stalledTicks = 0;
+            case FAILED -> fail("移动 " + axisName(axis) + " 轴失败: " + driver.failure()
+                + "（停在 " + String.format("%.3f", coord) + "）");
+            case MOVING -> {
+                // 继续
+            }
         }
-        lastCoord = coord;
-        ticks++;
     }
 
     @Override
@@ -117,6 +110,11 @@ public class MoveAction extends Action {
         FlightVelocity.end();
         NoFall.release();
         ChatUtils.debug("NoFall 已关闭，飞行结束");
+
+        // 失败 / 被取消时不要记录边，避免写下实际没走通的路
+        if (failureReason() == null && startBlock != null) {
+            WaypointManager.get().recordMove(startBlock, startBlock.offset(axis, blocks));
+        }
     }
 
     public static String axisName(Direction.Axis axis) {

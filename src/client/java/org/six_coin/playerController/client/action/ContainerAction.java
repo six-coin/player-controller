@@ -1,7 +1,6 @@
 package org.six_coin.playerController.client.action;
 
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventory;
@@ -13,6 +12,7 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.InventoryUtils;
 import org.six_coin.playerController.client.util.ItemRequest;
@@ -88,6 +88,9 @@ public class ContainerAction extends Action {
 
     @Override
     protected void onStart() {
+        // 整个过程中都不要在客户端弹出容器界面
+        ScreenSuppressor.acquire();
+
         MinecraftClient mc = MinecraftClient.getInstance();
         ClientPlayerEntity player = mc.player;
         if (player == null || mc.world == null) {
@@ -287,6 +290,8 @@ public class ContainerAction extends Action {
                 ChatUtils.error("未满足: " + shortfall);
             }
         }
+
+        ScreenSuppressor.release();
     }
 
     private void closeScreen() {
@@ -294,15 +299,9 @@ public class ContainerAction extends Action {
         if (mc.player == null || handler == null) return;
         if (mc.player.currentScreenHandler != handler) return;
 
-        if (mc.currentScreen instanceof HandledScreen<?> screen && handler.equals(screen.getScreenHandler())) {
-            // 走原版关闭流程：发 CloseHandledScreenC2SPacket 并移除界面
-            screen.close();
-        } else {
-            mc.player.closeHandledScreen();
-            if (mc.currentScreen instanceof HandledScreen<?>) {
-                mc.setScreen(null);
-            }
-        }
-        ChatUtils.debug("已关闭容器界面");
+        // 界面本来就没有显示出来（见 ScreenSuppressor），
+        // 这里只要通知服务端关闭，并让客户端把 currentScreenHandler 换回玩家自己的。
+        mc.player.closeHandledScreen();
+        ChatUtils.debug("已关闭容器（客户端全程没有显示界面）");
     }
 }

@@ -18,6 +18,11 @@ public abstract class Action {
     /** 名字，用于聊天栏输出。 */
     public abstract String name();
 
+    /** 是不是“移动类”任务（/pc move cancel 只取消这一类）。 */
+    public boolean isMovement() {
+        return false;
+    }
+
     protected void onStart() {
     }
 

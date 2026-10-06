@@ -5,6 +5,7 @@ import org.six_coin.playerController.client.util.ChatUtils;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.Iterator;
 
 /**
  * 动作调度器：同一时间只跑一个动作，其余排队。
@@ -48,6 +49,25 @@ public final class ActionManager {
         if (current != null) {
             current.fail("被取消");
         }
+    }
+
+    /** 取消当前和排队的移动任务，返回取消的数量。 */
+    public int cancelMoves() {
+        int count = 0;
+
+        Iterator<Action> iterator = queue.iterator();
+        while (iterator.hasNext()) {
+            if (iterator.next().isMovement()) {
+                iterator.remove();
+                count++;
+            }
+        }
+
+        if (current != null && current.isMovement()) {
+            current.fail("被 /pc move cancel 取消");
+            count++;
+        }
+        return count;
     }
 
     public void tick(MinecraftClient client) {
