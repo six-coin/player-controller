@@ -42,10 +42,12 @@ import java.util.TreeMap;
  * <p>生成 {@code world_<n>/container/all_items.json}：
  * <pre>
  * {
- *   "detail": { "1": { "id": 1, "container_position": {...}, "access_position": {...}, "items": {...} } },
+ *   "detail": { "1": { "id": 1, "cost": 114, "container_position": {...},
+ *                      "access_position": {...}, "items": {...} } },
  *   "overall": { "minecraft:stone": 64 }
  * }
  * </pre>
+ * {@code cost} 是从玩家当前位置走到那个落点的代价（同维度按方块距离累加，传送门那一段算 0）；
  * {@code items} 直接抄缓存里的；{@code overall} 是所有 detail 的 items 加和。
  */
 public final class ContainerItemsExporter {
@@ -103,16 +105,19 @@ public final class ContainerItemsExporter {
                     + " 在边上，已新建路径点 #" + accessNode.id());
             }
 
-            if (graph.shortestPath(start.id(), accessNode.id()) == null) {
+            List<Waypoint> path = graph.shortestPath(start.id(), accessNode.id());
+            if (path == null) {
                 ChatUtils.debug("容器 #" + container.id() + " 的落点 #" + accessNode.id() + " "
                     + accessPos.toShortString() + "（" + DimensionUtils.display(container.dimension())
                     + "）从这里走不到，跳过");
                 continue;
             }
+            int cost = graph.pathCost(path);
 
             written++;
             JsonObject entry = new JsonObject();
             entry.addProperty("id", container.id());
+            entry.addProperty("cost", cost);
             entry.add("container_position", positionJson(container.dimension(), container.pos()));
             entry.add("access_position", positionJson(container.dimension(), accessPos));
 
@@ -125,7 +130,7 @@ public final class ContainerItemsExporter {
             detail.add(String.valueOf(container.id()), entry);
 
             ChatUtils.debug("容器 #" + container.id() + " 落点 #" + accessNode.id() + " "
-                + accessPos.toShortString() + "，物品 " + container.itemsSummary());
+                + accessPos.toShortString() + "，cost " + cost + "，物品 " + container.itemsSummary());
         }
 
         // 建过点就存一次盘

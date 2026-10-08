@@ -352,6 +352,20 @@ public final class WaypointGraph {
         return Math.abs(a.x() - b.x()) + Math.abs(a.y() - b.y()) + Math.abs(a.z() - b.z());
     }
 
+    /**
+     * 走完这条路的代价：每一段都用 {@link #weight} 加起来，也就是同维度按方块距离、
+     * 传送门（跨维度）那一段算 0，和 {@link #shortestPath} 里用的权重是同一套。
+     */
+    public int pathCost(List<Waypoint> path) {
+        double total = 0;
+        for (int i = 1; i < path.size(); i++) {
+            double weight = weight(path.get(i - 1).id(), path.get(i).id());
+            if (weight == Double.MAX_VALUE) continue;
+            total += weight;
+        }
+        return (int) Math.round(total);
+    }
+
     public static boolean isValidName(@Nullable String name) {
         return name != null && NAME_PATTERN.matcher(name).matches();
     }
