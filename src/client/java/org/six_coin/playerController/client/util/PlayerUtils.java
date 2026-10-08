@@ -28,6 +28,9 @@ public final class PlayerUtils {
      */
     public static final double CENTER_Y_OFFSET = 0.2;
 
+    /** 眼睛相对脚底的高度（原版是 1.62）。 */
+    public static final double EYE_HEIGHT = 1.62;
+
     private PlayerUtils() {
     }
 
@@ -133,6 +136,21 @@ public final class PlayerUtils {
         ClientPlayerEntity player = player();
         if (player == null) return Double.MAX_VALUE;
         return player.getEyePos().distanceTo(Vec3d.ofCenter(pos));
+    }
+
+    /**
+     * 站在 {@code standOn} 上时，眼睛到 {@code target} 中心的距离。
+     *
+     * <p>工作站用站立点当参照：所有相关方块都要在站立点的触及范围内。
+     */
+    public static double eyeDistanceFrom(BlockPos standOn, BlockPos target) {
+        Vec3d eye = Vec3d.ofCenter(standOn).add(0, EYE_HEIGHT, 0);
+        return eye.distanceTo(Vec3d.ofCenter(target));
+    }
+
+    /** 站在 {@code standOn} 上够不够得着 {@code target}。 */
+    public static boolean isWithinReachFrom(BlockPos standOn, BlockPos target) {
+        return eyeDistanceFrom(standOn, target) <= reach();
     }
 
     /** 看向某个方块中心所需要的 yaw。 */

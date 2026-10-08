@@ -9,6 +9,7 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.text.Text;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
+import org.six_coin.playerController.client.station.StationManager;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
 
 /**
@@ -68,6 +69,7 @@ public final class ConfigCommand {
                     }
                     WaypointManager.get().switchWorld(num);
                     ContainerCacheManager.get().switchWorld(num);
+                    StationManager.get().switchWorld(num);
                     context.getSource().sendFeedback(Text.literal("已切换到世界配置 world_" + num));
                     return 1;
                 }));

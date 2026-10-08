@@ -8,6 +8,8 @@ import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerCacheRenderer;
 import org.six_coin.playerController.client.container.ContainerCacheTracker;
+import org.six_coin.playerController.client.station.StationManager;
+import org.six_coin.playerController.client.station.StationRenderer;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.waypoint.PortalTracker;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
@@ -20,9 +22,11 @@ public class PlayerControllerClient implements ClientModInitializer {
         PlayerControllerConfig.load();
         WaypointManager.get().load();
         ContainerCacheManager.get().load();
+        StationManager.get().load();
         PcCommand.register();
         WaypointRenderer.register();
         ContainerCacheRenderer.register();
+        StationRenderer.register();
 
         // 在原版 tick 世界之前驱动动作队列，移动类动作写入的速度才能在当 tick 生效
         ClientTickEvents.START_CLIENT_TICK.register(ActionManager.get()::tick);
