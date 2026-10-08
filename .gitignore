@@ -20,5 +20,8 @@ hs_err_pid*
 # Common working directory
 run
 
+# 游戏日志（在项目根目录直接跑客户端时会生成）
+logs
+
 # private folder
 ref

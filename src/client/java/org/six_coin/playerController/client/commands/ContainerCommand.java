@@ -1,6 +1,5 @@
 package org.six_coin.playerController.client.commands;
 
-import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -11,19 +10,22 @@ import net.minecraft.inventory.Inventory;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import org.six_coin.playerController.client.action.ActionManager;
-import org.six_coin.playerController.client.action.ContainerAction;
+import org.six_coin.playerController.client.action.ContainerGetAction;
 import org.six_coin.playerController.client.util.ChatUtils;
-import org.six_coin.playerController.client.util.ItemListParser;
-import org.six_coin.playerController.client.util.ItemRequest;
+import org.six_coin.playerController.client.util.ItemList;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
-import java.util.List;
-
 /**
- * {@code /pc container [position_x] [position_y] [position_z] [item_list]}
+ * {@code /pc container get from_target <item_list>}
  *
- * <p>坐标必须落在触及范围内，否则直接拒绝执行。
- * item_list 形如 {@code stone=64,dirt=32}（详见 {@link ItemListParser}）。
+ * <p>打开玩家准星指着的那个方块（必须是容器），按 item_list 把东西拿进主背包。
+ * item_list 是一段 JSON，键是物品 id、值是还要多少个：
+ *
+ * <pre>
+ *   /pc container get from_target {"minecraft:cobblestone": 65, "minecraft:grass_block": 13}
+ * </pre>
+ *
+ * <p>具体规则见 {@link ContainerGetAction}；命令跑完会把修改后的 item_list 原样输出到聊天栏。
  */
 public final class ContainerCommand {
 
@@ -32,17 +34,13 @@ public final class ContainerCommand {
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
         return ClientCommandManager.literal("container")
-            .then(ClientCommandManager.argument("position_x", IntegerArgumentType.integer())
-                .suggests(LookSuggestions::x)
-                .then(ClientCommandManager.argument("position_y", IntegerArgumentType.integer())
-                    .suggests(LookSuggestions::y)
-                    .then(ClientCommandManager.argument("position_z", IntegerArgumentType.integer())
-                        .suggests(LookSuggestions::z)
-                        .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
-                            .executes(ContainerCommand::execute)))));
+            .then(ClientCommandManager.literal("get")
+                .then(ClientCommandManager.literal("from_target")
+                    .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
+                        .executes(ContainerCommand::getFromTarget))));
     }
 
-    private static int execute(CommandContext<FabricClientCommandSource> context) {
+    private static int getFromTarget(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
 
         if (source.getPlayer() == null || source.getWorld() == null) {
@@ -50,39 +48,36 @@ public final class ContainerCommand {
             return 0;
         }
 
-        int x = IntegerArgumentType.getInteger(context, "position_x");
-        int y = IntegerArgumentType.getInteger(context, "position_y");
-        int z = IntegerArgumentType.getInteger(context, "position_z");
-        BlockPos pos = new BlockPos(x, y, z);
-
-        // 1. 解析物品列表
-        List<ItemRequest> requests;
+        // 1. 解析 item_list
+        String raw = StringArgumentType.getString(context, "item_list");
+        ItemList itemList;
         try {
-            requests = ItemListParser.parse(StringArgumentType.getString(context, "item_list"));
-        } catch (ItemListParser.ParseException e) {
-            source.sendError(Text.literal("物品列表格式错误: " + e.getMessage()));
+            itemList = ItemList.parse(raw);
+        } catch (ItemList.ParseException e) {
+            source.sendError(Text.literal("item_list 解析失败: " + e.getMessage()));
+            ChatUtils.debug("item_list 原文: " + raw);
             return 0;
         }
+        ChatUtils.debug("解析 item_list: " + itemList.describe());
 
-        StringBuilder summary = new StringBuilder();
-        for (int i = 0; i < requests.size(); i++) {
-            if (i > 0) summary.append(", ");
-            summary.append(requests.get(i).displayName());
+        // 2. 目标 = 准星看到的方块
+        BlockPos pos = PlayerUtils.lookedAtBlock();
+        if (pos == null) {
+            source.sendError(Text.literal("你没有看向任何方块"));
+            return 0;
         }
-        ChatUtils.debug("解析物品列表: " + summary);
+        if (!PlayerUtils.isWithinReach(pos)) {
+            source.sendError(Text.literal("方块 " + pos.toShortString() + " 超出触及范围（距离 "
+                + String.format("%.2f", PlayerUtils.eyeDistanceTo(pos))
+                + "，触及范围 " + String.format("%.2f", PlayerUtils.reach()) + "）"));
+            return 0;
+        }
 
         MinecraftClient mc = MinecraftClient.getInstance();
-
-        // 2. 坐标必须在触及范围内，否则拒绝执行
-        if (!PlayerUtils.isWithinReach(pos)) {
-            String message = String.format("容器 %s 超出触及范围（距离 %.2f，触及范围 %.2f），拒绝执行",
-                pos.toShortString(), PlayerUtils.eyeDistanceTo(pos), PlayerUtils.reach());
-            source.sendError(Text.literal(message));
-            ChatUtils.debug(message);
+        if (mc.world == null) {
+            source.sendError(Text.literal("没有世界"));
             return 0;
         }
-
-        // 3. 该位置必须真的是一个容器
         if (mc.world.getBlockState(pos).isAir()) {
             source.sendError(Text.literal(pos.toShortString() + " 是空气，不是容器"));
             return 0;
@@ -92,12 +87,10 @@ public final class ContainerCommand {
             return 0;
         }
 
-        ChatUtils.debug(String.format("容器 %s 在触及范围内（距离 %.2f / %.2f）",
-            pos.toShortString(), PlayerUtils.eyeDistanceTo(pos), PlayerUtils.reach()));
-
-        // 4. 交给动作执行
-        ActionManager.get().submit(new ContainerAction(pos, requests));
-        source.sendFeedback(Text.literal("已提交任务：从 " + pos.toShortString() + " 取 " + summary));
+        // 3. 交给动作执行
+        ActionManager.get().submit(new ContainerGetAction(pos, itemList));
+        source.sendFeedback(Text.literal("已提交任务：从 " + pos.toShortString() + " 取 "
+            + itemList.describe() + "（结束后会输出剩下的 item_list）"));
         return 1;
     }
 }

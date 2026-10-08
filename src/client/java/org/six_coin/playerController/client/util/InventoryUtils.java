@@ -1,61 +1,87 @@
 package org.six_coin.playerController.client.util;
 
 import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 
-/** 背包 / 容器相关的查询。 */
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 背包 / 容器相关的查询。
+ *
+ * <p>玩家背包的 27 个主格在 {@link PlayerInventory} 里的下标是 9..35（0..8 是快捷栏），
+ * 在界面里就是「{@code slot.inventory == 玩家背包} 且 {@code slot.getIndex()} 落在 9..35」的那些槽位。
+ */
 public final class InventoryUtils {
+
+    /** 主背包（27 格，不含快捷栏）在玩家背包里的起始下标。 */
+    public static final int MAIN_START = 9;
+
+    /** 主背包的结束下标（不含）。 */
+    public static final int MAIN_END = 36;
 
     private InventoryUtils() {
     }
 
-    /** 玩家背包（含盔甲、副手）里某种物品的总数。 */
-    public static int count(PlayerInventory inventory, Item item) {
-        int total = 0;
-        for (int i = 0; i < inventory.size(); i++) {
-            ItemStack stack = inventory.getStack(i);
-            if (!stack.isEmpty() && stack.isOf(item)) {
-                total += stack.getCount();
-            }
+    /** 玩家背包的 27 个主格（不含快捷栏）在这套界面里的槽位。 */
+    public static List<Slot> mainSlots(ScreenHandler handler, PlayerInventory inventory) {
+        List<Slot> result = new ArrayList<>();
+        for (Slot slot : handler.slots) {
+            if (isMainSlot(slot, inventory)) result.add(slot);
         }
-        return total;
+        return result;
+    }
+
+    /** 是不是玩家主背包（不含快捷栏）的槽位。 */
+    public static boolean isMainSlot(Slot slot, PlayerInventory inventory) {
+        if (slot.inventory != inventory) return false;
+        int index = slot.getIndex();
+        return index >= MAIN_START && index < MAIN_END;
+    }
+
+    /** 主背包里第一个空格，没有就返回 null。 */
+    public static Slot firstEmptyMainSlot(ScreenHandler handler, PlayerInventory inventory) {
+        for (Slot slot : mainSlots(handler, inventory)) {
+            if (slot.isEnabled() && slot.getStack().isEmpty()) return slot;
+        }
+        return null;
     }
 
     /**
-     * 在当前界面里找到属于“容器”（而不是玩家背包）的第一个装着该物品的槽位。
+     * 主背包里能再放下 amount 个这种物品的同类半叠（有的话优先用它，省格子）。
      *
-     * @return 槽位 id，找不到返回 -1
+     * @return 找不到返回 null
      */
-    public static int findContainerSlot(ScreenHandler handler, PlayerInventory playerInventory, Item item) {
-        for (int i = 0; i < handler.slots.size(); i++) {
-            Slot slot = handler.getSlot(i);
-            if (slot.inventory == playerInventory) continue;
-            ItemStack stack = slot.getStack();
-            if (!stack.isEmpty() && stack.isOf(item)) {
-                return i;
-            }
+    public static Slot mergeTarget(ScreenHandler handler, PlayerInventory inventory,
+                                   ItemStack stack, int amount) {
+        for (Slot slot : mainSlots(handler, inventory)) {
+            if (!slot.isEnabled()) continue;
+            ItemStack current = slot.getStack();
+            if (current.isEmpty()) continue;
+            if (!ItemStack.areItemsAndComponentsEqual(current, stack)) continue;
+            if (current.getMaxCount() - current.getCount() >= amount) return slot;
         }
-        return -1;
+        return null;
     }
 
-    /** 玩家背包里是否还有空位。 */
-    public static boolean hasEmptySlot(PlayerInventory inventory) {
-        for (int i = 0; i < inventory.size(); i++) {
-            if (inventory.getStack(i).isEmpty()) return true;
+    /** 容器自己的格子（不是玩家背包的那些）。 */
+    public static List<Slot> containerSlots(ScreenHandler handler) {
+        List<Slot> result = new ArrayList<>();
+        for (Slot slot : handler.slots) {
+            if (slot.inventory instanceof PlayerInventory) continue;
+            result.add(slot);
         }
-        return false;
+        return result;
     }
 
-    /** 玩家背包还能不能装下这种物品（有空位，或者有没满的同类堆叠）。 */
-    public static boolean canAccept(PlayerInventory inventory, Item item) {
-        for (int i = 0; i < inventory.size(); i++) {
-            ItemStack stack = inventory.getStack(i);
-            if (stack.isEmpty()) return true;
-            if (stack.isOf(item) && stack.getCount() < stack.getMaxCount()) return true;
-        }
-        return false;
+    /** 日志用：一个槽位的简单描述。 */
+    public static String describe(Slot slot) {
+        ItemStack stack = slot.getStack();
+        if (stack.isEmpty()) return "#" + slot.id + "（空）";
+        return "#" + slot.id + " "
+            + net.minecraft.registry.Registries.ITEM.getId(stack.getItem())
+            + " x" + stack.getCount();
     }
 }
