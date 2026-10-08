@@ -37,7 +37,8 @@ public final class ContainerCommand {
             .then(ClientCommandManager.literal("get")
                 .then(ClientCommandManager.literal("from_target")
                     .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
-                        .executes(ContainerCommand::getFromTarget))));
+                        .executes(ContainerCommand::getFromTarget))))
+            .then(ContainerCacheCommand.build());
     }
 
     private static int getFromTarget(CommandContext<FabricClientCommandSource> context) {

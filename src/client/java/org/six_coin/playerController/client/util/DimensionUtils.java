@@ -41,6 +41,21 @@ public final class DimensionUtils {
         };
     }
 
+    /**
+     * 排序用的维度优先级：主世界 0、下界 1、末地 2，其他维度排最后。
+     *
+     * <p>{@code optimize} / 缓存重排都用它，好让同一维度的东西挨在一起。
+     */
+    public static int orderOf(String dimension) {
+        if (dimension == null) return 3;
+        return switch (dimension) {
+            case OVERWORLD -> 0;
+            case NETHER -> 1;
+            case END -> 2;
+            default -> 3;
+        };
+    }
+
     /** 末地出生平台方块（末地传送门的落点）。 */
     public static BlockPos endSpawnPos() {
         return END_SPAWN_POS;

@@ -3,6 +3,7 @@ package org.six_coin.playerController.client.waypoint;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.util.DimensionUtils;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -684,7 +685,7 @@ public final class WaypointGraph {
     }
 
     /**
-     * 把所有普通路径点按 x, y, z 递增重新编号成 1, 2, 3, ...，
+     * 把所有普通路径点按「维度（主世界、下界、末地、其它）、x、y、z 递增」重新编号成 1, 2, 3, ...，
      * 边按两端 id 排序后重新编成 -1, -2, -3, ...，出生点记录一起改。
      */
     public void renumber() {
@@ -692,7 +693,10 @@ public final class WaypointGraph {
         for (Waypoint w : waypoints.values()) {
             if (!w.isSpawn()) normal.add(w);
         }
-        normal.sort(Comparator.comparingInt(Waypoint::x)
+        normal.sort(Comparator
+            .comparingInt((Waypoint w) -> DimensionUtils.orderOf(w.dimension()))
+            .thenComparing(Waypoint::dimension)
+            .thenComparingInt(Waypoint::x)
             .thenComparingInt(Waypoint::y)
             .thenComparingInt(Waypoint::z));
 

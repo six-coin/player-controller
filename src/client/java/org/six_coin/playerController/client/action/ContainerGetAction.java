@@ -5,16 +5,12 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import org.six_coin.playerController.client.container.ContainerOpener;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.InventoryUtils;
@@ -214,27 +210,7 @@ public class ContainerGetAction extends Action {
     // ------------------------------------------------------------------
 
     private void openContainer(MinecraftClient mc, ClientPlayerEntity player) {
-        PlayerUtils.lookAt(pos);
-        float yaw = player.getYaw();
-        float pitch = player.getPitch();
-
-        // 先把朝向同步给服务端，再发交互包
-        mc.getNetworkHandler().sendPacket(
-            new PlayerMoveC2SPacket.LookAndOnGround(yaw, pitch, player.isOnGround(), player.horizontalCollision));
-
-        Direction side = PlayerUtils.facingSide(pos);
-        Vec3d hitPos = Vec3d.ofCenter(pos).add(
-            side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5);
-        BlockHitResult hitResult = new BlockHitResult(hitPos, side, pos, false);
-
-        boolean wasSneaking = player.isSneaking();
-        player.setSneaking(false);
-        mc.interactionManager.interactBlock(player, Hand.MAIN_HAND, hitResult);
-        player.swingHand(Hand.MAIN_HAND);
-        player.setSneaking(wasSneaking);
-
-        ChatUtils.debug("已右键 %s（面 %s，yaw %.1f pitch %.1f），等容器界面",
-            pos.toShortString(), side.asString(), yaw, pitch);
+        ContainerOpener.open(mc, player, pos);
         openWaitTicks = 0;
         phase = Phase.OPENING;
     }

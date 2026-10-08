@@ -361,7 +361,7 @@ public final class WaypointManager {
     }
 
     /**
-     * 把当前 world 的 waypoints.json 备份到同目录下的 {@code waypoint_bak_<n>.json}（n 从 1 开始，
+     * 把当前 world 的 waypoints.json 备份到同目录下的 {@code waypoints_bak_<n>.json}（n 从 1 开始，
      * 挑第一个还没被占用的编号）。
      *
      * @return 备份文件路径；源文件不存在或者备份失败返回 null
@@ -381,7 +381,7 @@ public final class WaypointManager {
             int n = 1;
             Path target;
             do {
-                target = dir.resolve("waypoint_bak_" + n + ".json");
+                target = dir.resolve("waypoints_bak_" + n + ".json");
                 n++;
             } while (Files.exists(target));
 
