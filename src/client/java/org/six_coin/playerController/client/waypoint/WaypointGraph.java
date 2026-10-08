@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
@@ -68,7 +67,6 @@ public final class WaypointGraph {
     public void rebuildIndex() {
         syncSpawnWaypoint();
         syncSpawnEdge();
-        normalizeEndReturnEdges();
 
         byPos.clear();
         byName.clear();
@@ -156,29 +154,6 @@ public final class WaypointGraph {
         for (int id : existing) edges.remove(id);
         if (target == null) return;
         edges.put(nextEdgeId(), new Edge(SPAWN_ID, target.id(), false));
-    }
-
-    /**
-     * 末地回主世界的边必须指向出生点节点（0 号），不能指向出生点那个普通路径点。
-     *
-     * <p>旧存档迁移过来、或者手工改过文件时可能会出现指错的情况，这里统一掰正：
-     * 一条<b>单向</b>的<b>跨维度</b>边，如果终点正好是出生点的普通路径点，就改成指向 0 号。
-     */
-    private void normalizeEndReturnEdges() {
-        Waypoint target = spawnWaypointTarget();
-        if (target == null) return;
-
-        for (Edge e : edges.values()) {
-            if (e.bi()) continue;                 // 双向的跨维度边是下界传送门，不动
-            if (e.from() == SPAWN_ID) continue;   // 出生点自己的出口边
-            if (e.to() != target.id()) continue;
-
-            Waypoint from = waypoints.get(e.from());
-            if (from == null) continue;
-            if (from.dimension().equals(target.dimension())) continue;
-
-            e.remap(e.from(), SPAWN_ID);
-        }
     }
 
     /** 当前出生点对应的那个普通路径点。 */
@@ -438,90 +413,122 @@ public final class WaypointGraph {
     }
 
     // ------------------------------------------------------------------
-    // 加一段路（带重叠切分）
+    // 加一段路
     // ------------------------------------------------------------------
 
     /**
-     * 加入一段轴向移动，并按重叠情况切开已有边（只看同一维度、同一条线上的双向边）。
+     * 记录一段沿轴走路：起点、终点各 {@link #addWaypoint}（会自动把穿过它们的边切开），
+     * 连上这条边之后，再把它和其它边所有「重合」的位置也建成路径点。
      *
-     * @return 这次操作涉及到的切点
+     * <p>重合分两种，都取位置、不管方向：
+     * <ul>
+     *   <li><b>同一条线上重叠</b>：取重叠段的两端；</li>
+     *   <li><b>十字交叉</b>：取交点。</li>
+     * </ul>
+     *
+     * <p>建点的时候会顺手把穿过那个位置的边从中间切开，所以重叠 / 交叉的地方一定共用同一个路径点，
+     * 这样走出来的图是自动连通的（交叉路口也能拐弯）。
      */
-    public List<BlockPos> addSegment(String dimension, BlockPos pa, BlockPos pb) {
-        Direction.Axis axis = sharedAxis(pa, pb);
-        if (axis == null) {
+    public void addSegment(String dimension, BlockPos pa, BlockPos pb) {
+        if (sharedAxis(pa, pb) == null) {
             throw new IllegalArgumentException("两个路径点必须有两个坐标相等（只能沿一个轴移动）");
         }
 
-        splitEdgeAt(dimension, pa);
-        splitEdgeAt(dimension, pb);
+        Waypoint a = addWaypoint(dimension, pa);
+        Waypoint b = addWaypoint(dimension, pb);
+        addEdge(a.id(), b.id(), true);
 
-        int lo = Math.min(coord(pa, axis), coord(pb, axis));
-        int hi = Math.max(coord(pa, axis), coord(pb, axis));
-        if (lo == hi) {
-            throw new IllegalArgumentException("两个路径点不能是同一个位置");
-        }
-
-        // 1. 找出同一条线上、和新线段有正长度重叠的双向边
-        List<Integer> overlapping = new ArrayList<>();
-        for (Map.Entry<Integer, Edge> entry : new ArrayList<>(edges.entrySet())) {
-            Edge e = entry.getValue();
-            if (!e.bi()) continue;
-            Waypoint wa = get(e.from());
-            Waypoint wb = get(e.to());
-            if (wa == null || wb == null) continue;
-            if (!wa.dimension().equals(dimension) || !wb.dimension().equals(dimension)) continue;
-            if (!onLine(wa.pos(), pa, axis) || !onLine(wb.pos(), pa, axis)) continue;
-            int elo = Math.min(coord(wa, axis), coord(wb, axis));
-            int ehi = Math.max(coord(wa, axis), coord(wb, axis));
-            if (Math.min(ehi, hi) > Math.max(elo, lo)) overlapping.add(entry.getKey());
-        }
-
-        // 2. 收集切点：新线段两端、落在它内部的已有路径点、以及重叠边的端点
-        TreeSet<Integer> cuts = new TreeSet<>();
-        cuts.add(lo);
-        cuts.add(hi);
-
-        // 线上已经存在的路径点也要把新边切开（哪怕它身上一条边都没有）
-        for (Waypoint w : new ArrayList<>(waypoints.values())) {
-            if (w.isSpawn()) continue;
-            if (!w.dimension().equals(dimension)) continue;
-            if (!onLine(w.pos(), pa, axis)) continue;
-            int c = coord(w, axis);
-            if (c > lo && c < hi) cuts.add(c);
-        }
-
-        for (int edgeId : overlapping) {
-            Edge e = edges.get(edgeId);
-            if (e == null) continue;
-            for (int c : new int[]{coord(get(e.from()), axis), coord(get(e.to()), axis)}) {
-                if (c > lo && c < hi) cuts.add(c);
-            }
-        }
-
-        // 3. 拆掉重叠边，把落在新线段外面的部分补回去
-        for (int edgeId : overlapping) {
-            Edge e = edges.get(edgeId);
-            if (e == null) continue;
-            Waypoint wa = get(e.from());
-            Waypoint wb = get(e.to());
-            int elo = Math.min(coord(wa, axis), coord(wb, axis));
-            int ehi = Math.max(coord(wa, axis), coord(wb, axis));
-            removeEdge(edgeId);
-            if (elo < lo) addWalkEdge(dimension, pointAt(pa, axis, elo), pointAt(pa, axis, lo));
-            if (ehi > hi) addWalkEdge(dimension, pointAt(pa, axis, hi), pointAt(pa, axis, ehi));
-        }
-
-        // 4. 相邻切点两两连边
-        Integer prev = null;
-        for (int c : cuts) {
-            if (prev != null) addWalkEdge(dimension, pointAt(pa, axis, prev), pointAt(pa, axis, c));
-            prev = c;
+        for (BlockPos crossing : crossingPositions(dimension, a, b)) {
+            addWaypoint(dimension, crossing);
         }
         rebuildIndex();
+    }
 
+    /** 建一个路径点（已经有了就复用），并把穿过这一格的边从中间切开。 */
+    public Waypoint addWaypoint(String dimension, BlockPos pos) {
+        splitEdgeAt(dimension, pos);
+        return ensureWaypoint(dimension, pos);
+    }
+
+    /** 这条边和其它边重合的所有位置（同线重叠的两端、十字交叉的交点）。 */
+    private List<BlockPos> crossingPositions(String dimension, Waypoint a, Waypoint b) {
         List<BlockPos> result = new ArrayList<>();
-        for (int c : cuts) result.add(pointAt(pa, axis, c));
+
+        for (Edge edge : new ArrayList<>(edges.values())) {
+            if (edge.between(a.id(), b.id())) continue;   // 自己这条边不算
+            Waypoint p = get(edge.from());
+            Waypoint q = get(edge.to());
+            if (p == null || q == null) continue;
+            if (!p.dimension().equals(dimension) || !q.dimension().equals(dimension)) continue;
+
+            for (BlockPos pos : overlaps(a.pos(), b.pos(), p.pos(), q.pos())) {
+                if (!result.contains(pos)) result.add(pos);
+            }
+        }
         return result;
+    }
+
+    /**
+     * 两条轴向线段重合的位置。
+     *
+     * <p>共线重叠 → 重叠段两端；十字交叉 → 交点；其余情况（不共线、不共面、碰不到）→ 空。
+     */
+    private static List<BlockPos> overlaps(BlockPos a, BlockPos b, BlockPos p, BlockPos q) {
+        Direction.Axis first = sharedAxis(a, b);
+        Direction.Axis second = sharedAxis(p, q);
+        if (first == null || second == null) return List.of();
+
+        if (first == second) {
+            // 同一条线上：不在这个轴上的两个坐标都得一样
+            if (!onLine(a, p, first) || !onLine(b, p, first)) return List.of();
+            int lo = Math.max(low(a, b, first), low(p, q, first));
+            int hi = Math.min(high(a, b, first), high(p, q, first));
+            if (lo > hi) return List.of();
+            return List.of(pointAt(a, first, lo), pointAt(a, first, hi));
+        }
+
+        // 十字交叉：两条线还得在同一个平面上
+        Direction.Axis third = thirdAxis(first, second);
+        if (coord(a, third) != coord(p, third)) return List.of();
+
+        int firstValue = coord(p, first);     // 第二条线在 first 轴上是固定的
+        int secondValue = coord(a, second);   // 第一条线在 second 轴上是固定的
+        if (firstValue < low(a, b, first) || firstValue > high(a, b, first)) return List.of();
+        if (secondValue < low(p, q, second) || secondValue > high(p, q, second)) return List.of();
+
+        return List.of(at(first, firstValue, second, secondValue, third, coord(a, third)));
+    }
+
+    /** 三条轴里剩下的那一条。 */
+    private static Direction.Axis thirdAxis(Direction.Axis first, Direction.Axis second) {
+        for (Direction.Axis axis : Direction.Axis.values()) {
+            if (axis != first && axis != second) return axis;
+        }
+        return first;
+    }
+
+    /** 按三个轴上的值拼一个方块坐标。 */
+    private static BlockPos at(Direction.Axis a1, int v1, Direction.Axis a2, int v2,
+                               Direction.Axis a3, int v3) {
+        return new BlockPos(
+            valueOf(Direction.Axis.X, a1, v1, a2, v2, a3, v3),
+            valueOf(Direction.Axis.Y, a1, v1, a2, v2, a3, v3),
+            valueOf(Direction.Axis.Z, a1, v1, a2, v2, a3, v3));
+    }
+
+    private static int valueOf(Direction.Axis target, Direction.Axis a1, int v1,
+                               Direction.Axis a2, int v2, Direction.Axis a3, int v3) {
+        if (a1 == target) return v1;
+        if (a2 == target) return v2;
+        return v3;
+    }
+
+    private static int low(BlockPos a, BlockPos b, Direction.Axis axis) {
+        return Math.min(coord(a, axis), coord(b, axis));
+    }
+
+    private static int high(BlockPos a, BlockPos b, Direction.Axis axis) {
+        return Math.max(coord(a, axis), coord(b, axis));
     }
 
     /**

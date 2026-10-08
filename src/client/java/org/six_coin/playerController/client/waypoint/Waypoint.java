@@ -38,9 +38,8 @@ public final class Waypoint {
         this.id = id;
     }
 
-    /** 维度 id，例如 minecraft:overworld。老存档里没有这个字段时补成主世界。 */
+    /** 维度 id，例如 minecraft:overworld。 */
     public String dimension() {
-        if (dimension == null || dimension.isEmpty()) dimension = DimensionUtils.OVERWORLD;
         return dimension;
     }
 

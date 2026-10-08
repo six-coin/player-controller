@@ -2,9 +2,6 @@ package org.six_coin.playerController.client.waypoint;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
@@ -20,9 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 路径点管理器：负责当前 world 编号的读写、显示开关、编辑模式、各种边的记录。
@@ -122,24 +117,10 @@ public final class WaypointManager {
         }
 
         try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-            JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-
-            // 旧格式的 edges 是一个数组；新格式是「编号 -> 边」的对象
-            boolean oldFormat = root.has("edges") && root.get("edges").isJsonArray();
-
-            if (oldFormat) {
-                graph = migrateOldFormat(root);
-                loadedOk = true;
-                graph.rebuildIndex();
-                save();
-                ChatUtils.info("已把旧格式的 waypoints.json 迁移成新格式"
-                    + "（路径点重新编号为 1,2,3...，边合并成带编号的对象）");
-            } else {
-                WaypointGraph loaded = GSON.fromJson(root, WaypointGraph.class);
-                graph = loaded == null ? new WaypointGraph() : loaded;
-                loadedOk = true;
-                graph.rebuildIndex();
-            }
+            WaypointGraph loaded = GSON.fromJson(reader, WaypointGraph.class);
+            graph = loaded == null ? new WaypointGraph() : loaded;
+            loadedOk = true;
+            graph.rebuildIndex();
 
             ChatUtils.debug("已加载 world_" + world + " 的路径点: "
                 + graph.normalCount() + " 个点，" + graph.edgeCount() + " 条边");
@@ -149,123 +130,6 @@ public final class WaypointManager {
             ChatUtils.error("读取路径点失败：" + e.getMessage()
                 + " —— 这一轮不会覆盖原文件，请把文件发给我看看");
         }
-    }
-
-    /**
-     * 把上一版的格式迁移过来。
-     *
-     * <p>旧格式：{@code edges} 是数组（{@code {a,b}}），{@code oneWayEdges} 是数组（{@code {from,to}}），
-     * 出生点节点编号是 -1，另有 {@code spawns} / {@code currentSpawn}。
-     *
-     * <p>新格式：路径点 1,2,3...（出生点节点 0），边是「编号 -1,-2,-3... -&gt; {from,to,bi}」的对象，
-     * 出生点用顶层的 {@code spawn} 记录对应的普通路径点。
-     */
-    private static WaypointGraph migrateOldFormat(JsonObject root) {
-        WaypointGraph graph = new WaypointGraph();
-        Map<Integer, Waypoint> byOldId = new HashMap<>();
-
-        JsonObject oldWaypoints = root.has("waypoints") && root.get("waypoints").isJsonObject()
-            ? root.getAsJsonObject("waypoints")
-            : new JsonObject();
-
-        List<Integer> oldIds = new ArrayList<>();
-        for (String key : oldWaypoints.keySet()) {
-            try {
-                oldIds.add(Integer.parseInt(key));
-            } catch (NumberFormatException ignored) {
-                // 忽略不是数字的键
-            }
-        }
-        oldIds.sort(Integer::compareTo);
-
-        // 普通路径点：按旧编号升序建，新编号自然就是 1,2,3...
-        for (int oldId : oldIds) {
-            if (oldId < 0) continue;
-            JsonObject o = oldWaypoints.getAsJsonObject(String.valueOf(oldId));
-            if (o == null) continue;
-
-            Waypoint w = graph.ensureWaypoint(
-                optString(o, "dimension", DimensionUtils.OVERWORLD),
-                new BlockPos(optInt(o, "x"), optInt(o, "y"), optInt(o, "z")));
-            String name = optString(o, "name", null);
-            if (name != null && WaypointGraph.isValidName(name)) {
-                graph.setName(w.id(), name);
-            }
-            byOldId.put(oldId, w);
-        }
-
-        // 旧的 -1 号：出生点。它对应的普通路径点就是新的出生点目标
-        Waypoint spawnTarget = null;
-        String oldSpawnName = null;
-        for (int oldId : oldIds) {
-            if (oldId >= 0) continue;
-            JsonObject o = oldWaypoints.getAsJsonObject(String.valueOf(oldId));
-            if (o == null) continue;
-
-            spawnTarget = graph.ensureWaypoint(
-                optString(o, "dimension", DimensionUtils.OVERWORLD),
-                new BlockPos(optInt(o, "x"), optInt(o, "y"), optInt(o, "z")));
-            oldSpawnName = optString(o, "name", null);
-        }
-        if (spawnTarget != null) {
-            if (oldSpawnName != null && !spawnTarget.hasName()
-                && WaypointGraph.isValidName(oldSpawnName)) {
-                graph.setName(spawnTarget.id(), oldSpawnName);
-            }
-            graph.setSpawn(spawnTarget.id());
-        }
-
-        // 关键：边里引用旧 -1 的，要映射到新的出生点节点（0 号），
-        // 而不是映射到出生点那个普通路径点 —— 末地回主世界的边必须指向 0 号。
-        Waypoint spawnNode = graph.spawnNode();
-        if (spawnNode != null) {
-            for (int oldId : oldIds) {
-                if (oldId < 0) byOldId.put(oldId, spawnNode);
-            }
-        }
-
-        // 无向边
-        if (root.has("edges") && root.get("edges").isJsonArray()) {
-            for (JsonElement element : root.getAsJsonArray("edges")) {
-                if (!element.isJsonObject()) continue;
-                JsonObject o = element.getAsJsonObject();
-                Waypoint a = byOldId.get(optInt(o, "a"));
-                Waypoint b = byOldId.get(optInt(o, "b"));
-                if (a == null || b == null || a.id() == b.id()) continue;
-                graph.addEdge(a.id(), b.id(), true);
-            }
-        }
-
-        // 单向边
-        if (root.has("oneWayEdges") && root.get("oneWayEdges").isJsonArray()) {
-            for (JsonElement element : root.getAsJsonArray("oneWayEdges")) {
-                if (!element.isJsonObject()) continue;
-                JsonObject o = element.getAsJsonObject();
-                Waypoint a = byOldId.get(optInt(o, "from"));
-                Waypoint b = byOldId.get(optInt(o, "to"));
-                if (a == null || b == null || a.id() == b.id()) continue;
-                graph.addEdge(a.id(), b.id(), false);
-            }
-        }
-
-        return graph;
-    }
-
-    private static int optInt(JsonObject object, String key) {
-        JsonElement element = object.get(key);
-        if (element == null || !element.isJsonPrimitive()) return 0;
-        try {
-            return element.getAsInt();
-        } catch (Exception e) {
-            return 0;
-        }
-    }
-
-    @Nullable
-    private static String optString(JsonObject object, String key, @Nullable String fallback) {
-        JsonElement element = object.get(key);
-        if (element == null || element.isJsonNull() || !element.isJsonPrimitive()) return fallback;
-        return element.getAsString();
     }
 
     /** 切换世界配置：先把旧的存起来，再读新的。 */
@@ -296,7 +160,11 @@ public final class WaypointManager {
     // ------------------------------------------------------------------
 
     /**
-     * 编辑模式下把一段移动记录成双向边（会把重叠的边切开）。
+     * 编辑模式下把一段移动记成双向走路边。
+     *
+     * <p>具体做法见 {@link WaypointGraph#addSegment(String, BlockPos, BlockPos)}：
+     * 起点、终点各建一个路径点（会把穿过它们的边切开），再把这条边和其它边重合的位置也建成路径点，
+     * 所以走出来的图一定是连通的。
      *
      * <p>只有 {@code /pc move <轴>} / {@code /pc move face} 会走到这里（也就是
      * {@code MoveAction}）；{@code /pc move to} 走的都是已知边，不记录。
