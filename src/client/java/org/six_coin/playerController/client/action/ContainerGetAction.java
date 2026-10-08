@@ -10,6 +10,7 @@ import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
+import org.six_coin.playerController.client.container.ContainerCacheUpdater;
 import org.six_coin.playerController.client.container.ContainerOpener;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -190,6 +191,10 @@ public class ContainerGetAction extends Action {
 
     @Override
     protected void onEnd() {
+        // 拿完东西以后，这个容器要是已经在缓存里，就把缓存里的物品列表刷新一遍
+        if (handler != null) {
+            ContainerCacheUpdater.refresh(MinecraftClient.getInstance(), pos, handler);
+        }
         closeScreen();
 
         if (stopReason != null) {

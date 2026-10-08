@@ -3,7 +3,7 @@ package org.six_coin.playerController.client.container;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ChestBlock;
-import net.minecraft.inventory.Inventory;
+import net.minecraft.block.enums.ChestType;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -26,10 +26,7 @@ public final class ContainerTypes {
         "minecraft:barrel"
     );
 
-    /** 大箱子两半可能的水平方向。 */
-    public static final Direction[] HORIZONTAL = {
-        Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST
-    };
+    /** 大箱子两半的方向就按方块状态算，见 {@link #otherHalf(World, BlockPos)}。 */
 
     private ContainerTypes() {
     }
@@ -50,21 +47,29 @@ public final class ContainerTypes {
     }
 
     /**
-     * 这两个位置是不是同一个大箱子的两半。
+     * 大箱子的另一半在哪一格。
      *
-     * <p>用的是原版的连接判断（只看方块状态 / 相邻方块，和里面的东西无关，所以客户端也能用）。
+     * <p>直接看方块状态（跟原版一个算法）：
+     * <ul>
+     *   <li>{@code type=left} → 另一半在 {@code facing} 顺时针 90° 那边
+     *       （比如 facing=north + left → 东边，也就是 x+1）；</li>
+     *   <li>{@code type=right} → 另一半在 {@code facing} 逆时针 90° 那边。</li>
+     * </ul>
+     *
+     * @return 另一半的位置；这个位置不是箱子、或者箱子是单格的返回 null
      */
-    public static boolean sameDoubleChest(World world, BlockPos a, BlockPos b) {
-        Inventory first = chestInventory(world, a);
-        if (first == null) return false;
-        return first == chestInventory(world, b);
-    }
-
-    /** 这个位置的箱子（含它连着的另一半）的物品栏；不是箱子返回 null。 */
     @Nullable
-    private static Inventory chestInventory(World world, BlockPos pos) {
+    public static BlockPos otherHalf(World world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
-        if (!(state.getBlock() instanceof ChestBlock chestBlock)) return null;
-        return ChestBlock.getInventory(chestBlock, state, world, pos, true);
+        if (!(state.getBlock() instanceof ChestBlock)) return null;
+
+        ChestType type = state.get(ChestBlock.CHEST_TYPE);
+        if (type == ChestType.SINGLE) return null;
+
+        Direction facing = state.get(ChestBlock.FACING);
+        Direction direction = type == ChestType.LEFT
+            ? facing.rotateYClockwise()
+            : facing.rotateYCounterclockwise();
+        return pos.offset(direction);
     }
 }

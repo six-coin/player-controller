@@ -294,8 +294,8 @@ public final class ContainerCacheManager {
     /**
      * 把界面里容器格子里的东西统计出来（大箱子的话 54 格都在里面）。
      *
-     * <p>规则：箱子里的物品和潜影盒里的物品都算；潜影盒本身只在非空时算一个
-     * （它虽然是堆叠上限 1，这里破例）；堆叠上限 1 的、改过名字的物品不算。
+     * <p>规则：箱子里的物品和潜影盒里的物品都算；<b>潜影盒本身永远不记</b>
+     * （不管空的还是装着东西的）；堆叠上限 1 的、改过名字的物品不算。
      */
     public static Map<String, Integer> snapshot(ScreenHandler handler) {
         Map<String, Integer> items = new TreeMap<>();
@@ -309,9 +309,7 @@ public final class ContainerCacheManager {
         if (stack.isEmpty()) return;
 
         if (ShulkerUtils.isShulkerBox(stack)) {
-            if (!ShulkerUtils.contents(stack).isEmpty() && ItemRules.customNameOf(stack) == null) {
-                add(items, Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount());
-            }
+            // 盒子本身不记，只记里面要看的东西（空盒子就什么都不记）
             for (ItemStack inner : ShulkerUtils.consideredContents(stack)) {
                 add(items, Registries.ITEM.getId(inner.getItem()).toString(), inner.getCount());
             }
