@@ -17,7 +17,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 路径点管理器：负责当前 world 编号的读写、显示开关、编辑模式、各种边的记录。
@@ -289,5 +291,106 @@ public final class WaypointManager {
         save();
         ChatUtils.debug("已取消出生点设置");
         return true;
+    }
+
+    // ------------------------------------------------------------------
+    // 可达性 / 清理
+    // ------------------------------------------------------------------
+
+    /**
+     * 从这些起点出发不可达的路径点和边。
+     *
+     * @param waypoints 可以删的不可达路径点
+     * @param edges     可以删的不可达边
+     * @param skipped   不可达但受保护、不会删的路径点
+     */
+    public record Unreachable(List<Waypoint> waypoints,
+                              List<WaypointGraph.EdgeEntry> edges,
+                              List<Waypoint> skipped) {
+    }
+
+    /** 这个路径点是不是「不能删」的：出生点节点、当前出生点、末地初始平台。 */
+    public boolean isProtected(Waypoint waypoint) {
+        if (waypoint == null) return true;
+        if (waypoint.isSpawn()) return true;   // 0 号出生点节点
+
+        Waypoint spawn = graph.spawnWaypointTarget();
+        if (spawn != null && spawn.id() == waypoint.id()) return true;
+
+        return waypoint.dimension().equals(DimensionUtils.END)
+            && waypoint.pos().equals(DimensionUtils.endSpawnPos());
+    }
+
+    /**
+     * 从这些起点出发，找出不可达的路径点和边。
+     *
+     * <p>路径点不可达 = 从起点沿着走得过去的方向到不了它（出生点节点、当前出生点、末地平台会跳过，
+     * 放进 {@code skipped}）。
+     *
+     * <p>边不可达 = 它的起点不可达（也就是这条边走不了）；从出生点节点（0 号）出发的那条边是自动生成的，
+     * 不算，受保护的点身上的边也不动。
+     */
+    public Unreachable findUnreachable(Collection<Integer> starts) {
+        Set<Integer> reachable = graph.reachableFrom(starts);
+
+        List<Waypoint> waypoints = new ArrayList<>();
+        List<Waypoint> skipped = new ArrayList<>();
+        for (Waypoint waypoint : graph.allWaypoints()) {
+            if (waypoint.isSpawn()) continue;                  // 出生点节点不参与
+            if (reachable.contains(waypoint.id())) continue;    // 走得到
+            if (isProtected(waypoint)) {
+                skipped.add(waypoint);
+                continue;
+            }
+            waypoints.add(waypoint);
+        }
+
+        List<WaypointGraph.EdgeEntry> edges = new ArrayList<>();
+        for (WaypointGraph.EdgeEntry entry : graph.allEdges()) {
+            Edge edge = entry.edge();
+            if (edge.touches(WaypointGraph.SPAWN_ID)) continue;   // 出生点自动生成的那条边
+            if (reachable.contains(edge.from())) continue;        // 从可达的点出发，这条边走得了
+
+            Waypoint from = graph.get(edge.from());
+            Waypoint to = graph.get(edge.to());
+            if (isProtected(from) || isProtected(to)) continue;   // 受保护的点身上的边不动
+
+            edges.add(entry);
+        }
+        return new Unreachable(waypoints, edges, skipped);
+    }
+
+    /**
+     * 把当前 world 的 waypoints.json 备份到同目录下的 {@code waypoint_bak_<n>.json}（n 从 1 开始，
+     * 挑第一个还没被占用的编号）。
+     *
+     * @return 备份文件路径；源文件不存在或者备份失败返回 null
+     */
+    @Nullable
+    public Path backupFile() {
+        int world = loadedWorld >= 0 ? loadedWorld : PlayerControllerConfig.getWorld();
+        Path dir = worldDir(world);
+        Path source = worldFile(world);
+        if (!Files.exists(source)) {
+            ChatUtils.debug("没有可备份的路径点文件：" + source);
+            return null;
+        }
+
+        try {
+            Files.createDirectories(dir);
+            int n = 1;
+            Path target;
+            do {
+                target = dir.resolve("waypoint_bak_" + n + ".json");
+                n++;
+            } while (Files.exists(target));
+
+            Files.copy(source, target);
+            ChatUtils.debug("已备份路径点文件：" + source + " → " + target);
+            return target;
+        } catch (IOException e) {
+            ChatUtils.error("备份路径点文件失败: " + e.getMessage());
+            return null;
+        }
     }
 }

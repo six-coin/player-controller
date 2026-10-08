@@ -4,8 +4,11 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -268,6 +271,28 @@ public final class WaypointGraph {
             if (e.between(a, b)) return true;
         }
         return false;
+    }
+
+    /**
+     * 从这些点出发，沿着「走得过去」的方向能到达的所有路径点（含起点自己）。
+     *
+     * <p>走的方向按 {@link #outgoing(int)} 来：双向边两边都能走，单向边只能 from → to，
+     * 跨维度（传送门）边也算。
+     */
+    public Set<Integer> reachableFrom(Collection<Integer> starts) {
+        Set<Integer> seen = new LinkedHashSet<>();
+        Deque<Integer> queue = new ArrayDeque<>();
+
+        for (int id : starts) {
+            if (waypoints.containsKey(id) && seen.add(id)) queue.add(id);
+        }
+        while (!queue.isEmpty()) {
+            int id = queue.poll();
+            for (int next : outgoing(id)) {
+                if (seen.add(next)) queue.add(next);
+            }
+        }
+        return seen;
     }
 
     /** 找一条能从 from 走到 to 的边（返回它的编号）。 */

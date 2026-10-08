@@ -22,7 +22,10 @@ import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointGraph;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
 
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * {@code /pc w ...} —— 路径点、边、出生点，全部走这一套命令。
@@ -46,6 +49,8 @@ import java.util.List;
  * /pc w del &lt;id&gt;
  * /pc w optimize
  * /pc w list
+ * /pc w del_unreachable_list
+ * /pc w del_unreachable_execute
  * </pre>
  */
 public final class WaypointsCommand {
@@ -106,7 +111,11 @@ public final class WaypointsCommand {
             .then(ClientCommandManager.literal("optimize")
                 .executes(WaypointsCommand::optimize))
             .then(ClientCommandManager.literal("list")
-                .executes(WaypointsCommand::list));
+                .executes(WaypointsCommand::list))
+            .then(ClientCommandManager.literal("del_unreachable_list")
+                .executes(WaypointsCommand::delUnreachableList))
+            .then(ClientCommandManager.literal("del_unreachable_execute")
+                .executes(WaypointsCommand::delUnreachableExecute));
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> waypointAdd() {
@@ -581,6 +590,187 @@ public final class WaypointsCommand {
             source.sendFeedback(spawnLine(spawn));
         }
         return 1;
+    }
+
+    // ------------------------------------------------------------------
+    // 清理不可达的路径点 / 边
+    // ------------------------------------------------------------------
+
+    /** {@code /pc w del_unreachable_list}：列出从玩家现在的位置出发不可达的路径点和边。 */
+    private static int delUnreachableList(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+
+        List<Waypoint> starts = startWaypoints(source);
+        if (starts == null) return 0;
+
+        WaypointManager manager = WaypointManager.get();
+        WaypointGraph graph = manager.graph();
+        List<Integer> ids = idsOf(starts);
+        WaypointManager.Unreachable result = manager.findUnreachable(ids);
+
+        Set<Integer> reachable = graph.reachableFrom(ids);
+        int reachableNormal = 0;
+        for (Waypoint waypoint : graph.allWaypoints()) {
+            if (!waypoint.isSpawn() && reachable.contains(waypoint.id())) reachableNormal++;
+        }
+
+        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7起点 " + describeStarts(starts)
+            + "：可达 " + reachableNormal + " 个路径点"));
+        source.sendFeedback(Text.literal("§7不可达的路径点（" + result.waypoints().size() + " 个）："));
+        sendWaypointLines(source, result.waypoints());
+        if (!result.skipped().isEmpty()) {
+            source.sendFeedback(Text.literal("§7不可达但受保护、不会删的路径点（"
+                + result.skipped().size() + " 个）："));
+            sendWaypointLines(source, result.skipped());
+        }
+        source.sendFeedback(Text.literal("§7不可达的边（" + result.edges().size() + " 条）："));
+        sendEdgeLines(source, graph, result.edges());
+        return 1;
+    }
+
+    /** {@code /pc w del_unreachable_execute}：先把 waypoints.json 备份，再把不可达的点和边全删掉。 */
+    private static int delUnreachableExecute(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+
+        List<Waypoint> starts = startWaypoints(source);
+        if (starts == null) return 0;
+
+        WaypointManager manager = WaypointManager.get();
+        WaypointGraph graph = manager.graph();
+        WaypointManager.Unreachable result = manager.findUnreachable(idsOf(starts));
+
+        if (result.waypoints().isEmpty() && result.edges().isEmpty()) {
+            source.sendFeedback(Text.literal("从 " + describeStarts(starts)
+                + " 出发没有不可达的路径点和边，什么都没删（也没备份）"));
+            reportSkipped(source, result.skipped());
+            return 1;
+        }
+
+        // 1. 先备份
+        Path backup = manager.backupFile();
+        if (backup == null) {
+            source.sendError(Text.literal("备份路径点文件失败（文件不存在或者写不进去），已中止，什么都没删"));
+            return 0;
+        }
+        source.sendFeedback(Text.literal("已备份到 " + backup));
+
+        // 2. 删点（挂在上面的边会一起删掉），再删剩下的不可达边
+        int beforeNodes = graph.normalCount();
+        int beforeEdges = graph.edgeCount();
+
+        int removedNodes = 0;
+        for (Waypoint waypoint : result.waypoints()) {
+            ChatUtils.debug("删除不可达路径点 #" + waypoint.id() + " "
+                + DimensionUtils.display(waypoint.dimension()) + " " + waypoint.coordString());
+            if (graph.removeWaypoint(waypoint.id())) removedNodes++;
+        }
+
+        int removedEdges = 0;
+        for (WaypointGraph.EdgeEntry entry : result.edges()) {
+            ChatUtils.debug("删除不可达边 #" + entry.id() + " " + describeEdge(graph, entry.edge()));
+            if (graph.removeEdge(entry.id())) removedEdges++;
+        }
+        manager.save();
+
+        source.sendFeedback(Text.literal("已删除 " + removedNodes + " 个不可达路径点；路径点 "
+            + beforeNodes + " → " + graph.normalCount() + "，边 " + beforeEdges + " → " + graph.edgeCount()
+            + "（删点会连带删掉挂在上面的边，另外单独删了 " + removedEdges + " 条不可达边）"));
+        reportSkipped(source, result.skipped());
+        return 1;
+    }
+
+    /** 没删的受保护点提醒一下。 */
+    private static void reportSkipped(FabricClientCommandSource source, List<Waypoint> skipped) {
+        if (skipped.isEmpty()) return;
+
+        List<String> ids = new ArrayList<>();
+        for (Waypoint waypoint : skipped) ids.add("#" + waypoint.id());
+        source.sendFeedback(Text.literal("有 " + skipped.size() + " 个不可达但受保护的路径点没删（"
+            + String.join("、", ids) + "）：出生点节点、当前出生点、末地初始平台；"
+            + "要删当前出生点的话先用 spawn_set_* 换一个"));
+    }
+
+    /**
+     * 玩家现在算站在哪：站在路径点上就是它；站在某条边中间就是这条边的两个端点
+     * （两边都走得过去）；都不在就报错并返回 null。
+     */
+    @Nullable
+    private static List<Waypoint> startWaypoints(FabricClientCommandSource source) {
+        BlockPos pos = PlayerUtils.currentBlockPos();
+        if (pos == null) {
+            source.sendError(Text.literal("拿不到玩家位置"));
+            return null;
+        }
+
+        WaypointGraph graph = WaypointManager.get().graph();
+        String dimension = DimensionUtils.current();
+
+        Waypoint here = graph.at(dimension, pos);
+        if (here != null) return List.of(here);
+
+        WaypointGraph.EdgeEntry edge = graph.edgeAt(dimension, pos);
+        if (edge == null) {
+            source.sendError(Text.literal("你现在所在的 " + pos.toShortString()
+                + " 既不是路径点，也不在任何边上，算不出可达范围"));
+            return null;
+        }
+
+        List<Waypoint> starts = new ArrayList<>();
+        Waypoint from = graph.get(edge.edge().from());
+        Waypoint to = graph.get(edge.edge().to());
+        if (from != null) starts.add(from);
+        if (to != null) starts.add(to);
+
+        ChatUtils.debug("站在边 #" + edge.id() + " 上，可达范围按两端算");
+        return starts;
+    }
+
+    private static List<Integer> idsOf(List<Waypoint> waypoints) {
+        List<Integer> ids = new ArrayList<>();
+        for (Waypoint waypoint : waypoints) ids.add(waypoint.id());
+        return ids;
+    }
+
+    private static String describeStarts(List<Waypoint> starts) {
+        if (starts.size() == 1) {
+            Waypoint only = starts.get(0);
+            return "#" + only.id() + " " + only.coordString();
+        }
+        return "边上的两端 #" + starts.get(0).id() + " / #" + starts.get(1).id();
+    }
+
+    /** 按 {@code list} 的格式打印一批路径点。 */
+    private static void sendWaypointLines(FabricClientCommandSource source, List<Waypoint> waypoints) {
+        if (waypoints.isEmpty()) {
+            source.sendFeedback(Text.literal("  §8（空）"));
+            return;
+        }
+        int shown = 0;
+        for (Waypoint waypoint : waypoints) {
+            if (shown++ >= LIST_LIMIT) {
+                source.sendFeedback(Text.literal("  §8… 还有 "
+                    + (waypoints.size() - LIST_LIMIT) + " 个没有显示"));
+                break;
+            }
+            source.sendFeedback(waypointLine(waypoint));
+        }
+    }
+
+    /** 按 {@code list} 的格式打印一批边。 */
+    private static void sendEdgeLines(FabricClientCommandSource source, WaypointGraph graph,
+                                      List<WaypointGraph.EdgeEntry> edges) {
+        if (edges.isEmpty()) {
+            source.sendFeedback(Text.literal("  §8（空）"));
+            return;
+        }
+        int shown = 0;
+        for (WaypointGraph.EdgeEntry entry : edges) {
+            if (shown++ >= LIST_LIMIT) {
+                source.sendFeedback(Text.literal("  §8… 还有 " + (edges.size() - LIST_LIMIT) + " 条没有显示"));
+                break;
+            }
+            source.sendFeedback(edgeLine(graph, entry));
+        }
     }
 
     /** {@code {id} [设置名称] [删除] [删除名称] [主] [1 1 1] (name)} */
