@@ -32,9 +32,9 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " move face <blocks> §8- §7朝当前朝向移动（抬头/低头就是上下）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " move to <x y z|name> §8- §7沿路径点图走过去（走的都是已知边，不记录任何东西）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " move cancel §8- §7取消所有移动任务"));
-                source.sendFeedback(Text.literal("§7  /" + name + " container <x> <y> <z> <item_list> §8- §7从容器取物品"));
+                source.sendFeedback(Text.literal("§7  /" + name + " container <x> <y> <z> <item_list> §8- §7从容器取物品（x y z 一次 Tab 补全）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " w ... §8- §7路径点 / 边 / 出生点（等价写法：/" + name + " waypoints ...）"));
-                source.sendFeedback(Text.literal("§7    §7子命令：waypoint_add、waypoint_add_here、waypoint_name、spawn_set_by_name、edge_add、del、optimize、list、show、edit"));
+                source.sendFeedback(Text.literal("§7    §7子命令：waypoint_add、waypoint_add_here、waypoint_name、waypoint_name_del、spawn_set_by_name、edge_add、del、optimize、list、show、edit"));
                 source.sendFeedback(Text.literal("§7  /" + name + " config ... §8- §7配置（debug / world / actions move_speed、interaction_range）"));
                 source.sendFeedback(Text.literal("§7  item_list 例：§fstone=64,dirt=32,oak_log"));
                 return 1;

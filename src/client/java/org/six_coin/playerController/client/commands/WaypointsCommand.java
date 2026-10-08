@@ -37,6 +37,8 @@ import java.util.List;
  * /pc w waypoint_add_here [name]
  * /pc w waypoint_name &lt;id&gt; &lt;name&gt;
  * /pc w waypoint_name_here &lt;name&gt;
+ * /pc w waypoint_name_del &lt;id&gt;
+ * /pc w waypoint_name_del_here
  * /pc w spawn_set_by_name &lt;name&gt;
  * /pc w spawn_set_by_id &lt;id&gt;
  * /pc w spawn_del
@@ -77,6 +79,11 @@ public final class WaypointsCommand {
             .then(ClientCommandManager.literal("waypoint_name_here")
                 .then(ClientCommandManager.argument("name", StringArgumentType.word())
                     .executes(WaypointsCommand::waypointNameHere)))
+            .then(ClientCommandManager.literal("waypoint_name_del")
+                .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
+                    .executes(WaypointsCommand::waypointNameDel)))
+            .then(ClientCommandManager.literal("waypoint_name_del_here")
+                .executes(WaypointsCommand::waypointNameDelHere))
             .then(ClientCommandManager.literal("waypoint_del_target")
                 .executes(WaypointsCommand::waypointDelTarget))
             .then(ClientCommandManager.literal("spawn_set_by_name")
@@ -260,6 +267,61 @@ public final class WaypointsCommand {
         }
         WaypointManager.get().save();
         source.sendFeedback(Text.literal("已把 #" + waypoint.id() + " 命名为 " + name));
+        return 1;
+    }
+
+    /** {@code /pc w waypoint_name_del <id>}：删掉某个路径点的名字。 */
+    private static int waypointNameDel(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        int id = IntegerArgumentType.getInteger(context, "id");
+
+        WaypointGraph graph = WaypointManager.get().graph();
+        Waypoint waypoint = graph.get(id);
+        if (waypoint == null) {
+            source.sendError(Text.literal("没有 #" + id + " 这个路径点"));
+            return 0;
+        }
+        return deleteName(source, graph, waypoint);
+    }
+
+    /** {@code /pc w waypoint_name_del_here}：删掉脚下这个路径点的名字。 */
+    private static int waypointNameDelHere(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+
+        BlockPos pos = PlayerUtils.currentBlockPos();
+        if (pos == null) {
+            source.sendError(Text.literal("拿不到玩家位置"));
+            return 0;
+        }
+
+        WaypointGraph graph = WaypointManager.get().graph();
+        Waypoint waypoint = graph.at(DimensionUtils.current(), pos);
+        if (waypoint == null) {
+            source.sendError(Text.literal("你现在站的 " + pos.toShortString() + " 不是路径点"));
+            return 0;
+        }
+        return deleteName(source, graph, waypoint);
+    }
+
+    /** 清掉一个路径点的名字（出生点节点除外）。 */
+    private static int deleteName(FabricClientCommandSource source, WaypointGraph graph, Waypoint waypoint) {
+        int id = waypoint.id();
+
+        if (waypoint.isSpawn()) {
+            source.sendError(Text.literal("0 号是出生点节点，名字跟着出生点走，不能单独改"));
+            return 0;
+        }
+        if (!waypoint.hasName()) {
+            source.sendFeedback(Text.literal("#" + id + " 本来就没有名字"));
+            return 1;
+        }
+        String oldName = waypoint.name();
+        if (!graph.setName(id, null)) {
+            source.sendError(Text.literal("删除 #" + id + " 的名字失败"));
+            return 0;
+        }
+        WaypointManager.get().save();
+        source.sendFeedback(Text.literal("已删除 #" + id + " 的名字（" + oldName + "）"));
         return 1;
     }
 
@@ -521,7 +583,7 @@ public final class WaypointsCommand {
         return 1;
     }
 
-    /** {@code {id} [设置名称] [删除] [主] [1 1 1] (name)} */
+    /** {@code {id} [设置名称] [删除] [删除名称] [主] [1 1 1] (name)} */
     private static Text waypointLine(Waypoint waypoint) {
         MutableText line = Text.literal(" " + waypoint.id() + " ").formatted(Formatting.GRAY);
 
@@ -531,6 +593,11 @@ public final class WaypointsCommand {
         line.append(Text.literal(" "));
         line.append(actionButton("删除", ROOT + "del " + waypoint.id(),
             "点击把删除命令填到聊天栏"));
+        if (waypoint.hasName()) {
+            line.append(Text.literal(" "));
+            line.append(actionButton("删除名称", ROOT + "waypoint_name_del " + waypoint.id(),
+                "点击把删除名称的命令填到聊天栏（" + ROOT + "waypoint_name_del <id>）"));
+        }
 
         line.append(Text.literal(" "));
         line.append(dimensionTag(waypoint.dimension()));
