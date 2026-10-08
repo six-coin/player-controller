@@ -42,8 +42,8 @@ import java.util.List;
  *       每个物品最多扣到 0，不会扣成负数。</li>
  * </ol>
  *
- * <p>不看的东西（见 {@link ItemRules}）：堆叠上限 1 的物品、命名过的物品。潜影盒自己也是
- * 堆叠上限 1 的物品，但它走潜影盒那条规则；盒子要是被命名过，一样无视。
+ * <p>不看的东西（见 {@link ItemRules}）：堆叠上限 1 的物品、改过名字（custom_name）的物品。
+ * 潜影盒自己也是堆叠上限 1 的物品，但它走潜影盒那条规则；盒子要是改过名字，一样无视。
  *
  * <p><b>绝对不碰快捷栏</b>：不用 shift 点击（{@code QUICK_MOVE}，服务端会往快捷栏塞），
  * 所有往背包放的操作都只点主背包 27 格。
@@ -302,11 +302,11 @@ public class ContainerGetAction extends Action {
 
             // ① 潜影盒：盒子里有要的东西就整个搬走。
             //    潜影盒自己也是堆叠上限 1 的物品，所以它先走这条规则；
-            //    不过盒子要是被命名过，按「命名过的物品一律无视」处理。
+            //    不过盒子要是改过名字，按「改过名字的一律无视」处理。
             if (ShulkerUtils.isShulkerBox(stack)) {
-                String boxName = ItemRules.nameOf(stack);
+                String boxName = ItemRules.customNameOf(stack);
                 if (boxName != null) {
-                    ChatUtils.debug("第 %d 格是潜影盒但有名字（%s），无视", slot.id, boxName);
+                    ChatUtils.debug("第 %d 格是潜影盒但改过名字（%s），无视", slot.id, boxName);
                     slotCursor++;
                     continue;
                 }
@@ -325,7 +325,7 @@ public class ContainerGetAction extends Action {
                 break;
             }
 
-            // ② 普通物品：堆叠上限 1 的、命名过的都当没看见
+            // ② 普通物品：堆叠上限 1 的、改过名字的都当没看见
             if (ItemRules.isIgnored(stack)) {
                 ChatUtils.debug("第 %d 格 %s x%d 无视（%s）", slot.id,
                     Registries.ITEM.getId(stack.getItem()), stack.getCount(),

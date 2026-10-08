@@ -11,13 +11,17 @@ import org.jetbrains.annotations.Nullable;
  * <p>两条：
  * <ul>
  *   <li><b>堆叠上限是 1 的物品</b>（工具、盔甲、床……）—— 无视；</li>
- *   <li><b>命名过的物品</b>（有 custom_name 或者 item_name 组件）—— 无视。</li>
+ *   <li><b>改过名字的物品</b> —— 无视。</li>
  * </ul>
+ *
+ * <p>「改过名字」只认 {@code custom_name} 组件（铁砧改名、或者命令里写 custom_name 的那种）。
+ * 不能看 {@code item_name}：1.21 起每个物品本来就带着 item_name（石头就是「石头」），
+ * 拿它判断的话所有物品都会被当成改过名字。
  *
  * <p>规则用在两个地方：遍历容器格子时的普通物品、以及潜影盒里装的东西。
  *
  * <p>注意：潜影盒自己也是堆叠上限 1 的物品，但遍历的时候它先走「潜影盒」那条规则，
- * 所以不会被这里的「堆叠上限 1」无视掉；不过盒子要是被命名过，还是会被无视（命名规则适用所有物品）。
+ * 所以不会被这里的「堆叠上限 1」无视掉；不过盒子要是改过名字，还是会被无视。
  */
 public final class ItemRules {
 
@@ -29,39 +33,25 @@ public final class ItemRules {
         return stack.getMaxCount() <= 1;
     }
 
-    /** 命名过的物品的名字，没名字返回 null（custom_name 优先，其次 item_name）。 */
+    /** 这个物品被改过名字的话，返回改的名字；没改过返回 null。 */
     @Nullable
-    public static String nameOf(ItemStack stack) {
+    public static String customNameOf(ItemStack stack) {
         Text custom = stack.get(DataComponentTypes.CUSTOM_NAME);
-        if (custom != null) return custom.getString();
-
-        Text itemName = stack.get(DataComponentTypes.ITEM_NAME);
-        if (itemName != null) return itemName.getString();
-
-        return null;
-    }
-
-    /** 名字是从哪个组件来的（日志里说清楚，免得误判看不出来）。 */
-    public static String nameSource(ItemStack stack) {
-        if (stack.get(DataComponentTypes.CUSTOM_NAME) != null) return "custom_name";
-        if (stack.get(DataComponentTypes.ITEM_NAME) != null) return "item_name";
-        return "";
+        return custom == null ? null : custom.getString();
     }
 
     /** 这一叠要不要无视（true = 当没看见）。 */
     public static boolean isIgnored(ItemStack stack) {
-        return isUnstackable(stack) || nameOf(stack) != null;
+        return isUnstackable(stack) || customNameOf(stack) != null;
     }
 
     /** 给日志用：为什么无视。 */
     public static String ignoreReason(ItemStack stack) {
-        String name = nameOf(stack);
+        String name = customNameOf(stack);
         boolean unstackable = isUnstackable(stack);
 
-        if (name != null && unstackable) {
-            return "堆叠上限 1 + 有名字（" + name + "，" + nameSource(stack) + "）";
-        }
-        if (name != null) return "有名字（" + name + "，" + nameSource(stack) + "）";
+        if (name != null && unstackable) return "堆叠上限 1 + 改过名字（" + name + "）";
+        if (name != null) return "改过名字（" + name + "）";
         if (unstackable) return "堆叠上限 1";
         return "";
     }
