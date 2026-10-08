@@ -10,6 +10,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.config.PlayerControllerConfig;
 
 /** 玩家相关的计算：朝向、触及距离、方块中心对齐等。 */
 public final class PlayerUtils {
@@ -56,7 +57,7 @@ public final class PlayerUtils {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player == null || mc.world == null) return null;
 
-        HitResult hit = mc.player.raycast(mc.player.getBlockInteractionRange(), 0.0f, false);
+        HitResult hit = mc.player.raycast(reach(), 0.0f, false);
         if (hit instanceof BlockHitResult blockHit && hit.getType() == HitResult.Type.BLOCK) {
             return blockHit.getBlockPos();
         }
@@ -111,22 +112,27 @@ public final class PlayerUtils {
     // 触及范围 / 朝向
     // ------------------------------------------------------------------
 
+    /**
+     * 当前生效的方块触及距离，单位：方块。
+     *
+     * <p>取配置里的 {@code actions.interaction_range}（默认 4.5，和原版一样），
+     * 用 {@code /pc config actions interaction_range <小数>} 改。
+     *
+     * <p>注意：这只是本模组自己的判断标准，服务端还有它自己的一套距离检查。
+     */
+    public static double reach() {
+        return PlayerControllerConfig.getInteractionRange();
+    }
+
     /** 玩家眼睛到方块中心的距离是否在触及范围内。 */
     public static boolean isWithinReach(BlockPos pos) {
-        ClientPlayerEntity player = player();
-        if (player == null) return false;
-        return eyeDistanceTo(pos) <= player.getBlockInteractionRange();
+        return eyeDistanceTo(pos) <= reach();
     }
 
     public static double eyeDistanceTo(BlockPos pos) {
         ClientPlayerEntity player = player();
         if (player == null) return Double.MAX_VALUE;
         return player.getEyePos().distanceTo(Vec3d.ofCenter(pos));
-    }
-
-    public static double reach() {
-        ClientPlayerEntity player = player();
-        return player == null ? 0.0 : player.getBlockInteractionRange();
     }
 
     /** 看向某个方块中心所需要的 yaw。 */

@@ -8,6 +8,8 @@ import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
+import org.six_coin.playerController.client.util.PortalUtils;
+import org.six_coin.playerController.client.waypoint.PortalTracker;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
 
 /**
@@ -17,7 +19,9 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * 移动方式用 Meteor Flight 的 velocity 模式，速度取配置里的 {@code actions.move_speed}。
  *
  * <p>如果处于路径点编辑模式，结束后会把起点和终点记成路径点和一条边；
- * 终点在末地传送门处时还会额外连一条到末地出生平台的单向边。
+ * 终点在末地传送门处时还会额外连一条到末地出生平台的单向边；
+ * 终点在「下面垫着黑曜石的下界传送门」处时，会武装 {@link PortalTracker}，
+ * 等玩家被传走之后记一条双向 0 长度传送门边。
  */
 public class MoveAction extends Action {
 
@@ -28,6 +32,9 @@ public class MoveAction extends Action {
     private BlockPos startBlock;
     private BlockPos endBlock;
     private MoveDriver driver;
+
+    /** 这次移动有没有武装过传送门记录（失败时只撤自己武装的那次）。 */
+    private boolean armedPortal;
 
     public MoveAction(Direction.Axis axis, int blocks) {
         this.axis = axis;
@@ -76,6 +83,13 @@ public class MoveAction extends Action {
         //    放在这里而不是收尾时做，是因为走进去会立刻被传送走，
         //    那时候 mc.world 已经是末地了，查不到主世界的方块。
         WaypointManager.get().recordEndPortalLink(dimension, endBlock);
+
+        // 3.5 终点如果是「下面垫着黑曜石的下界传送门方块」，编辑模式下把这次传送武装起来。
+        //     之后 PortalTracker 会观察到玩家被传走，再校验落点、记一条双向 0 长度传送门边。
+        if (WaypointManager.get().isEditMode() && PortalUtils.isNetherPortalOnObsidian(endBlock)) {
+            PortalTracker.arm(dimension, endBlock);
+            armedPortal = true;
+        }
 
         // 4. 确定这一段的起止
         double start = PlayerUtils.axisValue(axis, player);
@@ -126,10 +140,20 @@ public class MoveAction extends Action {
     @Override
     protected void onEnd() {
         FlightVelocity.end();
-        ChatUtils.debug("飞行结束");
 
-        // 失败 / 被取消时不要记录边，避免写下实际没走通的路
-        if (failureReason() == null && startBlock != null && dimension != null) {
+        // 失败 / 被取消时不要记录边，避免写下实际没走通的路；
+        // 武装过的传送门记录也一起撤掉（没武装过就不动别人的武装状态）
+        if (failureReason() != null) {
+            if (armedPortal) {
+                PortalTracker.disarm();
+                armedPortal = false;
+            }
+            ChatUtils.debug("飞行结束（失败，不记录边）");
+            return;
+        }
+
+        ChatUtils.debug("飞行结束");
+        if (startBlock != null && dimension != null) {
             WaypointManager.get().recordMove(dimension, startBlock, endBlock);
         }
     }

@@ -27,6 +27,9 @@ import java.util.List;
 /**
  * {@code /pc w ...} —— 路径点、边、出生点，全部走这一套命令。
  *
+ * <p>{@code w} 也可以写成 {@code waypoints}，两种写法完全等价
+ * （{@code /pc w list} 和 {@code /pc waypoints list} 是同一条命令）。
+ *
  * <pre>
  * /pc w show
  * /pc w edit
@@ -54,8 +57,9 @@ public final class WaypointsCommand {
     private WaypointsCommand() {
     }
 
-    public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("w")
+    /** @param name 这一层的名字：{@code w} 或 {@code waypoints} */
+    public static LiteralArgumentBuilder<FabricClientCommandSource> build(String name) {
+        return ClientCommandManager.literal(name)
             .executes(WaypointsCommand::status)
             .then(ClientCommandManager.literal("show")
                 .executes(WaypointsCommand::toggleShow))
@@ -675,7 +679,11 @@ public final class WaypointsCommand {
             + (editing ? "§a开启" : "§c关闭")));
         if (editing) {
             context.getSource().sendFeedback(Text.literal(
-                "§7此时执行 /pc move 会把起点、终点记成路径点，中间记成一条边（自动保存）"));
+                "§7此时 /pc move <轴> 和 /pc move face 会把起点、终点记成路径点，中间记成一条边（自动保存）"));
+            context.getSource().sendFeedback(Text.literal(
+                "§7终点是下界传送门方块（下面垫着黑曜石）时，走过去被传送后还会记一条传送门边"));
+            context.getSource().sendFeedback(Text.literal(
+                "§7/pc move to 走的都是已知边，不会记录任何东西"));
         }
         return 1;
     }

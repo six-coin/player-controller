@@ -298,6 +298,9 @@ public final class WaypointManager {
     /**
      * 编辑模式下把一段移动记录成双向边（会把重叠的边切开）。
      *
+     * <p>只有 {@code /pc move <轴>} / {@code /pc move face} 会走到这里（也就是
+     * {@code MoveAction}）；{@code /pc move to} 走的都是已知边，不记录。
+     *
      * @return 是否真的记录了
      */
     public boolean recordMove(String dimension, BlockPos from, BlockPos to) {
@@ -357,6 +360,11 @@ public final class WaypointManager {
 
     /**
      * 编辑模式下：玩家穿过下界传送门后，把传送前所在的路径点和落地方块连一条 0 长度双向边。
+     *
+     * <p>调用方必须已经校验过两端都是「下面垫着黑曜石的下界传送门方块」
+     * （见 {@link PortalUtils#isNetherPortalOnObsidian(BlockPos)}），而且确认这次传送是
+     * {@code /pc move <轴>} / {@code /pc move face} 的终点 —— 这些判断都在
+     * {@link PortalTracker} 里做，玩家平时自己走进传送门是不会记的。
      *
      * @return 是否新建了传送门边
      */

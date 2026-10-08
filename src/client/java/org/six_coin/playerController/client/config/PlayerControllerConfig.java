@@ -24,7 +24,8 @@ import java.nio.file.Path;
  *   "debug": true,
  *   "world": 1,
  *   "actions": {
- *     "move_speed": 3.0
+ *     "move_speed": 3.0,
+ *     "interaction_range": 4.5
  *   }
  * }
  * </pre>
@@ -41,6 +42,13 @@ public final class PlayerControllerConfig {
     /** 移动速度的合法范围（单位：方块 / tick）。 */
     public static final double MIN_MOVE_SPEED = 0.01;
     public static final double MAX_MOVE_SPEED = 64.0;
+
+    /** 触及距离的默认值（和原版方块交互距离一样是 4.5 格）。 */
+    public static final double DEFAULT_INTERACTION_RANGE = 4.5;
+
+    /** 触及距离的合法范围（单位：方块）。 */
+    public static final double MIN_INTERACTION_RANGE = 0.5;
+    public static final double MAX_INTERACTION_RANGE = 64.0;
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -67,12 +75,33 @@ public final class PlayerControllerConfig {
         @SerializedName("move_speed")
         private double moveSpeed = 3.0;
 
+        /**
+         * 触及距离，单位：方块。
+         *
+         * <p>用来判断方块在不在「够得着」的范围内（例如 {@code /pc container} 打开容器、
+         * {@code /pc w waypoint_del_target} 取准星看到的方块）。默认值和原版一样是 4.5。
+         *
+         * <p>注意：这只是本模组自己的判断标准；服务端还有它自己的一套距离检查，
+         * 调大之后对服务端不认的交互依然会被服务端拒绝。
+         */
+        @SerializedName("interaction_range")
+        private double interactionRange = DEFAULT_INTERACTION_RANGE;
+
         public double moveSpeed() {
             return moveSpeed;
         }
 
         public void moveSpeed(double value) {
             moveSpeed = Math.min(MAX_MOVE_SPEED, Math.max(MIN_MOVE_SPEED, value));
+        }
+
+        public double interactionRange() {
+            return interactionRange;
+        }
+
+        public void interactionRange(double value) {
+            interactionRange = Math.min(MAX_INTERACTION_RANGE,
+                Math.max(MIN_INTERACTION_RANGE, value));
         }
     }
 
@@ -108,6 +137,15 @@ public final class PlayerControllerConfig {
 
     public static void setMoveSpeed(double value) {
         instance.actions.moveSpeed(value);
+        instance.save();
+    }
+
+    public static double getInteractionRange() {
+        return instance.actions.interactionRange();
+    }
+
+    public static void setInteractionRange(double value) {
+        instance.actions.interactionRange(value);
         instance.save();
     }
 
@@ -147,7 +185,8 @@ public final class PlayerControllerConfig {
             instance = loaded;
             ChatUtils.debug("已读取配置文件: " + path + " (debug=" + instance.debug
                 + ", world=" + instance.world
-                + ", move_speed=" + instance.actions.moveSpeed() + ")");
+                + ", move_speed=" + instance.actions.moveSpeed()
+                + ", interaction_range=" + instance.actions.interactionRange() + ")");
         } catch (Exception e) {
             instance = new PlayerControllerConfig();
             ChatUtils.error("读取配置文件失败，已使用默认值: " + e.getMessage());

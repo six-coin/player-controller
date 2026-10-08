@@ -1,13 +1,9 @@
 package org.six_coin.playerController.client.action;
 
-import net.minecraft.block.Blocks;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
-import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -31,6 +27,10 @@ import java.util.List;
  *   <li>同轴连续的几段会合并成一步（1 1 1 → 1 1 2 → 1 1 3 直接走 1 1 1 → 1 1 3）；</li>
  *   <li>遇到传送门边会自己走进去、等服务端传送、切维度后接着走。</li>
  * </ul>
+ *
+ * <p><b>move to 不记录任何东西</b>：它走的全是图上已经有的边，所以既不会记普通边，
+ * 也不会记末地 / 下界传送门边（编辑模式下要记路，用 {@code /pc move <轴>} 或
+ * {@code /pc move face}）。
  */
 public class PathMoveAction extends Action {
 
@@ -119,13 +119,7 @@ public class PathMoveAction extends Action {
             return;
         }
 
-        // 终点如果在末地传送门处，编辑模式下先连一条到末地的单向边。
-        // 放在这里是因为路径一旦穿过末地传送门，mc.world 就不是原来的维度了。
-        Waypoint last = path.get(path.size() - 1);
-        if (last.dimension().equals(DimensionUtils.current())) {
-            WaypointManager.get().recordEndPortalLink(last.dimension(), last.pos());
-        }
-
+        // 这里刻意什么都不记录：move to 走的都是图上已经记录过的边。
         FlightVelocity.begin();
         engaged = true;
 
@@ -374,7 +368,8 @@ public class PathMoveAction extends Action {
                     // 从末地回来必须落在当前出生点，否则直接停下
                     fail("从末地回来没有落在当前出生点（实际 " + actual.toShortString()
                         + "，当前出生点 " + step.to().coordString() + "），已停止任务；"
-                        + "用 /pc waypoints spawn add_here <name> 把实际落点登记成出生点再试");
+                        + "请在落点用 /pc w waypoint_add_here <name> 建一个路径点，"
+                        + "再用 /pc w spawn_set_by_name <name> 把它设为出生点后重试");
                 } else {
                     fail("落点 " + actual.toShortString() + " 和记录的路径点 "
                         + step.to().pos().toShortString() + " 对不上");
@@ -394,10 +389,6 @@ public class PathMoveAction extends Action {
         ChatUtils.debug("传送完成，继续走剩下的路");
     }
 
-    private static boolean isEndPortal(BlockPos pos) {
-        return PortalUtils.isEndPortal(pos);
-    }
-
     // ------------------------------------------------------------------
 
     @Override
@@ -406,15 +397,7 @@ public class PathMoveAction extends Action {
             FlightVelocity.end();
             engaged = false;
         }
-
-        WaypointManager manager = WaypointManager.get();
-        // 失败 / 被取消时不要记录边，避免写下实际没走通的路
-        if (failureReason() != null || !manager.isEditMode()) return;
-
-        for (Step step : steps) {
-            if (step.kind() != StepKind.MOVE) continue;
-            manager.recordMove(step.from().dimension(), step.from().pos(), step.to().pos());
-        }
+        // 不记录任何边：move to 只走图上已经有的路（要记边请用 /pc move <轴> 或 /pc move face）
     }
 
     /** 玩家偏离方块中心时，直接对齐过去。 */

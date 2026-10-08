@@ -22,7 +22,8 @@ public class PlayerControllerClient implements ClientModInitializer {
         // 在原版 tick 世界之前驱动动作队列，移动类动作写入的速度才能在当 tick 生效
         ClientTickEvents.START_CLIENT_TICK.register(ActionManager.get()::tick);
 
-        // 编辑模式下监听下界传送门（要一直在跑，不能只在有动作时跑）
+        // 记录下界传送门边：只有 /pc move <轴> / /pc move face 的终点是传送门时才会武装，
+        // 所以这里要一直跑着（传送是服务端做的，得等维度变化才能确认落点）
         ClientTickEvents.END_CLIENT_TICK.register(PortalTracker::tick);
 
         ChatUtils.debug("Player Controller 已加载，使用 /pc 查看命令；当前 debug="
