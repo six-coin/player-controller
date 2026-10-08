@@ -8,6 +8,7 @@ import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
+import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.PortalUtils;
 
 import java.io.IOException;
@@ -173,6 +174,33 @@ public final class WaypointManager {
         ChatUtils.debug("已新建路径点 #" + waypoint.id() + " "
             + DimensionUtils.display(dimension) + " " + waypoint.coordString());
         return waypoint;
+    }
+
+    /**
+     * 玩家现在在图上的起点：站在路径点上就返回它；站在某条边中间就在脚下新建一个路径点
+     * （边会被切开，点留着不回退）再返回；既不在点上也不在边上返回 null。
+     *
+     * <p>{@code /pc move to*} 和容器那套算路径的地方都用它。
+     */
+    @Nullable
+    public Waypoint playerStartWaypoint() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null || mc.world == null) return null;
+
+        BlockPos here = PlayerUtils.currentBlockPos();
+        if (here == null) return null;
+
+        String dimension = DimensionUtils.current();
+        Waypoint at = graph.at(dimension, here);
+        if (at != null) return at;
+
+        WaypointGraph.EdgeEntry edge = graph.edgeAt(dimension, here);
+        if (edge == null) return null;
+
+        Waypoint created = createWaypoint(dimension, here);
+        ChatUtils.info("你站的 " + here.toShortString() + " 在边 #" + edge.id()
+            + " 上，已新建起点路径点 #" + created.id());
+        return created;
     }
 
     /**

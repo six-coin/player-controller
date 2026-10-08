@@ -91,6 +91,15 @@ public final class ContainerCacheManager {
         return WaypointManager.worldDir(world).resolve(FILE_NAME);
     }
 
+    /** get_all_items 生成的文件：{@code world_<n>/container/all_items.json}。 */
+    public static Path itemsFile(int world) {
+        return WaypointManager.worldDir(world).resolve("container").resolve("all_items.json");
+    }
+
+    public Path currentItemsFile() {
+        return itemsFile(loadedWorld >= 0 ? loadedWorld : PlayerControllerConfig.getWorld());
+    }
+
     public Path currentFile() {
         return cacheFile(PlayerControllerConfig.getWorld());
     }

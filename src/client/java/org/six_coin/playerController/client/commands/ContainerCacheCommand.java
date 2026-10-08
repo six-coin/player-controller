@@ -26,10 +26,13 @@ import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.action.ContainerCacheAddAction;
 import org.six_coin.playerController.client.container.CachedContainer;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
+import org.six_coin.playerController.client.container.ContainerItemsExporter;
 import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
+import org.six_coin.playerController.client.waypoint.Waypoint;
+import org.six_coin.playerController.client.waypoint.WaypointManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -54,6 +57,7 @@ import java.util.function.Consumer;
  * /pc container cache optimize                    按维度（主世界、下界、末地）、xyz 递增重新编号（从 1 开始）
  * /pc container cache list                        列出所有缓存
  * /pc container cache show                        开关紫色高亮
+ * /pc container cache get_all_items               给每个缓存容器找一个走得到的落点，汇总成 all_items.json
  * </pre>
  *
  * <p>加缓存必须能打开容器（要在触及范围内、是支持的容器），所以是一次真实的开箱流程；
@@ -95,7 +99,9 @@ public final class ContainerCacheCommand {
             .then(ClientCommandManager.literal("list")
                 .executes(ContainerCacheCommand::list))
             .then(ClientCommandManager.literal("show")
-                .executes(ContainerCacheCommand::toggleShow));
+                .executes(ContainerCacheCommand::toggleShow))
+            .then(ClientCommandManager.literal("get_all_items")
+                .executes(ContainerCacheCommand::getAllItems));
     }
 
     // ------------------------------------------------------------------
@@ -359,6 +365,45 @@ public final class ContainerCacheCommand {
         boolean showing = ContainerCacheManager.get().toggleShow();
         context.getSource().sendFeedback(Text.literal("容器缓存高亮已"
             + (showing ? "§a开启" : "§c关闭") + "§r（紫色方块）"));
+        return 1;
+    }
+
+    /**
+     * {@code get_all_items}：给每个缓存容器在触及范围内找一个「有点或者边」的落点，
+     * 再看从玩家现在的位置走不走得到，走得到的汇总进 all_items.json。
+     */
+    private static int getAllItems(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        if (source.getPlayer() == null || source.getWorld() == null) {
+            source.sendError(Text.literal("没有玩家或世界"));
+            return 0;
+        }
+
+        // 1. 玩家必须站在路径点上或者边上（站在边上会在脚下新建一个起点路径点）
+        Waypoint start = WaypointManager.get().playerStartWaypoint();
+        if (start == null) {
+            BlockPos here = PlayerUtils.currentBlockPos();
+            source.sendError(Text.literal("你现在" + (here == null ? "" : "所在的 " + here.toShortString())
+                + " 既不是路径点，也不在任何边上，先站到图上再执行"));
+            return 0;
+        }
+
+        if (ContainerCacheManager.get().size() == 0) {
+            source.sendFeedback(Text.literal("容器缓存是空的，先加点容器再执行"));
+            return 1;
+        }
+
+        ContainerItemsExporter.Result result = ContainerItemsExporter.export(start);
+        if (result.file() == null) {
+            source.sendError(Text.literal("生成 all_items.json 失败，看看日志"));
+            return 0;
+        }
+
+        source.sendFeedback(Text.literal("起点 #" + start.id() + "；缓存容器 " + result.containers()
+            + " 个：找得到落点 " + result.withAccess() + " 个，走得到并写入 " + result.written() + " 个"));
+        source.sendFeedback(Text.literal("overall：" + result.overallKinds() + " 种物品 / "
+            + result.overallCount() + " 个"));
+        source.sendFeedback(Text.literal("文件: " + result.file()));
         return 1;
     }
 

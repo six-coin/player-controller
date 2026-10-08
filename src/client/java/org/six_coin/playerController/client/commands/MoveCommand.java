@@ -252,19 +252,11 @@ public final class MoveCommand {
         }
 
         // 起点：站在路径点上就直接用；站在某条边中间，就先在脚下新建一个路径点（边会被切开）
-        Waypoint from = graph.at(dimension, here);
+        Waypoint from = WaypointManager.get().playerStartWaypoint();
         if (from == null) {
-            WaypointGraph.EdgeEntry startEdge = graph.edgeAt(dimension, here);
-            if (startEdge == null) {
-                source.sendError(Text.literal("你现在所在的 " + here.toShortString()
-                    + " 既不是路径点，也不在任何边上，先用 /pc w waypoint_add_here 加一个"));
-                return 0;
-            }
-            from = WaypointManager.get().createWaypoint(dimension, here);
-            ChatUtils.debug("起点 " + here.toShortString() + " 在边 #" + startEdge.id()
-                + " 上，已新建路径点 #" + from.id());
-            source.sendFeedback(Text.literal("你站的 " + here.toShortString() + " 在边 #" + startEdge.id()
-                + " 上，已新建起点路径点 #" + from.id()));
+            source.sendError(Text.literal("你现在所在的 " + here.toShortString()
+                + " 既不是路径点，也不在任何边上，先用 /pc w waypoint_add_here 加一个"));
+            return 0;
         }
 
         if (from.id() == target.id()) {
