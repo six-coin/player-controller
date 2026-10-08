@@ -66,6 +66,31 @@ public final class InventoryUtils {
         return null;
     }
 
+    /**
+     * 整叠往主背包放的时候，下一个该点哪个格子：优先同类半叠（能合并），其次空格。
+     *
+     * <p>只看主背包 27 格，绝对不会碰快捷栏。
+     *
+     * @return 找不到能放的格子返回 null
+     */
+    public static Slot dumpTarget(ScreenHandler handler, PlayerInventory inventory, ItemStack stack) {
+        Slot merge = null;
+        Slot empty = null;
+
+        for (Slot slot : mainSlots(handler, inventory)) {
+            if (!slot.isEnabled() || !slot.canInsert(stack)) continue;
+            ItemStack current = slot.getStack();
+            if (current.isEmpty()) {
+                if (empty == null) empty = slot;
+                continue;
+            }
+            if (!ItemStack.areItemsAndComponentsEqual(current, stack)) continue;
+            if (current.getCount() >= current.getMaxCount()) continue;
+            if (merge == null) merge = slot;
+        }
+        return merge != null ? merge : empty;
+    }
+
     /** 容器自己的格子（不是玩家背包的那些）。 */
     public static List<Slot> containerSlots(ScreenHandler handler) {
         List<Slot> result = new ArrayList<>();

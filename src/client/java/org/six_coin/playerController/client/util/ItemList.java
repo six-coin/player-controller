@@ -150,22 +150,26 @@ public final class ItemList {
         return true;
     }
 
-    /** 修改后的 item_list JSON 文本（键的顺序和玩家写的一样）。 */
+    /** 修改后的 item_list JSON 文本（键的顺序和玩家写的一样；已经拿够的键不输出）。 */
     public String toJson() {
         JsonObject object = new JsonObject();
         for (String key : keys) {
-            object.addProperty(key, remaining.getOrDefault(key, 0));
+            int left = remaining.getOrDefault(key, 0);
+            if (left <= 0) continue;
+            object.addProperty(key, left);
         }
         return object.toString();
     }
 
-    /** 给日志 / 提示用的一行文字。 */
+    /** 给日志 / 提示用的一行文字（已经拿够的不列出来）。 */
     public String describe() {
         StringBuilder sb = new StringBuilder();
         for (String key : keys) {
+            int left = remaining.getOrDefault(key, 0);
+            if (left <= 0) continue;
             if (sb.length() > 0) sb.append(", ");
-            sb.append(key).append(" x").append(remaining.getOrDefault(key, 0));
+            sb.append(key).append(" x").append(left);
         }
-        return sb.toString();
+        return sb.length() == 0 ? "（没有剩余需求）" : sb.toString();
     }
 }

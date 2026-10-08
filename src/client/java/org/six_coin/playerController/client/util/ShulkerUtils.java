@@ -43,15 +43,27 @@ public final class ShulkerUtils {
         return result;
     }
 
-    /** 盒子里有没有 item_list 还要的东西。 */
-    public static boolean containsWanted(ItemStack shulker, ItemList itemList) {
+    /**
+     * 盒子里真正要看的那些东西：堆叠上限 1 的、命名过的都当没看见（见 {@link ItemRules}）。
+     */
+    public static List<ItemStack> consideredContents(ItemStack shulker) {
+        List<ItemStack> result = new ArrayList<>();
         for (ItemStack inner : contents(shulker)) {
+            if (ItemRules.isIgnored(inner)) continue;
+            result.add(inner);
+        }
+        return result;
+    }
+
+    /** 盒子里有没有 item_list 还要的东西（只看要看的那些）。 */
+    public static boolean containsWanted(ItemStack shulker, ItemList itemList) {
+        for (ItemStack inner : consideredContents(shulker)) {
             if (itemList.wants(inner.getItem())) return true;
         }
         return false;
     }
 
-    /** 盒子内容的一行描述，给日志用。 */
+    /** 盒子内容的一行描述，给日志用（被无视的会标出来）。 */
     public static String describeContents(ItemStack shulker) {
         List<ItemStack> contents = contents(shulker);
         if (contents.isEmpty()) return "（空盒子）";
@@ -60,6 +72,9 @@ public final class ShulkerUtils {
         for (ItemStack inner : contents) {
             if (sb.length() > 0) sb.append(", ");
             sb.append(Registries.ITEM.getId(inner.getItem())).append(" x").append(inner.getCount());
+            if (ItemRules.isIgnored(inner)) {
+                sb.append("（无视：").append(ItemRules.ignoreReason(inner)).append("）");
+            }
         }
         return sb.toString();
     }
