@@ -74,4 +74,34 @@ public final class StationData {
         if (item_final == null) item_final = new ArrayList<>();
         return item_final;
     }
+
+    /**
+     * 把没有维度的坐标丢掉（老格式 / 手改坏的文件），别让它在后面炸掉。
+     *
+     * <p>新格式每个坐标都带 dimension，这里只是防脏数据。
+     */
+    void sanitize() {
+        if (!valid(stand_point)) stand_point = null;
+        if (!valid(crafting_table)) crafting_table = null;
+        if (!valid(stonecutter)) stonecutter = null;
+        if (!valid(item_temp)) item_temp = null;
+        if (!valid(shulker_box_provider)) shulker_box_provider = null;
+
+        shulker_box_placement = validList(shulker_box_placement);
+        item_storage = validList(item_storage);
+        item_final = validList(item_final);
+    }
+
+    private static boolean valid(StationPos pos) {
+        return pos == null || (pos.dimension() != null && !pos.dimension().isBlank());
+    }
+
+    private static List<StationPos> validList(List<StationPos> source) {
+        List<StationPos> result = new ArrayList<>();
+        if (source == null) return result;
+        for (StationPos pos : source) {
+            if (pos != null && valid(pos)) result.add(pos);
+        }
+        return result;
+    }
 }
