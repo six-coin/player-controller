@@ -667,11 +667,12 @@ public final class WaypointsCommand {
             .setStyle(Style.EMPTY.withColor(edge.bi() ? Formatting.GREEN : Formatting.YELLOW));
     }
 
-    /** {@code [主] {point_id} (name)} */
+    /** {@code [主] [1 1 1] (name)} */
     private static Text endpointText(Waypoint waypoint) {
         MutableText text = Text.literal("");
         text.append(dimensionTag(waypoint.dimension()));
-        text.append(Text.literal(" " + waypoint.id()).formatted(Formatting.AQUA));
+        text.append(Text.literal(" "));
+        text.append(clickableCoord(waypoint.pos()));
         if (waypoint.hasName()) {
             text.append(Text.literal(" "));
             text.append(nameText(waypoint.name()));

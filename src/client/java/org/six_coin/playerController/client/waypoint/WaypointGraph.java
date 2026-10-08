@@ -279,6 +279,35 @@ public final class WaypointGraph {
         return null;
     }
 
+    /**
+     * 这个位置是不是落在某条走路边（双向边）的中间（不含两端）。
+     *
+     * <p>用来判断「站在边上」：站在边上可以在那里 {@link #addWaypoint} 建个点把边切开。
+     * 单向边（出生点那条、以及跨维度传送门）不算。
+     *
+     * @return 那条边，没落在任何边上返回 null
+     */
+    @Nullable
+    public EdgeEntry edgeAt(String dimension, BlockPos pos) {
+        for (Map.Entry<Integer, Edge> entry : edges.entrySet()) {
+            Edge edge = entry.getValue();
+            if (!edge.bi()) continue;
+            Waypoint a = get(edge.from());
+            Waypoint b = get(edge.to());
+            if (a == null || b == null) continue;
+            if (!a.dimension().equals(dimension) || !b.dimension().equals(dimension)) continue;
+
+            Direction.Axis axis = sharedAxis(a.pos(), b.pos());
+            if (axis == null) continue;
+            if (!onLine(pos, a.pos(), axis)) continue;
+
+            int c = coord(pos, axis);
+            if (c <= low(a.pos(), b.pos(), axis) || c >= high(a.pos(), b.pos(), axis)) continue;
+            return new EdgeEntry(entry.getKey(), edge);
+        }
+        return null;
+    }
+
     /** 边的通行代价：跨维度（传送门）算 0，同维度按方块距离。 */
     public double weight(int fromId, int toId) {
         Waypoint a = get(fromId);

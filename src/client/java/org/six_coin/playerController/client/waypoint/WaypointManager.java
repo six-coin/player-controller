@@ -160,6 +160,20 @@ public final class WaypointManager {
     // ------------------------------------------------------------------
 
     /**
+     * 在这里新建一个路径点（已经有了就复用），并把穿过这一格的边从中间切开，然后存盘。
+     *
+     * <p>就是「newwaypoint」：{@link WaypointGraph#addWaypoint(String, BlockPos)} + 保存。
+     * 命令里（起点/终点落在边上时）都是走这里；新建的点不会回退，就留在那儿。
+     */
+    public Waypoint createWaypoint(String dimension, BlockPos pos) {
+        Waypoint waypoint = graph.addWaypoint(dimension, pos);
+        save();
+        ChatUtils.debug("已新建路径点 #" + waypoint.id() + " "
+            + DimensionUtils.display(dimension) + " " + waypoint.coordString());
+        return waypoint;
+    }
+
+    /**
      * 编辑模式下把一段移动记成双向走路边。
      *
      * <p>具体做法见 {@link WaypointGraph#addSegment(String, BlockPos, BlockPos)}：

@@ -29,10 +29,19 @@ import java.util.List;
  *
  * <pre>
  * /pc move &lt;x|y|z&gt; &lt;blocks&gt;   沿轴移动指定格数
- * /pc move to &lt;x&gt; &lt;y&gt; &lt;z&gt;     沿路径点图走到某个路径点
+ * /pc move to &lt;x&gt; &lt;y&gt; &lt;z&gt;     沿路径点图走到某个路径点（坐标必须已经是路径点）
  * /pc move to &lt;name&gt;          同上，用名字指定
+ * /pc move to_name &lt;name&gt;     用名字指定终点（跟 to &lt;name&gt; 等价）
+ * /pc move to_id &lt;id&gt;         用编号指定终点
+ * /pc move to_position &lt;x&gt; &lt;y&gt; &lt;z&gt;  用坐标指定终点：
+ *                             ① 是路径点就直接走；② 在某条边中间就先在那边新建路径点再走；③ 都不是就报错
  * /pc move cancel             取消当前和排队的移动任务
  * </pre>
+ *
+ * <p>走路径的起点：站在路径点上直接用；站在某条边的中间就先在脚下新建一个路径点
+ * （边会被切开，新建的点留着不回退）；既不在路径点上也不在任何边上就拒绝执行。
+ *
+ * <p>{@code move to} 走的都是已知边，不会记录任何东西（要记边请用 {@code move <轴>} / {@code move face}）。
  */
 public final class MoveCommand {
 
@@ -45,6 +54,9 @@ public final class MoveCommand {
         node.then(axis("y", Direction.Axis.Y));
         node.then(axis("z", Direction.Axis.Z));
         node.then(moveTo());
+        node.then(moveToNameNode());
+        node.then(moveToIdNode());
+        node.then(moveToPositionNode());
         node.then(ClientCommandManager.literal("face")
             .then(ClientCommandManager.argument("blocks", IntegerArgumentType.integer(1))
                 .executes(context -> face(context.getSource(),
@@ -127,6 +139,38 @@ public final class MoveCommand {
                     StringArgumentType.getString(context, "name"))));
     }
 
+    /** {@code to_name <name>}：跟 {@code to <name>} 一样。 */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> moveToNameNode() {
+        return ClientCommandManager.literal("to_name")
+            .then(ClientCommandManager.argument("name", StringArgumentType.word())
+                .suggests((context, builder) -> CommandSource.suggestMatching(names(), builder))
+                .executes(context -> moveToName(context.getSource(),
+                    StringArgumentType.getString(context, "name"))));
+    }
+
+    /** {@code to_id <id>}：只能用路径点编号。 */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> moveToIdNode() {
+        return ClientCommandManager.literal("to_id")
+            .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
+                .executes(context -> moveToId(context.getSource(),
+                    IntegerArgumentType.getInteger(context, "id"))));
+    }
+
+    /** {@code to_position <x> <y> <z>}：是路径点就直接走，在边上就先建点，都不是就报错。 */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> moveToPositionNode() {
+        return ClientCommandManager.literal("to_position")
+            .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
+                .suggests(LookSuggestions::x)
+                .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+                    .suggests(LookSuggestions::y)
+                    .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                        .suggests(LookSuggestions::z)
+                        .executes(context -> moveToPosition(context.getSource(), new BlockPos(
+                            IntegerArgumentType.getInteger(context, "x"),
+                            IntegerArgumentType.getInteger(context, "y"),
+                            IntegerArgumentType.getInteger(context, "z")))))));
+    }
+
     // ------------------------------------------------------------------
 
     private static int moveToBlock(FabricClientCommandSource source, BlockPos target) {
@@ -134,7 +178,8 @@ public final class MoveCommand {
         Waypoint to = graph.at(DimensionUtils.current(), target);
         if (to == null) {
             source.sendError(Text.literal("当前维度（" + DimensionUtils.display(DimensionUtils.current())
-                + "）的 " + target.toShortString() + " 不是路径点"));
+                + "）的 " + target.toShortString() + " 不是路径点"
+                + "（坐标在边上的情况请用 /pc move to_position）"));
             return 0;
         }
         return startPath(source, to);
@@ -149,6 +194,48 @@ public final class MoveCommand {
         return startPath(source, to);
     }
 
+    private static int moveToId(FabricClientCommandSource source, int id) {
+        Waypoint to = WaypointManager.get().graph().get(id);
+        if (to == null) {
+            source.sendError(Text.literal("没有 #" + id + " 这个路径点"));
+            return 0;
+        }
+        return startPath(source, to);
+    }
+
+    /**
+     * 用坐标指定终点。
+     *
+     * <p>① 这个坐标已经是路径点 → 直接按编号走；
+     * ② 这个坐标在某条边中间 → 先在那边新建一个路径点（边会被切开，点留着不回退），再走；
+     * ③ 都不是 → 报错。
+     */
+    private static int moveToPosition(FabricClientCommandSource source, BlockPos target) {
+        WaypointGraph graph = WaypointManager.get().graph();
+        String dimension = DimensionUtils.current();
+
+        Waypoint to = graph.at(dimension, target);
+        if (to != null) {
+            ChatUtils.debug("to_position：" + target.toShortString()
+                + " 已经是路径点 #" + to.id() + "，直接走");
+            return startPath(source, to);
+        }
+
+        WaypointGraph.EdgeEntry edge = graph.edgeAt(dimension, target);
+        if (edge == null) {
+            source.sendError(Text.literal("当前维度（" + DimensionUtils.display(dimension) + "）的 "
+                + target.toShortString() + " 既不是路径点，也不在任何边上"));
+            return 0;
+        }
+
+        to = WaypointManager.get().createWaypoint(dimension, target);
+        ChatUtils.debug("to_position：" + target.toShortString() + " 在边 #" + edge.id()
+            + " 上，已新建路径点 #" + to.id());
+        source.sendFeedback(Text.literal("目标 " + target.toShortString() + " 在边 #" + edge.id()
+            + " 上，已在那边新建路径点 #" + to.id()));
+        return startPath(source, to);
+    }
+
     private static int startPath(FabricClientCommandSource source, Waypoint target) {
         if (source.getPlayer() == null) {
             source.sendError(Text.literal("没有玩家"));
@@ -158,17 +245,26 @@ public final class MoveCommand {
         WaypointGraph graph = WaypointManager.get().graph();
         String dimension = DimensionUtils.current();
 
-        // 条件一：当前所在位置（取整后）本身必须是路径点
         BlockPos here = PlayerUtils.currentBlockPos();
         if (here == null) {
             source.sendError(Text.literal("拿不到玩家位置"));
             return 0;
         }
+
+        // 起点：站在路径点上就直接用；站在某条边中间，就先在脚下新建一个路径点（边会被切开）
         Waypoint from = graph.at(dimension, here);
         if (from == null) {
-            source.sendError(Text.literal("你现在所在的 " + here.toShortString()
-                + " 不是路径点，先用 /pc w waypoint_add_here 加一个"));
-            return 0;
+            WaypointGraph.EdgeEntry startEdge = graph.edgeAt(dimension, here);
+            if (startEdge == null) {
+                source.sendError(Text.literal("你现在所在的 " + here.toShortString()
+                    + " 既不是路径点，也不在任何边上，先用 /pc w waypoint_add_here 加一个"));
+                return 0;
+            }
+            from = WaypointManager.get().createWaypoint(dimension, here);
+            ChatUtils.debug("起点 " + here.toShortString() + " 在边 #" + startEdge.id()
+                + " 上，已新建路径点 #" + from.id());
+            source.sendFeedback(Text.literal("你站的 " + here.toShortString() + " 在边 #" + startEdge.id()
+                + " 上，已新建起点路径点 #" + from.id()));
         }
 
         if (from.id() == target.id()) {
@@ -176,7 +272,7 @@ public final class MoveCommand {
             return 1;
         }
 
-        // 条件二：必须找得到路
+        // 必须找得到路
         List<Waypoint> path = graph.shortestPath(from.id(), target.id());
         if (path == null || path.size() < 2) {
             source.sendError(Text.literal("从 " + DimensionUtils.display(dimension) + " " + here.toShortString()
