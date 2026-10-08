@@ -11,11 +11,12 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShapes;
 import org.six_coin.playerController.client.util.ChatUtils;
+import org.six_coin.playerController.client.util.DimensionUtils;
 
 /**
  * 把工作站相关的方块按部分的颜色画成方块描边（{@code /pc station show} 开关）。
  *
- * <p>颜色见 {@link StationPart}；只画当前维度里的（station.json 里的坐标不带维度），
+ * <p>颜色见 {@link StationPart}；只画当前维度的（station.json 里的坐标带维度），
  * 太远的（超过 {@link #MAX_DISTANCE}）不画。
  */
 public final class StationRenderer {
@@ -46,9 +47,13 @@ public final class StationRenderer {
 
             MatrixStack matrices = context.matrices();
             VertexConsumer buffer = context.consumers().getBuffer(RenderLayers.lines());
+            String dimension = DimensionUtils.current();
 
             for (StationPart part : StationPart.values()) {
-                for (BlockPos pos : manager.positions(part)) {
+                for (StationPos stationPos : manager.positions(part)) {
+                    if (!stationPos.dimension().equals(dimension)) continue;
+
+                    BlockPos pos = stationPos.pos();
                     double dx = pos.getX() + 0.5 - camera.x;
                     double dy = pos.getY() + 0.5 - camera.y;
                     double dz = pos.getZ() + 0.5 - camera.z;

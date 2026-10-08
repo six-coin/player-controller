@@ -60,6 +60,12 @@ public final class ContainerCacheUpdater {
     public static int refresh(MinecraftClient client, BlockPos pos, ScreenHandler handler) {
         if (client == null || client.world == null || pos == null || handler == null) return 0;
 
+        // 创造模式物品栏不是真容器，别理它
+        if (ContainerCacheTracker.isCreativeInventory(client)) {
+            ChatUtils.debug("现在开着创造模式物品栏，不刷新容器缓存");
+            return 0;
+        }
+
         List<CachedContainer> entries = findEntries(client.world, pos);
         if (entries.isEmpty()) {
             ChatUtils.debug("容器的位置 " + pos.toShortString() + "（及大箱子另一半）不在缓存里，不用刷新");
@@ -74,7 +80,7 @@ public final class ContainerCacheUpdater {
         for (CachedContainer container : entries) {
             if (ContainerCacheManager.get().updateItems(container, items)) {
                 changed++;
-                ChatUtils.info("容器缓存已更新 #" + container.id() + " " + container.type() + " "
+                ChatUtils.debug("容器缓存已更新 #" + container.id() + " " + container.type() + " "
                     + DimensionUtils.display(container.dimension()) + " " + container.coordString()
                     + "：" + items.size() + " 种 / " + total + " 个");
             } else {

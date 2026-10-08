@@ -1,6 +1,7 @@
 package org.six_coin.playerController.client.container;
 
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.util.math.BlockPos;
@@ -72,6 +73,12 @@ public final class ContainerCacheTracker {
 
         if (current == null || current == player.playerScreenHandler) return;
 
+        // 创造模式物品栏虽然也有自己的界面处理器，但它不是容器：直接不理
+        if (isCreativeInventory(client)) {
+            ChatUtils.debug("打开的是创造模式物品栏，不是容器，不跟踪也不刷新");
+            return;
+        }
+
         BlockPos looked = PlayerUtils.lookedAtBlock();
         if (looked == null) {
             ChatUtils.debug("看不出打开的是哪个方块（准星没对着方块），这次不跟踪");
@@ -87,6 +94,11 @@ public final class ContainerCacheTracker {
 
         viewingPos = looked;
         ChatUtils.debug("打开的容器在缓存里：" + describe(found) + "，关界面时会重新记一遍");
+    }
+
+    /** 现在打开的是不是创造模式物品栏（它不是真容器，别去认它）。 */
+    public static boolean isCreativeInventory(MinecraftClient client) {
+        return client.currentScreen instanceof CreativeInventoryScreen;
     }
 
     private static String describe(List<CachedContainer> containers) {

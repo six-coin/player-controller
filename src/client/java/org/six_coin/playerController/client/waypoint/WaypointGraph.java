@@ -3,6 +3,7 @@ package org.six_coin.playerController.client.waypoint;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
 import java.util.ArrayDeque;
@@ -515,8 +516,28 @@ public final class WaypointGraph {
 
     /** 建一个路径点（已经有了就复用），并把穿过这一格的边从中间切开。 */
     public Waypoint addWaypoint(String dimension, BlockPos pos) {
+        boolean isNew = at(dimension, pos) == null;
         splitEdgeAt(dimension, pos);
-        return ensureWaypoint(dimension, pos);
+        Waypoint created = ensureWaypoint(dimension, pos);
+        if (isNew) linkAdjacentWaypoints(created);
+        return created;
+    }
+
+    /**
+     * 新路径点自动连边：上下左右前后这 6 格里已经有别的路径点（只看路径点，不看边）的话，
+     * 就跟它连一条双向走路边。
+     *
+     * <p>{@code /pc w waypoint_add*}、{@code move to} 起点/终点落在边上、容器缓存找落点，
+     * 这些新建路径点的地方走的都是 {@link #addWaypoint}，所以统一在这里连。
+     */
+    private void linkAdjacentWaypoints(Waypoint waypoint) {
+        for (Direction direction : Direction.values()) {
+            Waypoint other = at(waypoint.dimension(), waypoint.pos().offset(direction));
+            if (other == null || other.id() == waypoint.id()) continue;
+            if (!addWalkEdge(waypoint.dimension(), waypoint.pos(), other.pos())) continue;
+            ChatUtils.debug("新路径点 #" + waypoint.id() + " 和相邻的 #" + other.id() + "（"
+                + direction.asString() + "）自动连了一条双向边");
+        }
     }
 
     /** 这条边和其它边重合的所有位置（同线重叠的两端、十字交叉的交点）。 */

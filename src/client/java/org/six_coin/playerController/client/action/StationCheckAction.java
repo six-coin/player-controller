@@ -11,12 +11,15 @@ import net.minecraft.screen.slot.Slot;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
+import org.six_coin.playerController.client.container.ContainerCacheTracker;
 import org.six_coin.playerController.client.container.ContainerOpener;
 import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.station.StationManager;
 import org.six_coin.playerController.client.station.StationPart;
+import org.six_coin.playerController.client.station.StationPos;
 import org.six_coin.playerController.client.util.ChatUtils;
+import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.InventoryUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 
@@ -137,7 +140,8 @@ public class StationCheckAction extends Action {
         if (handler == null) {
             openWaitTicks++;
             ScreenHandler current = player.currentScreenHandler;
-            if (current != null && current != player.playerScreenHandler) {
+            if (current != null && current != player.playerScreenHandler
+                && !ContainerCacheTracker.isCreativeInventory(mc)) {
                 handler = current;
                 settleTicks = 0;
                 return;
@@ -212,8 +216,17 @@ public class StationCheckAction extends Action {
     // ------------------------------------------------------------------
 
     private void collectTargets(World world, StationPart part) {
+        String dimension = DimensionUtils.current();
         Set<BlockPos> seen = new HashSet<>();
-        for (BlockPos configured : StationManager.get().positions(part)) {
+
+        for (StationPos stationPos : StationManager.get().positions(part)) {
+            if (!stationPos.dimension().equals(dimension)) {
+                ChatUtils.debug("工作站检查：跳过 " + part.display() + " " + stationPos.describe()
+                    + "（不在当前维度）");
+                continue;
+            }
+
+            BlockPos configured = stationPos.pos();
             BlockPos other = ContainerTypes.otherHalf(world, configured);
             BlockPos canonical = other == null || configured.compareTo(other) <= 0 ? configured : other;
             if (!seen.add(canonical)) continue;

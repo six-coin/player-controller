@@ -1,10 +1,12 @@
 package org.six_coin.playerController.client.station;
 
 import net.minecraft.util.math.BlockPos;
+import org.six_coin.playerController.client.util.DimensionUtils;
 
-/** station.json 里的一个坐标（就是 {@code {"x": .., "y": .., "z": ..}}）。 */
+/** station.json 里的一个坐标：{@code {"dimension": "minecraft:overworld", "x": .., "y": .., "z": ..}}。 */
 public final class StationPos {
 
+    private String dimension;
     private int x;
     private int y;
     private int z;
@@ -13,14 +15,19 @@ public final class StationPos {
     private StationPos() {
     }
 
-    private StationPos(int x, int y, int z) {
+    private StationPos(String dimension, int x, int y, int z) {
+        this.dimension = dimension;
         this.x = x;
         this.y = y;
         this.z = z;
     }
 
-    public static StationPos of(BlockPos pos) {
-        return new StationPos(pos.getX(), pos.getY(), pos.getZ());
+    public static StationPos of(String dimension, BlockPos pos) {
+        return new StationPos(dimension, pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    public String dimension() {
+        return dimension;
     }
 
     public BlockPos pos() {
@@ -43,8 +50,26 @@ public final class StationPos {
         return x + " " + y + " " + z;
     }
 
+    /** 带维度的显示，比如「主世界 1 2 3」。 */
+    public String describe() {
+        return DimensionUtils.display(dimension) + " " + coordString();
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) return true;
+        if (!(other instanceof StationPos pos)) return false;
+        return x == pos.x && y == pos.y && z == pos.z
+            && dimension != null && dimension.equals(pos.dimension);
+    }
+
+    @Override
+    public int hashCode() {
+        return ((dimension == null ? 0 : dimension.hashCode()) * 31 + x) * 31 + y * 31 + z;
+    }
+
     @Override
     public String toString() {
-        return coordString();
+        return describe();
     }
 }

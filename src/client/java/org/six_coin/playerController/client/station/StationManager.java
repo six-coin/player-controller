@@ -6,6 +6,7 @@ import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
+import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
 
 import java.io.IOException;
@@ -94,6 +95,7 @@ public final class StationManager {
         try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             StationData loaded = GSON.fromJson(reader, StationData.class);
             if (loaded != null) data = loaded;
+            data.sanitize();
             loadedOk = true;
             ChatUtils.debug("已加载 world_" + world + " 的工作站：" + totalCount() + " 个坐标");
         } catch (Exception e) {
@@ -129,10 +131,10 @@ public final class StationManager {
     // 查询
     // ------------------------------------------------------------------
 
-    /** 单点部分的位置；没设过返回 null。 */
+    /** 单点部分的位置（带维度）；没设过返回 null。 */
     @Nullable
-    public BlockPos single(StationPart part) {
-        StationPos pos = switch (part) {
+    public StationPos single(StationPart part) {
+        return switch (part) {
             case STAND_POINT -> data.standPoint();
             case CRAFTING_TABLE -> data.craftingTable();
             case STONECUTTER -> data.stonecutter();
@@ -140,35 +142,31 @@ public final class StationManager {
             case SHULKER_BOX_PROVIDER -> data.shulkerBoxProvider();
             default -> null;
         };
-        return pos == null ? null : pos.pos();
     }
 
     /** 列表部分的位置（拷贝，改它没用）。 */
-    public List<BlockPos> list(StationPart part) {
-        List<StationPos> source = switch (part) {
-            case SHULKER_BOX_PLACEMENT -> data.shulkerBoxPlacement();
-            case ITEM_STORAGE -> data.itemStorage();
-            case ITEM_FINAL -> data.itemFinal();
+    public List<StationPos> list(StationPart part) {
+        return switch (part) {
+            case SHULKER_BOX_PLACEMENT -> List.copyOf(data.shulkerBoxPlacement());
+            case ITEM_STORAGE -> List.copyOf(data.itemStorage());
+            case ITEM_FINAL -> List.copyOf(data.itemFinal());
             default -> List.of();
         };
-        List<BlockPos> result = new ArrayList<>(source.size());
-        for (StationPos pos : source) result.add(pos.pos());
-        return result;
     }
 
     /** 这一部分所有已经设过的坐标：单点就是 0 或 1 个，列表就是全部。 */
-    public List<BlockPos> positions(StationPart part) {
+    public List<StationPos> positions(StationPart part) {
         if (part.isList()) return list(part);
-        BlockPos single = single(part);
+        StationPos single = single(part);
         return single == null ? List.of() : List.of(single);
     }
 
     /** 所有已经设过的坐标（去重），用来做触及范围检查。 */
-    public List<BlockPos> allPositions() {
-        List<BlockPos> all = new ArrayList<>();
-        Set<BlockPos> seen = new HashSet<>();
+    public List<StationPos> allPositions() {
+        List<StationPos> all = new ArrayList<>();
+        Set<StationPos> seen = new HashSet<>();
         for (StationPart part : StationPart.values()) {
-            for (BlockPos pos : positions(part)) {
+            for (StationPos pos : positions(part)) {
                 if (seen.add(pos)) all.add(pos);
             }
         }
@@ -183,8 +181,8 @@ public final class StationManager {
     // 修改
     // ------------------------------------------------------------------
 
-    public void setSingle(StationPart part, BlockPos pos) {
-        StationPos value = StationPos.of(pos);
+    public void setSingle(StationPart part, String dimension, BlockPos pos) {
+        StationPos value = StationPos.of(dimension, pos);
         switch (part) {
             case STAND_POINT -> data.standPoint(value);
             case CRAFTING_TABLE -> data.craftingTable(value);
@@ -194,29 +192,31 @@ public final class StationManager {
             default -> throw new IllegalArgumentException(part + " 不是单点");
         }
         save();
-        ChatUtils.debug("工作站 " + part.display() + " = " + pos.toShortString());
+        ChatUtils.debug("工作站 " + part.display() + " = " + value.describe());
     }
 
     /** 往列表里加一个位置（已经有了就返回 false）。 */
-    public boolean add(StationPart part, BlockPos pos) {
+    public boolean add(StationPart part, String dimension, BlockPos pos) {
         List<StationPos> target = mutableList(part);
-        for (StationPos existing : target) {
-            if (existing.pos().equals(pos)) return false;
-        }
-        target.add(StationPos.of(pos));
+        StationPos value = StationPos.of(dimension, pos);
+        if (target.contains(value)) return false;
+
+        target.add(value);
         save();
-        ChatUtils.debug("工作站 " + part.display() + " 加入 " + pos.toShortString()
+        ChatUtils.debug("工作站 " + part.display() + " 加入 " + value.describe()
             + "，现在 " + target.size() + " 个");
         return true;
     }
 
     /** 从列表里删一个位置（本来就没有返回 false）。 */
-    public boolean remove(StationPart part, BlockPos pos) {
+    public boolean remove(StationPart part, String dimension, BlockPos pos) {
         List<StationPos> target = mutableList(part);
-        boolean removed = target.removeIf(existing -> existing.pos().equals(pos));
+        boolean removed = target.removeIf(existing -> existing.dimension().equals(dimension)
+            && existing.pos().equals(pos));
         if (removed) {
             save();
-            ChatUtils.debug("工作站 " + part.display() + " 删掉 " + pos.toShortString()
+            ChatUtils.debug("工作站 " + part.display() + " 删掉 "
+                + DimensionUtils.display(dimension) + " " + pos.toShortString()
                 + "，现在 " + target.size() + " 个");
         }
         return removed;
