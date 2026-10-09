@@ -25,20 +25,25 @@ import java.util.Map;
 
 /**
  * 备货「第二部分 阶段1」的第 3 步：把用户手写的 {@code material.json}（跟第一部分读的是同一份）
- * 再处理一遍，算出**这次要合成哪些最终产物、要去取哪些原材料**（附件 2.1.3 的那六步）。
+ * 再处理一遍，算出**这次要合成哪些最终产物、要去取哪些原材料**（附件 2.1.3 的那七步）。
  *
  * <pre>
  * 提前处理：把第一部分阶段3 交过来的 station_data 反推成 check.json 里 item_storage 那种
  *          最简单的 item_list，记作 current_item_storage（只在这里用，用完就扔）
- * 第一步：material.json 里去掉 final_final 已经收过的最终产物 → 2_1_process_raw.json
+ * 第一步：material.json 里去掉 **final_pack** 已经处理过的最终产物 → 2_1_process_raw.json
  * 第二步：把 2_1 里所有「原材料」（recipe_type = base）摊平成 item_list → 2_2_material_raw.json
  * 第三步：all_items 的 overall + current_item_storage 凑得齐的才留 → 2_3_material_clean.json
  * 第四步：2_1 里「用到的材料有一个不在 2_3 里」的最终产物整个删掉 → 2_4_process_clean.json
  * 第五步：把 2_4 里所有原材料摊平成 item_list → 2_5_material_cleaner.json
- * 第六步：2_5 复制成 final_material.json、2_4 复制成 final_process.json
+ * 第六步：2_5 扣掉 current_item_storage 里已经有的部分 → 2_6_material_final.json
+ * 第七步：2_6 复制成 final_material.json、2_4 复制成 final_process.json
  * </pre>
  *
- * <p>这么一套下来，留下的只有「能够全量合成」的最终产物。不一定是最优解，但够用（需求原话）。
+ * <p>第一步看的是 {@code final_pack.json}（第一部分要**装盒**的完整清单），不是 {@code final_final.json}
+ * （那只是「还缺多少、要去容器里拿多少」）：仓库里本来就够的那部分最终产物也在 final_pack 里，
+ * 第一部分已经把它们装进盒子了，这里就不该再做一遍。
+ *
+ * <p>这么一套下来，留下的只有「能够全量合成」的最终产物，要去取的也是「还缺的」那部分。
  */
 public final class StockProcessMaterials {
 
@@ -56,6 +61,8 @@ public final class StockProcessMaterials {
                          int shortMaterialKinds,
                          List<String> shortItems,
                          List<String> droppedProducts,
+                         int cleanerMaterialKinds,
+                         int cleanerMaterialTotal,
                          int finalMaterialKinds,
                          int finalMaterialTotal,
                          Path processRawFile,
@@ -63,6 +70,7 @@ public final class StockProcessMaterials {
                          Path materialCleanFile,
                          Path processCleanFile,
                          Path materialCleanerFile,
+                         Path materialFinalFile,
                          Path finalMaterialFile,
                          Path finalProcessFile) {
     }
@@ -74,13 +82,14 @@ public final class StockProcessMaterials {
      * 单独测这套逻辑的时候可以直接给一组临时路径。
      */
     public record StockFiles(Path material,
-                             Path finalFinal,
+                             Path finalPack,
                              Path allItems,
                              Path processRaw,
                              Path materialRaw,
                              Path materialClean,
                              Path processClean,
                              Path materialCleaner,
+                             Path materialFinal,
                              Path finalMaterial,
                              Path finalProcess) {
     }
@@ -93,13 +102,14 @@ public final class StockProcessMaterials {
 
         return new StockFiles(
             manager.currentMaterialFile(task),
-            manager.currentFinalFinalFile(task),
+            manager.currentFinalPackFile(task),
             ContainerCacheManager.itemsFile(world),
             manager.currentProcessRawFile(task),
             manager.currentMaterialRawFile(task),
             manager.currentMaterialCleanFile(task),
             manager.currentProcessCleanFile(task),
             manager.currentMaterialCleanerFile(task),
+            manager.currentMaterialFinalFile(task),
             manager.currentFinalMaterialFile(task),
             manager.currentFinalProcessFile(task));
     }
@@ -120,11 +130,11 @@ public final class StockProcessMaterials {
         }
         JsonArray tree = readTree(files.material());
 
-        // final_final（第一部分收过的最终产物）
-        Map<String, Integer> collected = readItemList(files.finalFinal(), null);
-        ChatUtils.debug("第二部分：final_final 里有 " + collected.size() + " 种已经收过的最终产物");
+        // final_pack（第一部分要装盒的完整清单 = 第一部分已经处理过的最终产物）
+        Map<String, Integer> collected = readItemList(files.finalPack(), null);
+        ChatUtils.debug("第二部分：final_pack 里有 " + collected.size() + " 种第一部分已经处理过的最终产物");
 
-        // 第一步：去掉 final_final 已经收过的
+        // 第一步：去掉 final_pack 里已经有的（那些第一部分已经装盒了，不用再做）
         JsonArray raw = new JsonArray();
         List<String> droppedAtStep1 = new ArrayList<>();
         for (JsonElement element : tree) {
@@ -136,7 +146,7 @@ public final class StockProcessMaterials {
             raw.add(element);
         }
         writeTree(files.processRaw(), raw);
-        ChatUtils.debug("2_1 去掉 final_final 收过的 " + droppedAtStep1.size() + " 个最终产物："
+        ChatUtils.debug("2_1 去掉 final_pack 里已经有的 " + droppedAtStep1.size() + " 个最终产物："
             + describeList(droppedAtStep1) + " -> " + files.processRaw());
 
         // 第二步：摊平成原材料
@@ -186,23 +196,42 @@ public final class StockProcessMaterials {
         writeItemList(files.materialCleaner(), materialCleaner);
         ChatUtils.debug("2_5 原材料 " + materialCleaner.size() + " 种 -> " + files.materialCleaner());
 
-        // 第六步：复制
+        // 第六步：扣掉仓库里已经有的那部分（仓库里有的就不用再去容器里取了）
+        Map<String, Integer> materialFinal = new LinkedHashMap<>();
+        int coveredByStorage = 0;
+        for (Map.Entry<String, Integer> entry : materialCleaner.entrySet()) {
+            int have = currentItemStorage.getOrDefault(entry.getKey(), 0);
+            int left = entry.getValue() - have;
+            if (left <= 0) {
+                coveredByStorage++;
+                continue;
+            }
+            materialFinal.put(entry.getKey(), left);
+        }
+        writeItemList(files.materialFinal(), materialFinal);
+        ChatUtils.debug("2_6 扣掉仓库已有的 " + coveredByStorage + " 种，还要取 "
+            + materialFinal.size() + " 种 -> " + files.materialFinal());
+
+        // 第七步：复制
         Path finalMaterialFile = files.finalMaterial();
         Path finalProcessFile = files.finalProcess();
         Files.createDirectories(finalMaterialFile.getParent());
-        Files.copy(files.materialCleaner(), finalMaterialFile, StandardCopyOption.REPLACE_EXISTING);
+        Files.copy(files.materialFinal(), finalMaterialFile, StandardCopyOption.REPLACE_EXISTING);
         Files.copy(files.processClean(), finalProcessFile, StandardCopyOption.REPLACE_EXISTING);
 
         int rawTotal = 0;
         for (int count : materialRaw.values()) rawTotal += count;
         int cleanerTotal = 0;
         for (int count : materialCleaner.values()) cleanerTotal += count;
+        int finalTotal = 0;
+        for (int count : materialFinal.values()) finalTotal += count;
 
         return new Result(raw.size(), clean.size(),
             materialRaw.size(), rawTotal, materialClean.size(), shortItems.size(),
             shortItems, droppedProducts, materialCleaner.size(), cleanerTotal,
+            materialFinal.size(), finalTotal,
             files.processRaw(), files.materialRaw(), files.materialClean(), files.processClean(),
-            files.materialCleaner(), finalMaterialFile, finalProcessFile);
+            files.materialCleaner(), files.materialFinal(), finalMaterialFile, finalProcessFile);
     }
 
     // ------------------------------------------------------------------

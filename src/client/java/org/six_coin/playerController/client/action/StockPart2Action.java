@@ -174,9 +174,12 @@ public class StockPart2Action extends Action {
                 ChatUtils.info("（丢掉的最终产物 " + result.droppedProducts().size() + " 个："
                     + join(result.droppedProducts()) + "）");
             }
-            ChatUtils.info("2_5 最终要取的原材料：" + result.finalMaterialKinds() + " 种 / "
-                + result.finalMaterialTotal() + " 个 → " + result.materialCleanerFile());
-            ChatUtils.info("final_material.json（阶段2 照它取货）和 final_process.json（阶段3 合成用）都写好了");
+            ChatUtils.info("2_5 原材料（合成要用的全部）：" + result.cleanerMaterialKinds() + " 种 / "
+                + result.cleanerMaterialTotal() + " 个 → " + result.materialCleanerFile());
+            ChatUtils.info("2_6 扣掉仓库里已经有的，还要去取：" + result.finalMaterialKinds() + " 种 / "
+                + result.finalMaterialTotal() + " 个 → " + result.materialFinalFile()
+                + "，复制成 " + result.finalMaterialFile());
+            ChatUtils.info("final_process.json（阶段3 合成用）也写好了 → " + result.finalProcessFile());
 
             // 阶段2：取货（用第二部分自己的文件，卸货都进 item_storage）
             stage2 = new StockStage2Action(task, "第二阶段2（取货）",

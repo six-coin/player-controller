@@ -27,19 +27,25 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * 备货「第一部分 阶段1」的第 3 步：把用户手写的 {@code material.json} 处理成三份文件。
+ * 备货「第一部分 阶段1」的第 3 步：把用户手写的 {@code material.json} 处理成几份文件。
  *
  * <ol>
- *   <li>{@code 1_1_material_clean.json}：只留最外层的「物品 + 数量」；</li>
- *   <li>{@code 1_2_material_optimized.json}：拿 check.json 的 {@code item_storage} 和
+ *   <li>{@code 1_1_material_clean.json}：只留最外层的「物品 + 数量」（也就是**完整需求量**）；</li>
+ *   <li>{@code 1_2_material_optimized.json}（要**去取多少**）：拿 check.json 的 {@code item_storage} 和
  *       all_items.json 的 {@code overall} 去减：
  *       <ul>
  *         <li>仓库 + 容器里的总量都不够 → 舍弃（记一条提示）；</li>
  *         <li>仓库里就够了 → 舍弃；</li>
  *         <li>否则 → 记「还需要多少」（要的数量 − 仓库数量，也就是要去容器里取的量）；</li>
  *       </ul></li>
- *   <li>把 1_2 原样复制成 {@code final_final.json}。</li>
+ *   <li>把 1_2 原样复制成 {@code final_final.json}（第一部分阶段2 照它取货）；</li>
+ *   <li>{@code 1_3_material_can_access_all.json}（要**装多少**）：同样是 1_1 里「仓库 + 容器凑得齐」的，
+ *       但数量是**完整需求量** —— 因为分盒的时候，仓库里本来就有的那部分也要一起装进盒子；</li>
+ *   <li>把 1_3 原样复制成 {@code final_pack.json}（第一部分阶段3 照它分盒）。</li>
  * </ol>
+ *
+ * <p>两个清单的区别：{@code final_final} 是「还缺多少、要去拿」，{@code final_pack} 是
+ * 「最后要装进盒子里多少」。仓库里已经有的东西只在 final_pack 里出现，取货的时候不会再取一遍。
  */
 public final class StockMaterials {
 
@@ -56,9 +62,13 @@ public final class StockMaterials {
                          int skippedShort,
                          int skippedCovered,
                          List<String> shortItems,
+                         int packKinds,
+                         int packTotal,
                          Path cleanFile,
                          Path optimizedFile,
-                         Path finalFile) {
+                         Path finalFile,
+                         Path canAccessAllFile,
+                         Path finalPackFile) {
     }
 
     private StockMaterials() {
@@ -110,18 +120,37 @@ public final class StockMaterials {
         writeItems(optimizedFile, optimized);
         ChatUtils.debug("1_2 需要取货：" + optimized.size() + " 种 -> " + optimizedFile);
 
-        // 第三步：复制成 final_final.json
+        // 第三步：复制成 final_final.json（阶段2 取货照它）
         Path finalFile = manager.currentFinalFinalFile(task);
         Files.createDirectories(finalFile.getParent());
         Files.copy(optimizedFile, finalFile, StandardCopyOption.REPLACE_EXISTING);
+
+        // 第四步：1_3 —— 同样是「凑得齐」的，但数量是完整需求量（分盒装的是全部，不是只装取回来的那部分）
+        Map<Item, Integer> canAccessAll = new LinkedHashMap<>();
+        for (Map.Entry<Item, Integer> entry : clean.entrySet()) {
+            Item item = entry.getKey();
+            int need = entry.getValue();
+            if (storage.getOrDefault(item, 0) + overall.getOrDefault(item, 0) < need) continue;
+            canAccessAll.put(item, need);
+        }
+        Path canAccessAllFile = manager.currentCanAccessAllFile(task);
+        writeItems(canAccessAllFile, canAccessAll);
+        ChatUtils.debug("1_3 能全量装盒：" + canAccessAll.size() + " 种 -> " + canAccessAllFile);
+
+        // 第五步：复制成 final_pack.json（阶段3 分盒照它）
+        Path finalPackFile = manager.currentFinalPackFile(task);
+        Files.copy(canAccessAllFile, finalPackFile, StandardCopyOption.REPLACE_EXISTING);
 
         int cleanTotal = 0;
         for (int count : clean.values()) cleanTotal += count;
         int optimizedTotal = 0;
         for (int count : optimized.values()) optimizedTotal += count;
+        int packTotal = 0;
+        for (int count : canAccessAll.values()) packTotal += count;
 
         return new Result(clean.size(), cleanTotal, optimized.size(), optimizedTotal,
-            skippedShort, skippedCovered, shortItems, cleanFile, optimizedFile, finalFile);
+            skippedShort, skippedCovered, shortItems, canAccessAll.size(), packTotal,
+            cleanFile, optimizedFile, finalFile, canAccessAllFile, finalPackFile);
     }
 
     // ------------------------------------------------------------------

@@ -293,18 +293,21 @@ public class StockStartAction extends Action {
             + " 个容器，overall " + gathered.overallKinds() + " 种 / " + gathered.overallCount() + " 个 → "
             + gathered.file());
 
-        // 第 3 步：material.json -> 三份文件
+        // 第 3 步：material.json -> 1_1 / 1_2(final_final) / 1_3(final_pack)
         try {
             StockMaterials.Result result = StockMaterials.process(task);
             ChatUtils.info("1_1 材料清单：" + result.cleanKinds() + " 种 / " + result.cleanTotal()
                 + " 个 → " + result.cleanFile());
             ChatUtils.info("1_2 还要取货：" + result.optimizedKinds() + " 种 / " + result.optimizedTotal()
-                + " 个（仓库里已经有的 " + result.skippedCovered() + " 种被扣掉）→ " + result.optimizedFile());
+                + " 个（仓库里已经有的 " + result.skippedCovered() + " 种被扣掉）→ " + result.optimizedFile()
+                + "，复制成 " + result.finalFile());
             if (!result.shortItems().isEmpty()) {
                 ChatUtils.info("有 " + result.skippedShort() + " 种仓库 + 容器里都不够，已按规则舍弃："
                     + String.join("、", limit(result.shortItems(), 6)));
             }
-            ChatUtils.info("已复制一份到 " + result.finalFile());
+            ChatUtils.info("1_3 能全量装盒：" + result.packKinds() + " 种 / " + result.packTotal()
+                + " 个（完整需求量，不是只装取回来的那部分）→ " + result.canAccessAllFile()
+                + "，复制成 " + result.finalPackFile());
             ChatUtils.info("第一阶段阶段1 完成，接着进入阶段2（取货）");
             stage2 = new StockStage2Action(task);
             stage2.start();

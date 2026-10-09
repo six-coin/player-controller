@@ -46,12 +46,17 @@ import java.util.function.Supplier;
  *       退出界面 → 用快捷栏第一格的钻石镐挖掉 id=1 的潜影盒 → {@code move to_position}(盒子上面那一格)
  *       → 自然下落 → 捡起掉落物（落在快捷栏第二格）→ {@code move y 1} → {@code move to_position}(站立点)
  *       → 把捡到的盒子放进 item_final → 再从提供处取一个空盒放到 id=1；</li>
- *   <li><b>第 2 步</b>：遍历 item_storage，用 {@code only_item} 把 final_final 里的东西按<b>物品形态</b>取出来
+ *   <li><b>第 2 步</b>：遍历 item_storage，用 {@code only_item} 把 {@code final_pack} 里的东西按<b>物品形态</b>取出来
  *       （潜影盒整个无视）。物品栏满了就倒进最终产物暂存处，然后回到同一个容器接着取；</li>
  *   <li><b>第 3 步</b>：再处理<b>装在潜影盒里</b>的那些。维护 next_shulker_box_placement_id（初始 2，
  *       越界就回 2）：用 {@code only_one_shulker} 从 item_storage 取出一个装着所需物品的盒子放到摆放处，
  *       对着这个盒子 {@code get} 需要的东西；没拿完就先倒进暂存处再拿一遍，直到 all_cleared。</li>
  * </ol>
+ *
+ * <p>注意装盒用的是 {@code final_pack}（{@code 1_3_material_can_access_all.json} 的副本）：
+ * 它是**完整需求量**，而 {@code final_final} 是「还缺多少、要去容器里取多少」。
+ * 仓库里本来就有的那部分（比如仓库有 10 个、需求 30）也要一起装进盒子，
+ * 所以这里必须用 final_pack，不能拿 final_final 当需求。
  *
  * <p>「挖盒子 → 落下去捡 → 飞回来 → 走回站立点」这一整段飞行是**连着**的：
  * {@code FlightVelocity} 在这里 begin 一次，中途每一段移动自己 begin/end 不会把飞行关掉，
@@ -115,9 +120,9 @@ public class StockStage3Action extends Action {
     private final StationState handedState;
 
     private StationState state;
-    /** 还要装进暂存处的成品（跟 final_final 一样，会被每次取货扣减）。 */
+    /** 还要装进暂存处的成品（final_pack，**完整需求量**；每次取货会扣减它）。 */
     private ItemList need;
-    /** 完整的一份 final_final，只用来判断「这是不是成品」（不会被扣）。 */
+    /** 完整的一份 final_pack，只用来判断「这是不是成品」（不会被扣）。 */
     private ItemList finalWanted;
 
     private final List<Integer> storageIds = new ArrayList<>();
@@ -224,7 +229,7 @@ public class StockStage3Action extends Action {
         }
 
         if (need.isEmpty()) {
-            ChatUtils.info("final_final 里没有要装盒的东西了，阶段3 直接结束");
+            ChatUtils.info("final_pack 里没有要装盒的东西了，阶段3 直接结束");
             finish();
             return;
         }
@@ -331,8 +336,12 @@ public class StockStage3Action extends Action {
     // ------------------------------------------------------------------
 
     private void loadNeed() throws Exception {
-        Path file = StockManager.get().currentFinalFinalFile(task);
-        if (!Files.exists(file)) throw new IllegalStateException("找不到 " + file + "（阶段1 生成的？）");
+        // 装盒用的是 final_pack（**完整需求量**），不是 final_final（那是要去取货的量）：
+        // 仓库里本来就有的那部分也要一起装进盒子，不然 10 + 拿回来的 20 只会装 20 个。
+        Path file = StockManager.get().currentFinalPackFile(task);
+        if (!Files.exists(file)) {
+            throw new IllegalStateException("找不到 " + file + "（第一部分阶段1 生成的？）");
+        }
 
         String json = Files.readString(file, StandardCharsets.UTF_8);
         need = ItemList.parse(json);
@@ -616,7 +625,7 @@ public class StockStage3Action extends Action {
     }
 
     // ------------------------------------------------------------------
-    // 第 2 步：物品形态的 final_final
+    // 第 2 步：物品形态的成品
     // ------------------------------------------------------------------
 
     private void pushStep2() {
@@ -673,7 +682,7 @@ public class StockStage3Action extends Action {
     }
 
     // ------------------------------------------------------------------
-    // 第 3 步：装在潜影盒里的 final_final
+    // 第 3 步：装在潜影盒里的成品
     // ------------------------------------------------------------------
 
     private void pushStep3() {
@@ -949,7 +958,7 @@ public class StockStage3Action extends Action {
         return left.isEmpty() ? Map.of() : new TreeMap<>(left.get(0));
     }
 
-    /** 物品栏 27 格里有没有成品（也就是 final_final 里写过的东西）。 */
+    /** 物品栏 27 格里有没有成品（也就是 final_pack 里写过的东西）。 */
     private boolean inventoryHasWanted() {
         ClientPlayerEntity player = MinecraftClient.getInstance().player;
         if (player == null) return false;
