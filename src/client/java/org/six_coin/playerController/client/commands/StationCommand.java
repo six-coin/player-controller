@@ -1,5 +1,6 @@
 package org.six_coin.playerController.client.commands;
 
+import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -226,7 +227,7 @@ public final class StationCommand {
         }
 
         builder.then(ClientCommandManager.literal("set")
-            .then(coords().executes(context -> setCoords(context, part))));
+            .then(coords(context -> setCoords(context, part))));
         return builder;
     }
 
@@ -317,11 +318,11 @@ public final class StationCommand {
             .then(ClientCommandManager.literal("add_target")
                 .executes(context -> addTarget(context, part)))
             .then(ClientCommandManager.literal("add")
-                .then(coords().executes(context -> addCoords(context, part))))
+                .then(coords(context -> addCoords(context, part))))
             .then(ClientCommandManager.literal("del_target")
                 .executes(context -> delTarget(context, part)))
             .then(ClientCommandManager.literal("del")
-                .then(dimCoords().executes(context -> delCoords(context, part))))
+                .then(dimCoords(context -> delCoords(context, part))))
             .then(ClientCommandManager.literal("list")
                 .executes(context -> listPart(context, part)));
     }
@@ -558,26 +559,36 @@ public final class StationCommand {
     // 小工具
     // ------------------------------------------------------------------
 
-    /** x y z 三个参数，补全和别处一样：一次 Tab 补齐成准星指着的方块。 */
-    private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> coords() {
-        return ClientCommandManager.argument("x", IntegerArgumentType.integer())
-            .suggests(LookSuggestions::x)
-            .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
-                .suggests(LookSuggestions::y)
-                .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
-                    .suggests(LookSuggestions::z)));
-    }
-
-    /** del 用的 x y z（后面还能补一个 [dim]，补全的就是维度）。 */
-    private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> dimCoords() {
+    /**
+     * x y z 三个参数，补全和别处一样：一次 Tab 补齐成准星指着的方块。
+     *
+     * <p>注意命令必须挂在**最里面**那个参数（z）上：brigadier 只有在「读到输入结尾、而且当前节点有命令」
+     * 的时候才认这条命令，挂在 x 上的话 {@code add 1 2 3} 走到 z 就没有命令了，会报 Unknown command。
+     */
+    private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> coords(
+            Command<FabricClientCommandSource> command) {
         return ClientCommandManager.argument("x", IntegerArgumentType.integer())
             .suggests(LookSuggestions::x)
             .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
                 .suggests(LookSuggestions::y)
                 .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
                     .suggests(LookSuggestions::z)
+                    .executes(command)));
+    }
+
+    /** del 用的 x y z：z 上挂「不带 dim」的版本，可选的 [dim] 上挂同一个命令。 */
+    private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> dimCoords(
+            Command<FabricClientCommandSource> command) {
+        return ClientCommandManager.argument("x", IntegerArgumentType.integer())
+            .suggests(LookSuggestions::x)
+            .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+                .suggests(LookSuggestions::y)
+                .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                    .suggests(LookSuggestions::z)
+                    .executes(command)
                     .then(ClientCommandManager.argument("dim", StringArgumentType.greedyString())
-                        .suggests(StationCommand::suggestDimensions))));
+                        .suggests(StationCommand::suggestDimensions)
+                        .executes(command))));
     }
 
     /** [dim] 的补全：原版三个维度 + 工作站里已经出现过的维度。 */
