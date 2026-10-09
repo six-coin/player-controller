@@ -133,10 +133,10 @@ public final class RecipeCommand {
         return 1;
     }
 
-    /** 快捷栏第 3~9 格（背包下标 38~44）空着几格。 */
+    /** 快捷栏第 3~9 格（背包下标 2~8）空着几格。 */
     private static int freeHotbarSlots(ClientPlayerEntity player) {
         int free = 0;
-        for (int i = 38; i <= 44; i++) {
+        for (int i = 2; i <= 8; i++) {
             if (player.getInventory().getStack(i).isEmpty()) free++;
         }
         return free;

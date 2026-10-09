@@ -7,16 +7,14 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import net.minecraft.command.CommandSource;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 
-import java.util.HashSet;
+import java.util.Locale;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -53,9 +51,15 @@ public final class ItemIdArgumentType implements ArgumentType<Item> {
 
     @Override
     public <S> CompletableFuture<Suggestions> listSuggestions(CommandContext<S> context, SuggestionsBuilder builder) {
-        Set<String> ids = new HashSet<>();
-        for (Identifier id : Registries.ITEM.getIds()) ids.add(id.toString());
-        return CommandSource.suggestMatching(ids, builder);
+        String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
+        for (Identifier id : Registries.ITEM.getIds()) {
+            String full = id.toString();
+            // 只从开头匹配；没打冒号的话，也可以从冒号后面（路径部分）开始匹配
+            boolean match = full.startsWith(remaining)
+                || (!remaining.contains(":") && id.getPath().startsWith(remaining));
+            if (match) builder.suggest(full);
+        }
+        return builder.buildFuture();
     }
 
     private static String readId(StringReader reader) throws CommandSyntaxException {

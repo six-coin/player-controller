@@ -225,7 +225,8 @@ public final class StationCommand {
                 .executes(context -> setTarget(context, part)));
         }
 
-        builder.then(coords().executes(context -> setCoords(context, part)));
+        builder.then(ClientCommandManager.literal("set")
+            .then(coords().executes(context -> setCoords(context, part))));
         return builder;
     }
 
@@ -315,10 +316,12 @@ public final class StationCommand {
         return ClientCommandManager.literal(part.id())
             .then(ClientCommandManager.literal("add_target")
                 .executes(context -> addTarget(context, part)))
-            .then(coords().executes(context -> addCoords(context, part)))
+            .then(ClientCommandManager.literal("add")
+                .then(coords().executes(context -> addCoords(context, part))))
             .then(ClientCommandManager.literal("del_target")
                 .executes(context -> delTarget(context, part)))
-            .then(dimCoords().executes(context -> delCoords(context, part)))
+            .then(ClientCommandManager.literal("del")
+                .then(dimCoords().executes(context -> delCoords(context, part))))
             .then(ClientCommandManager.literal("list")
                 .executes(context -> listPart(context, part)));
     }
@@ -492,18 +495,28 @@ public final class StationCommand {
         for (StationPos stationPos : placements) {
             BlockPos pos = stationPos.pos();
             BlockState state = mc.world.getBlockState(pos);
+            // 本身是空气、上面是空气、下面不是空气（潜影盒要摆在这一格、站在上面那一格去开）
             if (!state.isAir()) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 不是空气（现在是 "
+                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 本身不是空气（现在是 "
                     + ContainerTypes.idOf(state) + "）");
-            } else if (!mc.world.getBlockState(pos.up()).isAir()) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面不是空气，潜影盒放上去打不开");
+            }
+            if (!mc.world.getBlockState(pos.up()).isAir()) {
+                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面不是空气（那里应该是能站人的地方）");
+            }
+            if (mc.world.getBlockState(pos.down()).isAir()) {
+                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 下面一格是空气（潜影盒没地方放）");
             }
 
-            Waypoint node = graph.at(stationPos.dimension(), pos);
-            if (node == null) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 本身还不是路径点");
-            } else if (standNode != null && graph.shortestPath(standNode.id(), node.id()) == null) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 从站立点走不到");
+            // 路径点要在上面那一格（站上去开潜影盒），本身不能是路径点
+            if (graph.at(stationPos.dimension(), pos) != null) {
+                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 本身不该是路径点（路径点应该在它上面那一格）");
+            }
+            Waypoint above = graph.at(stationPos.dimension(), pos.up());
+            if (above == null) {
+                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面那一格 "
+                    + pos.up().toShortString() + " 还不是路径点");
+            } else if (standNode != null && graph.shortestPath(standNode.id(), above.id()) == null) {
+                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面那一格从站立点走不到");
             }
         }
 

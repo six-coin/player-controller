@@ -36,8 +36,8 @@ public class CraftAction extends Action {
     /** 界面打开之后等几 tick 再动，保证槽位数据同步完了。 */
     private static final int SETTLE_TICKS = 2;
 
-    /** 每次 QuickMove 之后等几 tick，等服务器把新的成品格子同步回来。 */
-    private static final int RESULT_WAIT_TICKS = 2;
+    /** 每次 QuickMove 之后等几 tick，等服务器把新的成品 / 输入格子同步回来。 */
+    private static final int RESULT_WAIT_TICKS = 4;
 
     private static final int MAX_OPEN_WAIT_TICKS = 60;
 
@@ -61,11 +61,9 @@ public class CraftAction extends Action {
     private int settleTicks;
     private int totalTicks;
     private int cellIndex;
-    private int crafts;
+    /** 点了几次成品格（原版一次 shift 点击会把能合成的都合掉，所以通常只有 1 次）。 */
+    private int clicks;
     private int recipeIndex = -1;
-
-    /** 开始时快捷栏里有几个目标物品，收尾时对比一下。 */
-    private int hotbarBefore;
 
     public CraftAction(CraftPlan plan, BlockPos stationPos) {
         this.plan = plan;
@@ -90,7 +88,6 @@ public class CraftAction extends Action {
             return;
         }
 
-        hotbarBefore = countInHotbar(player, plan.target());
         ChatUtils.debug("开始 " + plan.describe());
         ContainerOpener.open(mc, player, stationPos);
     }
@@ -135,12 +132,8 @@ public class CraftAction extends Action {
             return;
         }
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player != null) {
-            int now = countInHotbar(mc.player, plan.target());
-            ChatUtils.info(name() + "完成：" + id(plan.target()) + " x" + plan.count()
-                + "，快捷栏里从 " + hotbarBefore + " 个变成 " + now + " 个（如果数目不对，看 debug 日志）");
-        }
+        ChatUtils.info(name() + "完成：" + id(plan.target()) + " x" + plan.count()
+            + "（点了 " + clicks + " 次成品格）");
     }
 
     // ------------------------------------------------------------------
@@ -182,7 +175,7 @@ public class CraftAction extends Action {
     /** 摆材料：每 tick 一下点击。 */
     private void tickPlace(MinecraftClient mc, ClientPlayerEntity player) {
         if (cellIndex >= plan.cells().size()) {
-            crafts = 0;
+            clicks = 0;
             settleTicks = 0;
             phase = Phase.WAIT_RESULT;
             return;
@@ -230,7 +223,13 @@ public class CraftAction extends Action {
         phase = Phase.CRAFT;
     }
 
-    /** 反复 QuickMove 成品。 */
+    /**
+     * QuickMove 成品。
+     *
+     * <p>注意：原版 shift+点击成品格是「一次把所有能合成的都合成掉」（工作台就是这样），
+     * 所以绝大多数情况点一次就够了。这里用「材料还在不在格子里」来判断还需不需要再点：
+     * 材料被清空就收工，还剩（例如切石机一次只切一个）就再来一下。
+     */
     private void tickCraft(MinecraftClient mc, ClientPlayerEntity player) {
         // 切石机：先把要切的配方选上
         if (plan.station() == CraftPlan.Station.STONECUTTER && recipeIndex < 0) {
@@ -238,7 +237,14 @@ public class CraftAction extends Action {
             return;
         }
 
-        if (crafts >= plan.crafts()) {
+        // 格子里没材料了 → 完事
+        if (!hasMaterials()) {
+            phase = Phase.DONE;
+            return;
+        }
+
+        if (clicks >= plan.crafts()) {
+            ChatUtils.debug("已经点了 " + clicks + " 次成品，格子里还剩材料，先收工（理论上应该正好取完）");
             phase = Phase.DONE;
             return;
         }
@@ -246,7 +252,7 @@ public class CraftAction extends Action {
         int resultSlot = resultSlotId();
         ItemStack result = slotStack(resultSlot);
         if (result.isEmpty()) {
-            fail("成品格是空的（第 " + (crafts + 1) + "/" + plan.crafts() + " 次），材料可能没摆对");
+            fail("成品格是空的（第 " + (clicks + 1) + "/" + plan.crafts() + " 次），材料可能没摆对");
             return;
         }
         if (!result.isOf(plan.target())) {
@@ -255,9 +261,20 @@ public class CraftAction extends Action {
         }
 
         click(mc, player, resultSlot, 0, SlotActionType.QUICK_MOVE);
-        crafts++;
+        clicks++;
         settleTicks = 0;
         phase = Phase.WAIT_RESULT;
+    }
+
+    /** 格子里还有没有材料：工作台看 9 个输入格，切石机看那唯一一格。 */
+    private boolean hasMaterials() {
+        if (plan.station() == CraftPlan.Station.STONECUTTER) {
+            return !slotStack(StonecutterScreenHandler.INPUT_ID).isEmpty();
+        }
+        for (Slot slot : ((CraftingScreenHandler) handler).getInputSlots()) {
+            if (!slot.getStack().isEmpty()) return true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------
@@ -382,15 +399,6 @@ public class CraftAction extends Action {
         if (mc.player == null || handler == null) return;
         if (mc.player.currentScreenHandler != handler) return;
         mc.player.closeHandledScreen();
-    }
-
-    private static int countInHotbar(ClientPlayerEntity player, Item item) {
-        int total = 0;
-        for (int i = 36; i < 45; i++) {
-            ItemStack stack = player.getInventory().getStack(i);
-            if (!stack.isEmpty() && stack.isOf(item)) total += stack.getCount();
-        }
-        return total;
     }
 
     private static String id(Item item) {
