@@ -36,6 +36,9 @@ public class MoveAction extends Action {
     /** 这次移动有没有武装过传送门记录（失败时只撤自己武装的那次）。 */
     private boolean armedPortal;
 
+    /** 自己有没有 begin 过飞行（begin/end 是引用计数的，没 begin 过就别 end）。 */
+    private boolean engaged;
+
     public MoveAction(Direction.Axis axis, int blocks) {
         this.axis = axis;
         this.blocks = blocks;
@@ -97,6 +100,7 @@ public class MoveAction extends Action {
         driver = new MoveDriver(axis, target, blocks);
 
         FlightVelocity.begin();
+        engaged = true;
 
         ChatUtils.debug("起点 %s=%.3f，目标 %.3f，速度 %.2f 格/tick",
             axisName(axis), start, target, PlayerControllerConfig.getMoveSpeed());
@@ -139,7 +143,10 @@ public class MoveAction extends Action {
 
     @Override
     protected void onEnd() {
-        FlightVelocity.end();
+        if (engaged) {
+            FlightVelocity.end();
+            engaged = false;
+        }
 
         // 失败 / 被取消时不要记录边，避免写下实际没走通的路；
         // 武装过的传送门记录也一起撤掉（没武装过就不动别人的武装状态）

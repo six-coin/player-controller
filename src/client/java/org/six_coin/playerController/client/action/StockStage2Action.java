@@ -108,6 +108,17 @@ public class StockStage2Action extends Action {
         this.task = task;
     }
 
+    /**
+     * 这一轮维护的 station_data（阶段3 直接接着用）。
+     *
+     * <p>阶段2 会往 item_storage 里倒潜影盒、往 item_final 里倒东西，这些改动只记在这份内存数据里；
+     * 阶段3 要是再去读阶段1 那份 check.json，看到的还是「阶段2 之前」的样子，
+     * 那阶段2 才倒进去的潜影盒就找不到、里面的东西永远拿不出来。
+     */
+    public StationState state() {
+        return state;
+    }
+
     @Override
     public String name() {
         return "备货 " + task + " 阶段2（取货）";

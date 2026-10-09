@@ -6,6 +6,7 @@ import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.context.ParsedCommandNode;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.client.MinecraftClient;
@@ -24,6 +25,7 @@ import org.six_coin.playerController.client.util.ItemList;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 
 /**
  * {@code /pc container get ...} —— 打开容器，按 item_list 把东西拿进主背包。
@@ -31,10 +33,18 @@ import java.util.function.BiFunction;
  * <pre>
  *   /pc container get from_target {"minecraft:cobblestone": 65, "minecraft:grass_block": 13}
  *   /pc container get from_id 3 {"minecraft:cobblestone": 65}
+ *   /pc container get from_position 1 2 3 {"minecraft:cobblestone": 65}
+ *   /pc container special_get from_position 1 2 3 only_item {"minecraft:cobblestone": 65}
+ *   /pc container special_get from_id 3 only_one_shulker {"minecraft:cobblestone": 65}
  * </pre>
  *
- * <p>{@code from_target} 用的是准星指着的方块；{@code from_id} 用的是容器缓存里的某个编号。
- * 两个都要求目标在触及范围内、而且是容器，其余流程完全一样。
+ * <p>{@code from_target} 用的是准星指着的方块；{@code from_id} 用的是容器缓存里的某个编号；
+ * {@code from_position} 用的是坐标。三个都要求目标在触及范围内、而且是容器，其余流程完全一样。
+ *
+ * <p>两个特殊模式（{@link ContainerGetAction.Mode}）写在 item_list **前面**：item_list 是贪婪参数，
+ * 写在它后面的字面量只会被它吃进去。{@code only_item} 只拿物品形态的（潜影盒整个无视），
+ * {@code only_one_shulker} 只找一个「里面装着 item_list 需要的东西」的潜影盒，放进快捷栏第三格
+ * 且**不输出** item_list。
  *
  * <p>具体规则见 {@link ContainerGetAction}；命令跑完会把修改后的 item_list 原样输出到聊天栏，
  * 并且把这个容器在缓存里的物品列表刷新一遍。
@@ -47,22 +57,13 @@ public final class ContainerCommand {
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
         return ClientCommandManager.literal("container")
             .then(ClientCommandManager.literal("get")
-                .then(ClientCommandManager.literal("from_target")
-                    .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
-                        .executes(ContainerCommand::getFromTarget)))
-                .then(ClientCommandManager.literal("from_position")
-                    .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
-                        .suggests(LookSuggestions::x)
-                        .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
-                            .suggests(LookSuggestions::y)
-                            .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
-                                .suggests(LookSuggestions::z)
-                                .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
-                                    .executes(ContainerCommand::getFromPosition))))))
-                .then(ClientCommandManager.literal("from_id")
-                    .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
-                        .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
-                            .executes(ContainerCommand::getFromId)))))
+                .then(getNode("from_target", null, false))
+                .then(getNode("from_position", "position", false))
+                .then(getNode("from_id", "id", false)))
+            .then(ClientCommandManager.literal("special_get")
+                .then(getNode("from_target", null, true))
+                .then(getNode("from_position", "position", true))
+                .then(getNode("from_id", "id", true)))
             .then(ClientCommandManager.literal("put")
                 .then(putToTargetNode())
                 .then(putToIdNode())
@@ -119,58 +120,110 @@ public final class ContainerCommand {
 
     // ------------------------------------------------------------------
 
-    private static int getFromTarget(CommandContext<FabricClientCommandSource> context) {
-        FabricClientCommandSource source = context.getSource();
-        if (!hasPlayer(source)) return 0;
-
-        ItemList itemList = readItemList(source, context);
-        if (itemList == null) return 0;
-
-        BlockPos pos = PlayerUtils.lookedAtBlock();
-        if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
-            return 0;
+    /**
+     * {@code get / special_get from_target|from_position|from_id} 三条命令，结构一样：
+     * 参数（没有 / x y z / id）→ 具体挂什么在最后那层节点上（见 {@link #fromNode}）。
+     *
+     * <p>{@code special_get} 把模式字面量放在坐标**后面**、item_list **前面**，因为 item_list 是贪婪的
+     * （贪到行尾），写在它后面的字面量只会被它吃进去：
+     * <pre>
+     *   /pc container special_get from_position &lt;x&gt; &lt;y&gt; &lt;z&gt; only_item &lt;item_list&gt;
+     * </pre>
+     */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> getNode(String name, @Nullable String arg,
+                                                                            boolean special) {
+        if (special) {
+            return fromNode(name, arg, leaf -> {
+                leaf.then(modeNode("only_item", ContainerGetAction.Mode.ONLY_ITEM));
+                leaf.then(modeNode("only_one_shulker", ContainerGetAction.Mode.ONLY_ONE_SHULKER));
+            });
         }
-        return startGet(source, pos, itemList);
+        return fromNode(name, arg, leaf -> leaf.then(
+            ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
+                .executes(context -> runGet(context, ContainerGetAction.Mode.NORMAL))));
     }
 
-    private static int getFromPosition(CommandContext<FabricClientCommandSource> context) {
-        FabricClientCommandSource source = context.getSource();
-        if (!hasPlayer(source)) return 0;
-
-        ItemList itemList = readItemList(source, context);
-        if (itemList == null) return 0;
-
-        BlockPos pos = new BlockPos(
-            IntegerArgumentType.getInteger(context, "x"),
-            IntegerArgumentType.getInteger(context, "y"),
-            IntegerArgumentType.getInteger(context, "z"));
-        return startGet(source, pos, itemList);
+    /** {@code only_item <item_list>} / {@code only_one_shulker <item_list>}。 */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> modeNode(String modeName,
+                                                                             ContainerGetAction.Mode mode) {
+        return ClientCommandManager.literal(modeName).then(
+            ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
+                .executes(context -> runGet(context, mode)));
     }
 
-    private static int getFromId(CommandContext<FabricClientCommandSource> context) {
+    /**
+     * 建出 {@code from_target} / {@code from_position x y z} / {@code from_id id}，
+     * 最后那层节点交给 {@code attach} 挂东西（item_list 或者模式字面量）。
+     */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> fromNode(
+        String name, @Nullable String arg,
+        Consumer<ArgumentBuilder<FabricClientCommandSource, ?>> attach) {
+
+        LiteralArgumentBuilder<FabricClientCommandSource> node = ClientCommandManager.literal(name);
+        if (arg == null) {
+            attach.accept(node);
+            return node;
+        }
+        if (arg.equals("id")) {
+            RequiredArgumentBuilder<FabricClientCommandSource, Integer> id =
+                ClientCommandManager.argument("id", IntegerArgumentType.integer());
+            attach.accept(id);
+            return node.then(id);
+        }
+
+        // 注意顺序：必须先把东西挂到 z 上，再把 z 挂到 y 上。
+        // brigadier 的 then(builder) 会**立刻 build 出一个 CommandNode**，之后再往那个 builder 上加子节点是没用的。
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> z =
+            ClientCommandManager.argument("z", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
+        attach.accept(z);
+
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> y =
+            ClientCommandManager.argument("y", IntegerArgumentType.integer()).suggests(LookSuggestions::y).then(z);
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> x =
+            ClientCommandManager.argument("x", IntegerArgumentType.integer()).suggests(LookSuggestions::x).then(y);
+        return node.then(x);
+    }
+
+    /** get 的统一入口：按命令名找出容器位置，再交给动作。 */
+    private static int runGet(CommandContext<FabricClientCommandSource> context, ContainerGetAction.Mode mode) {
         FabricClientCommandSource source = context.getSource();
         if (!hasPlayer(source)) return 0;
 
         ItemList itemList = readItemList(source, context);
         if (itemList == null) return 0;
 
-        int id = IntegerArgumentType.getInteger(context, "id");
-        CachedContainer cached = ContainerCacheManager.get().byId(id);
-        if (cached == null) {
-            source.sendError(Text.literal("容器缓存里没有 #" + id));
-            return 0;
+        // 哪个 from_*：**按名字找**，别按下标 —— 命令树上前面还有 pc / container / get 这些节点
+        String root = targetName(context);
+        BlockPos pos;
+        if (root.equals("from_id")) {
+            int id = IntegerArgumentType.getInteger(context, "id");
+            CachedContainer cached = ContainerCacheManager.get().byId(id);
+            if (cached == null) {
+                source.sendError(Text.literal("容器缓存里没有 #" + id));
+                return 0;
+            }
+            String dimension = DimensionUtils.current();
+            if (!cached.dimension().equals(dimension)) {
+                source.sendError(Text.literal("缓存 #" + id + " 在 " + DimensionUtils.display(cached.dimension())
+                    + "，你现在在 " + DimensionUtils.display(dimension) + "，够不着"));
+                return 0;
+            }
+            ChatUtils.debug("from_id #" + id + " → " + cached.type() + " " + cached.coordString());
+            pos = cached.pos();
+        } else if (root.equals("from_position")) {
+            pos = new BlockPos(
+                IntegerArgumentType.getInteger(context, "x"),
+                IntegerArgumentType.getInteger(context, "y"),
+                IntegerArgumentType.getInteger(context, "z"));
+        } else {
+            pos = PlayerUtils.lookedAtBlock();
+            if (pos == null) {
+                source.sendError(Text.literal("你没有看向任何方块"));
+                return 0;
+            }
         }
 
-        String dimension = DimensionUtils.current();
-        if (!cached.dimension().equals(dimension)) {
-            source.sendError(Text.literal("缓存 #" + id + " 在 " + DimensionUtils.display(cached.dimension())
-                + "，你现在在 " + DimensionUtils.display(dimension) + "，够不着"));
-            return 0;
-        }
-
-        ChatUtils.debug("from_id #" + id + " → " + cached.type() + " " + cached.coordString());
-        return startGet(source, cached.pos(), itemList);
+        return startGet(source, pos, itemList, mode);
     }
 
     // ------------------------------------------------------------------
@@ -254,6 +307,17 @@ public final class ContainerCommand {
 
     // ------------------------------------------------------------------
 
+    /** 在解析出来的节点里找 {@code from_target} / {@code from_position} / {@code from_id}。 */
+    private static String targetName(CommandContext<FabricClientCommandSource> context) {
+        for (ParsedCommandNode<FabricClientCommandSource> node : context.getNodes()) {
+            String name = node.getNode().getName();
+            if (name.equals("from_target") || name.equals("from_position") || name.equals("from_id")) {
+                return name;
+            }
+        }
+        return "from_target";
+    }
+
     private static boolean hasPlayer(FabricClientCommandSource source) {
         if (source.getPlayer() != null && source.getWorld() != null) return true;
         source.sendError(Text.literal("没有玩家或世界"));
@@ -276,8 +340,9 @@ public final class ContainerCommand {
         }
     }
 
-    /** {@code from_target} / {@code from_id} 共用的部分：校验触及范围和容器，然后提交任务。 */
-    private static int startGet(FabricClientCommandSource source, BlockPos pos, ItemList itemList) {
+    /** {@code get from_*} 共用的部分：校验触及范围和容器，然后提交任务。 */
+    private static int startGet(FabricClientCommandSource source, BlockPos pos, ItemList itemList,
+                                ContainerGetAction.Mode mode) {
         if (!PlayerUtils.isWithinReach(pos)) {
             source.sendError(Text.literal("方块 " + pos.toShortString() + " 超出触及范围（距离 "
                 + String.format("%.2f", PlayerUtils.eyeDistanceTo(pos))
@@ -299,9 +364,17 @@ public final class ContainerCommand {
             return 0;
         }
 
-        ActionManager.get().submit(new ContainerGetAction(pos, itemList));
-        source.sendFeedback(Text.literal("已提交任务：从 " + pos.toShortString() + " 取 "
-            + itemList.describe() + "（结束后会输出剩下的 item_list）"));
+        ActionManager.get().submit(new ContainerGetAction(pos, itemList, false, mode));
+        source.sendFeedback(Text.literal("已提交任务：从 " + pos.toShortString() + " 取 " + itemList.describe()
+            + "（模式 " + modeName(mode) + "）"));
         return 1;
+    }
+
+    private static String modeName(ContainerGetAction.Mode mode) {
+        return switch (mode) {
+            case NORMAL -> "normal";
+            case ONLY_ITEM -> "only_item";
+            case ONLY_ONE_SHULKER -> "only_one_shulker";
+        };
     }
 }

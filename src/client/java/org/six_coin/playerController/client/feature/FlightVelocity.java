@@ -17,6 +17,9 @@ import net.minecraft.util.math.Vec3d;
  * 玩家这一 tick 就会正好按我们给的速度位移，重力对位移没有影响 —— 也就是“悬停飞行”。
  *
  * <p>控制器不需要键盘输入，这里直接把“方向 × speed”当成速度写进去。
+ *
+ * <p>{@link #begin()} / {@link #end()} 是**引用计数**的：外层成套动作持有飞行的时候，
+ * 里面每一段移动自己 begin/end 不会把飞行提前关掉。
  */
 public final class FlightVelocity {
 
@@ -25,6 +28,15 @@ public final class FlightVelocity {
 
     private static boolean active;
 
+    /**
+     * 「悬停飞行」的持有层数。
+     *
+     * <p>一套连着的动作（比如备货里「挖盒子 → 落下去捡 → 飞上来 → 走回站立点」）中间不能关飞行，
+     * 不然玩家会在两步之间自己往下掉。所以 begin / end 做成引用计数：只要还有一层没释放，
+     * 就不会真的关掉（也不会把速度清零）。
+     */
+    private static int holds;
+
     private FlightVelocity() {
     }
 
@@ -32,11 +44,20 @@ public final class FlightVelocity {
         return active;
     }
 
+    /** 现在有几层还持有飞行。 */
+    public static int holds() {
+        return holds;
+    }
+
     public static void begin() {
+        holds++;
         active = true;
     }
 
     public static void end() {
+        if (holds > 0) holds--;
+        if (holds > 0) return;
+
         active = false;
         ClientPlayerEntity player = MinecraftClient.getInstance().player;
         if (player != null) {

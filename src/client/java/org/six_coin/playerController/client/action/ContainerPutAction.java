@@ -18,6 +18,7 @@ import org.six_coin.playerController.client.container.ContainerOpener;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.InventoryUtils;
+import org.six_coin.playerController.client.util.ItemList;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 
 /**
@@ -43,7 +44,9 @@ public class ContainerPutAction extends Action {
         /** 所有潜影盒。 */
         ALL_SHULKER_BOXES,
         /** 什么都放（物品 + 潜影盒）。 */
-        EVERYTHING
+        EVERYTHING,
+        /** 只放 item_list 还要的东西（备货阶段3 往暂存盒里放成品用，见构造器里的 wanted）。 */
+        WANTED
     }
 
     /** 打开界面之后等几 tick 再动。 */
@@ -66,6 +69,8 @@ public class ContainerPutAction extends Action {
     private final Mode mode;
     /** 要不要把「放完之后容器里剩什么」也带出来（备货流程用；命令输出不受影响）。 */
     private final boolean wantDetail;
+    /** 只有 {@link Mode#WANTED} 用：要放的东西（item_list 里还要的才算）。 */
+    private final ItemList wanted;
 
     private ScreenHandler handler;
     private Phase phase = Phase.OPENING;
@@ -85,9 +90,17 @@ public class ContainerPutAction extends Action {
     }
 
     public ContainerPutAction(BlockPos pos, Mode mode, boolean wantDetail) {
+        this(pos, mode, wantDetail, null);
+    }
+
+    /**
+     * @param wanted 只有 {@link Mode#WANTED} 用：只放「这个 item_list 还要的」物品
+     */
+    public ContainerPutAction(BlockPos pos, Mode mode, boolean wantDetail, @Nullable ItemList wanted) {
         this.pos = pos;
         this.mode = mode;
         this.wantDetail = wantDetail;
+        this.wanted = wanted;
     }
 
     @Override
@@ -120,6 +133,7 @@ public class ContainerPutAction extends Action {
             case ALL_ITEMS -> "all_items";
             case ALL_SHULKER_BOXES -> "all_shulker_boxes";
             case EVERYTHING -> "everything";
+            case WANTED -> "item_list 里还要的东西";
         };
     }
 
@@ -308,8 +322,9 @@ public class ContainerPutAction extends Action {
         return null;
     }
 
-    /** 这一叠算不算「要放的东西」：潜影盒不算物品，everything 什么都算。 */
+    /** 这一叠算不算「要放的东西」：潜影盒不算物品，everything 什么都算，wanted 只认 item_list。 */
     private boolean matches(ItemStack stack) {
+        if (mode == Mode.WANTED) return wanted != null && wanted.wants(stack.getItem());
         if (mode == Mode.EVERYTHING) return true;
 
         boolean shulker = ShulkerUtils.isShulkerBox(stack);

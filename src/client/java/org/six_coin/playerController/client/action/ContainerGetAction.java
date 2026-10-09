@@ -12,6 +12,7 @@ import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
+import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerCacheUpdater;
 import org.six_coin.playerController.client.container.ContainerOpener;
@@ -67,7 +68,9 @@ public class ContainerGetAction extends Action {
         /** 把光标上剩下的放回源格。 */
         RETURN,
         /** 整叠往主背包里放：左键点主背包格，直到光标空。 */
-        DUMP
+        DUMP,
+        /** only_one_shulker 专用：找一个有需要的潜影盒，拿走并放进快捷栏第三格。 */
+        ONE_BOX
     }
 
     /** 一次点击最多等这么多 tick 生效。 */
@@ -79,8 +82,19 @@ public class ContainerGetAction extends Action {
     /** 整个任务最久（20 tick = 1 秒）。 */
     private static final int MAX_TOTAL_TICKS = 20 * 300;
 
+    /** 取货模式。 */
+    public enum Mode {
+        /** 正常：item_list 要的物品和潜影盒都拿。 */
+        NORMAL,
+        /** only_item：只拿物品，无视潜影盒（盒子里的东西也不算）。 */
+        ONLY_ITEM,
+        /** only_one_shulker：只找一个「里面有 item_list 需要的东西」的潜影盒，拿走并放进快捷栏第三格；不返回 item_list。 */
+        ONLY_ONE_SHULKER
+    }
+
     private final BlockPos pos;
     private final ItemList itemList;
+    private final Mode mode;
 
     /** 一开始的 item_list 文本，给任务名字用（跑完以后 item_list 会被扣减，不适合再拿来显示）。 */
     private final String requestText;
@@ -110,6 +124,11 @@ public class ContainerGetAction extends Action {
     private ContainerCacheManager.Breakdown detail;
     private int freeSlots = -1;
 
+    /** only_one_shulker 用的状态。 */
+    public static final int HOTBAR_BOX_INDEX = 2;
+    private int oneBoxStep;
+    private int boxSlotId = -1;
+
     // 当前这次提取
     private Slot source;
     private ItemStack sourceStack;
@@ -121,17 +140,22 @@ public class ContainerGetAction extends Action {
     private int clickCursorCount;
 
     public ContainerGetAction(BlockPos pos, ItemList itemList) {
-        this(pos, itemList, false);
+        this(pos, itemList, false, Mode.NORMAL);
     }
 
     /**
      * @param wantDetail 要不要把「取完之后容器里剩什么」也带出来（备货流程用；命令输出不受影响）
      */
     public ContainerGetAction(BlockPos pos, ItemList itemList, boolean wantDetail) {
+        this(pos, itemList, wantDetail, Mode.NORMAL);
+    }
+
+    public ContainerGetAction(BlockPos pos, ItemList itemList, boolean wantDetail, Mode mode) {
         this.pos = pos.toImmutable();
         this.itemList = itemList;
         this.requestText = itemList.describe();
         this.wantDetail = wantDetail;
+        this.mode = mode;
     }
 
     /** 取完之后容器里剩什么（wantDetail 时才有意义；散装物品 + 每个潜影盒的内容）。 */
@@ -218,6 +242,7 @@ public class ContainerGetAction extends Action {
             case PLACE -> tickPlace();
             case RETURN -> tickReturn();
             case DUMP -> tickDump();
+            case ONE_BOX -> tickOneBox(player);
         }
     }
 
@@ -240,6 +265,13 @@ public class ContainerGetAction extends Action {
 
         if (stopReason != null) {
             ChatUtils.info("容器任务结束：" + stopReason);
+        }
+
+        // only_one_shulker 没有返回值，前面已经报过了
+        if (mode == Mode.ONLY_ONE_SHULKER) {
+            ChatUtils.debug("only_one_shulker 模式：不输出 item_list / all_cleared");
+            ScreenSuppressor.release();
+            return;
         }
 
         boolean allCleared = allCleared();
@@ -289,7 +321,7 @@ public class ContainerGetAction extends Action {
             slotCursor = 0;
             pendingClick = false;
             stepWaitTicks = 0;
-            phase = Phase.SCAN;
+            phase = mode == Mode.ONLY_ONE_SHULKER ? Phase.ONE_BOX : Phase.SCAN;
             ChatUtils.debug("容器已打开：syncId=%d，界面共 %d 格，其中容器格 %d 格",
                 handler.syncId, handler.slots.size(), containerSlots.size());
             dumpContainerSlots();
@@ -298,6 +330,79 @@ public class ContainerGetAction extends Action {
         if (openWaitTicks > MAX_OPEN_WAIT_TICKS) {
             fail("等待容器界面超时（" + openWaitTicks + " tick）");
         }
+    }
+
+    /**
+     * only_one_shulker 的流程：找一个「里面有 item_list 需要的东西」的潜影盒 → 拿走 →
+     * 放进快捷栏第三格（背包下标 2）。一 tick 一下点击，没有返回值。
+     */
+    private void tickOneBox(ClientPlayerEntity player) {
+        switch (oneBoxStep) {
+            case 0 -> {
+                boxSlotId = findShulkerWithNeeded();
+                if (boxSlotId < 0) {
+                    fail("容器里没有「装着 item_list 需要的东西」的潜影盒");
+                    return;
+                }
+                ItemStack box = handler.slots.get(boxSlotId).getStack();
+                ChatUtils.debug("选中第 %d 格的潜影盒（内容：%s）", boxSlotId,
+                    ShulkerUtils.describeContents(box));
+                oneBoxStep = 1;
+            }
+            case 1 -> {
+                click(handler.slots.get(boxSlotId), 0, SlotActionType.PICKUP, "拿起潜影盒");
+                oneBoxStep = 2;
+            }
+            case 2 -> {
+                if (handler.getCursorStack().isEmpty()) {
+                    fail("潜影盒没拿起来");
+                    return;
+                }
+                oneBoxStep = 3;
+            }
+            case 3 -> {
+                Slot target = hotbarSlot(HOTBAR_BOX_INDEX);
+                if (target == null) {
+                    fail("找不到快捷栏第 " + (HOTBAR_BOX_INDEX + 1) + " 格");
+                    return;
+                }
+                if (!target.getStack().isEmpty()) {
+                    fail("快捷栏第 " + (HOTBAR_BOX_INDEX + 1) + " 格被 " + InventoryUtils.describe(target) + " 占了");
+                    return;
+                }
+                click(target, 0, SlotActionType.PICKUP, "把潜影盒放进快捷栏");
+                oneBoxStep = 4;
+            }
+            default -> {
+                if (!handler.getCursorStack().isEmpty()) {
+                    fail("潜影盒没放进快捷栏");
+                    return;
+                }
+                ChatUtils.info("已取出一个潜影盒并放进快捷栏第 " + (HOTBAR_BOX_INDEX + 1) + " 格");
+                finish();
+            }
+        }
+    }
+
+    /** 找一个里面有 item_list 需要的东西、而且没改过名字的潜影盒。 */
+    private int findShulkerWithNeeded() {
+        for (Slot slot : containerSlots) {
+            ItemStack stack = slot.getStack();
+            if (stack.isEmpty() || !ShulkerUtils.isShulkerBox(stack)) continue;
+            if (ItemRules.customNameOf(stack) != null) continue;
+            if (!ShulkerUtils.containsWanted(stack, itemList)) continue;
+            return slot.id;
+        }
+        return -1;
+    }
+
+    /** 玩家快捷栏某一格（0~8，也就是背包下标）在界面里的 Slot。 */
+    @Nullable
+    private Slot hotbarSlot(int index) {
+        for (Slot slot : handler.slots) {
+            if (slot.inventory instanceof PlayerInventory && slot.getIndex() == index) return slot;
+        }
+        return null;
     }
 
     /** 打开之后先把容器里都有什么打一遍日志（每行 5 格，免得一行太长）。 */
@@ -344,6 +449,11 @@ public class ContainerGetAction extends Action {
             //    潜影盒自己也是堆叠上限 1 的物品，所以它先走这条规则；
             //    不过盒子要是改过名字，按「改过名字的一律无视」处理。
             if (ShulkerUtils.isShulkerBox(stack)) {
+                if (mode == Mode.ONLY_ITEM) {
+                    ChatUtils.debug("第 %d 格是潜影盒，但这次是 only_item（只拿物品），跳过", slot.id);
+                    slotCursor++;
+                    continue;
+                }
                 String boxName = ItemRules.customNameOf(stack);
                 if (boxName != null) {
                     ChatUtils.debug("第 %d 格是潜影盒但改过名字（%s），无视", slot.id, boxName);
