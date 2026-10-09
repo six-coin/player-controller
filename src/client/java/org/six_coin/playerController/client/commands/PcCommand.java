@@ -42,7 +42,7 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " container cache ... §8- §7容器缓存（add/add_position/add_target/add_batch、del/del_id/del_position/del_target/del_batch、optimize、list、show、get_all_items）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " station ... §8- §7工作站（各部分的 set/set_target/add/del/list、show 高亮、check 检查并导出报告）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " recipe crafting_table|stonecutter <item> <count> §8- §7在工作站上合成 / 切石（成品 QuickMove 进快捷栏）"));
-                source.sendFeedback(Text.literal("§7  /" + name + " stock add_task|del_task <名字>、/" + name + " stock task <名字> start §8- §7备货（第一阶段：检查 + 取货 + 分盒重装；第二部分还没做）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " stock add_task|del_task <名字>、/" + name + " stock task <名字> start|part2 §8- §7备货（start = 第一部分全部 + 第二部分阶段1、2；part2 = 只跑第二部分阶段1、2）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " w ... §8- §7路径点 / 边 / 出生点（等价写法：/" + name + " waypoints ...）"));
                 source.sendFeedback(Text.literal("§7    §7子命令：waypoint_add、waypoint_add_here、waypoint_name、waypoint_name_del、spawn_set_by_name、edge_add、del、optimize、list、show、edit"));
                 source.sendFeedback(Text.literal("§7    §7清理：del_unreachable_list（列出从当前位置不可达的点和边）、del_unreachable_execute（先备份再删掉它们）"));

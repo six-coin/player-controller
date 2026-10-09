@@ -27,9 +27,16 @@ import java.util.stream.Stream;
  * <pre>
  * stock.json           ["test_task", "test_task_2"]
  * stock/&lt;名字&gt;/material.json              用户手写放进去的
- * stock/&lt;名字&gt;/1_1_material_clean.json    阶段1 第 1 步产物
- * stock/&lt;名字&gt;/1_2_material_optimized.json 阶段1 第 2 步产物
- * stock/&lt;名字&gt;/final_final.json            阶段1 第 3 步产物（就是 1_2 的副本）
+ * stock/&lt;名字&gt;/1_1_material_clean.json    第一部分阶段1 第 1 步产物
+ * stock/&lt;名字&gt;/1_2_material_optimized.json 第一部分阶段1 第 2 步产物
+ * stock/&lt;名字&gt;/final_final.json            第一部分阶段1 第 3 步产物（就是 1_2 的副本）
+ * stock/&lt;名字&gt;/2_1_process_raw.json        第二部分阶段1 第 1 步产物
+ * stock/&lt;名字&gt;/2_2_material_raw.json       第二部分阶段1 第 2 步产物
+ * stock/&lt;名字&gt;/2_3_material_clean.json     第二部分阶段1 第 3 步产物
+ * stock/&lt;名字&gt;/2_4_process_clean.json      第二部分阶段1 第 4 步产物
+ * stock/&lt;名字&gt;/2_5_material_cleaner.json   第二部分阶段1 第 5 步产物
+ * stock/&lt;名字&gt;/final_material.json         第二部分阶段2 照着它取货（2_5 的副本）
+ * stock/&lt;名字&gt;/final_process.json          第二部分阶段3 合成用（2_4 的副本）
  * </pre>
  */
 public final class StockManager {
@@ -92,6 +99,43 @@ public final class StockManager {
         return taskDir(world, task).resolve("final_final.json");
     }
 
+    // ---- 第二部分（收集需要合成的材料）的文件 ----
+
+    /** {@code 2_1_process_raw.json}：material.json 去掉 final_final 已经收过的那些。 */
+    public static Path processRawFile(int world, String task) {
+        return taskDir(world, task).resolve("2_1_process_raw.json");
+    }
+
+    /** {@code 2_2_material_raw.json}：2_1 里所有「原材料」摊平成 item_list。 */
+    public static Path materialRawFile(int world, String task) {
+        return taskDir(world, task).resolve("2_2_material_raw.json");
+    }
+
+    /** {@code 2_3_material_clean.json}：2_2 里「仓库 + 容器凑得齐」的那些。 */
+    public static Path materialCleanFile(int world, String task) {
+        return taskDir(world, task).resolve("2_3_material_clean.json");
+    }
+
+    /** {@code 2_4_process_clean.json}：2_1 里「材料都齐」的最终产物。 */
+    public static Path processCleanFile(int world, String task) {
+        return taskDir(world, task).resolve("2_4_process_clean.json");
+    }
+
+    /** {@code 2_5_material_cleaner.json}：2_4 里所有「原材料」摊平成 item_list。 */
+    public static Path materialCleanerFile(int world, String task) {
+        return taskDir(world, task).resolve("2_5_material_cleaner.json");
+    }
+
+    /** {@code final_material.json}：2_5 的副本（第二部分阶段2 就照它去取货）。 */
+    public static Path finalMaterialFile(int world, String task) {
+        return taskDir(world, task).resolve("final_material.json");
+    }
+
+    /** {@code final_process.json}：2_4 的副本（第二部分阶段3 合成用）。 */
+    public static Path finalProcessFile(int world, String task) {
+        return taskDir(world, task).resolve("final_process.json");
+    }
+
     public static boolean isValidName(String name) {
         return name != null && NAME_PATTERN.matcher(name).matches();
     }
@@ -118,6 +162,34 @@ public final class StockManager {
 
     public Path currentFinalFinalFile(String task) {
         return finalFinalFile(world(), task);
+    }
+
+    public Path currentProcessRawFile(String task) {
+        return processRawFile(world(), task);
+    }
+
+    public Path currentMaterialRawFile(String task) {
+        return materialRawFile(world(), task);
+    }
+
+    public Path currentMaterialCleanFile(String task) {
+        return materialCleanFile(world(), task);
+    }
+
+    public Path currentProcessCleanFile(String task) {
+        return processCleanFile(world(), task);
+    }
+
+    public Path currentMaterialCleanerFile(String task) {
+        return materialCleanerFile(world(), task);
+    }
+
+    public Path currentFinalMaterialFile(String task) {
+        return finalMaterialFile(world(), task);
+    }
+
+    public Path currentFinalProcessFile(String task) {
+        return finalProcessFile(world(), task);
     }
 
     private int world() {

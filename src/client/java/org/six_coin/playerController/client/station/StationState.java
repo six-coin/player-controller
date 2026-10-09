@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -158,6 +159,91 @@ public final class StationState {
 
     public Storage storage(int id) {
         return itemStorage.get(id);
+    }
+
+    /** 所有 item_storage 的 id（从 1 开始，升序）。 */
+    public List<Integer> storageIds() {
+        return new ArrayList<>(itemStorage.keySet());
+    }
+
+    /**
+     * 把所有 item_storage 里的东西（散装 + 每个潜影盒里的）加在一起。
+     *
+     * <p>就是 {@code check.json} 里 {@code item_storage} 那种最简单的 item_list ——
+     * 第二部分阶段1 要用它反推一份「现在的仓库里有什么」。
+     */
+    public Map<String, Integer> storageItems() {
+        Map<String, Integer> total = new TreeMap<>();
+        for (Storage storage : itemStorage.values()) {
+            merge(total, storage.items());
+            for (Map<String, Integer> box : storage.shulkerBoxes()) merge(total, box);
+        }
+        return total;
+    }
+
+    private static void merge(Map<String, Integer> total, Map<String, Integer> items) {
+        for (Map.Entry<String, Integer> entry : items.entrySet()) {
+            if (entry.getValue() == null || entry.getValue() <= 0) continue;
+            total.merge(entry.getKey(), entry.getValue(), Integer::sum);
+        }
+    }
+
+    /**
+     * 从 {@code debug/station_data.json} 读一份（单独跑第二部分的时候用）。
+     *
+     * @return 文件不存在 / 读不了就返回 null
+     */
+    @Nullable
+    public static StationState loadDebug() {
+        Path file = debugFile();
+        if (!Files.exists(file)) return null;
+
+        try {
+            JsonElement root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
+            if (!root.isJsonObject()) return null;
+
+            StationState state = new StationState();
+
+            JsonElement storage = root.getAsJsonObject().get("item_storage");
+            if (storage != null && storage.isJsonObject()) {
+                for (Map.Entry<String, JsonElement> entry : storage.getAsJsonObject().entrySet()) {
+                    if (!entry.getValue().isJsonObject()) continue;
+                    JsonObject object = entry.getValue().getAsJsonObject();
+
+                    int id = object.has("id") ? object.get("id").getAsInt() : parseInt(entry.getKey());
+                    if (id <= 0) continue;
+
+                    Storage target = state.itemStorage.computeIfAbsent(id, Storage::new);
+                    int freeSlots = object.has("free_slots") ? object.get("free_slots").getAsInt() : -1;
+                    target.set(readItems(object.get("items")), readBoxes(object.get("shulker_boxes")), freeSlots);
+                }
+            }
+
+            JsonElement finals = root.getAsJsonObject().get("item_final");
+            if (finals != null && finals.isJsonObject()) {
+                for (Map.Entry<String, JsonElement> entry : finals.getAsJsonObject().entrySet()) {
+                    int id = parseInt(entry.getKey());
+                    if (id <= 0) continue;
+                    state.itemFinalFull.put(id, entry.getValue().getAsBoolean());
+                }
+            }
+
+            JsonElement placement = root.getAsJsonObject().get("shulker_box_placement");
+            if (placement != null && placement.isJsonObject()) {
+                for (Map.Entry<String, JsonElement> entry : placement.getAsJsonObject().entrySet()) {
+                    int id = parseInt(entry.getKey());
+                    if (id <= 0) continue;
+                    state.placements.put(id, readItems(entry.getValue()));
+                }
+            }
+
+            ChatUtils.debug("从 " + file + " 读到了 station_data：item_storage "
+                + state.itemStorage.size() + " 个，item_final " + state.itemFinalFull.size() + " 个");
+            return state;
+        } catch (Exception e) {
+            ChatUtils.error("读 " + file + " 失败：" + e.getMessage());
+            return null;
+        }
     }
 
     /** 用「刚数出来的」结果覆盖某个存储容器的记录（含还剩几个空格）。 */

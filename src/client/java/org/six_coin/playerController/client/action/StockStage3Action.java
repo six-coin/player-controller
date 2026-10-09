@@ -163,6 +163,15 @@ public class StockStage3Action extends Action {
         this.handedState = handedState;
     }
 
+    /**
+     * 这一轮维护的 station_data（第二部分接着用）。
+     *
+     * <p>跑完（或者失败）都会写一份到 {@code debug/station_data.json}，单独跑第二部分时读它。
+     */
+    public StationState state() {
+        return state;
+    }
+
     @Override
     public String name() {
         return "备货 " + task + " 阶段3（分盒重装）";
@@ -299,6 +308,8 @@ public class StockStage3Action extends Action {
             }
             ChatUtils.info("最终产物暂存处（摆放处 #" + STAGING_ID + "）还留着一个盒子，里面是这次没装满的成品；"
                 + "摆放处 " + placementIds + " 上借来的盒子也留在原地（下次用到那个 id 时会送回 item_storage）");
+            // 第二部分要接着用这份数据（单独跑第二部分时也从这里读），所以跑完也写一份
+            state.saveDebug();
             finish();
         }
     }

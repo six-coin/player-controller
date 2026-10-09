@@ -33,10 +33,12 @@ import java.util.List;
  *   <li>读 {@code stock/<名字>/material.json}，处理出 {@code 1_1_material_clean.json}、
  *       {@code 1_2_material_optimized.json} 和 {@code final_final.json}（见 {@link StockMaterials}）；</li>
  *   <li>阶段2：取货（{@link StockStage2Action}）；</li>
- *   <li>阶段3：分盒重装（{@link StockStage3Action}）。</li>
+ *   <li>阶段3：分盒重装（{@link StockStage3Action}）；</li>
+ *   <li>第二部分：收集需要合成的材料 —— 阶段1 预检查（容器汇总 + 处理材料清单）和阶段2 取货
+ *       （见 {@link StockPart2Action}）。</li>
  * </ol>
  *
- * <p>第二部分（收集需要合成的材料 / 合成）还没做，做完这里就先结束。
+ * <p>第二部分阶段3（合成）还没做，做完这里就先结束。
  */
 public class StockStartAction extends Action {
 
@@ -58,7 +60,9 @@ public class StockStartAction extends Action {
         /** 阶段2：取货。 */
         STAGE2,
         /** 阶段3：分盒重装。 */
-        STAGE3
+        STAGE3,
+        /** 第二部分：收集需要合成的材料（阶段1 预检查 + 阶段2 取货）。 */
+        PART2
     }
 
     private final String task;
@@ -67,6 +71,7 @@ public class StockStartAction extends Action {
     private TakeItemAction takePickaxe;
     private StockStage2Action stage2;
     private StockStage3Action stage3;
+    private StockPart2Action part2;
     private Stage stage = Stage.PRECHECK;
 
     public StockStartAction(String task) {
@@ -169,6 +174,17 @@ public class StockStartAction extends Action {
                 stage3.cleanup();
                 if (stage3.failureReason() != null) {
                     fail("阶段3 失败：" + stage3.failureReason());
+                    return;
+                }
+                startPart2();
+            }
+            case PART2 -> {
+                part2.update();
+                if (!part2.isFinished()) return;
+
+                part2.cleanup();
+                if (part2.failureReason() != null) {
+                    fail("第二部分失败：" + part2.failureReason());
                     return;
                 }
                 finish();
@@ -289,7 +305,7 @@ public class StockStartAction extends Action {
                     + String.join("、", limit(result.shortItems(), 6)));
             }
             ChatUtils.info("已复制一份到 " + result.finalFile());
-            ChatUtils.info("第一阶段 阶段1 完成，接着进入阶段2（取货）");
+            ChatUtils.info("第一阶段阶段1 完成，接着进入阶段2（取货）");
             stage2 = new StockStage2Action(task);
             stage2.start();
             stage = Stage.STAGE2;
@@ -300,10 +316,18 @@ public class StockStartAction extends Action {
 
     /** 阶段3：分盒重装（把收集到的东西装进潜影盒，盒子放去 item_final）。 */
     private void startStage3() {
-        ChatUtils.info("阶段2 完成，接着进入阶段3（分盒重装）");
+        ChatUtils.info("第一阶段阶段2 完成，接着进入阶段3（分盒重装）");
         stage3 = new StockStage3Action(task, stage2 == null ? null : stage2.state());
         stage3.start();
         stage = Stage.STAGE3;
+    }
+
+    /** 第二部分：收集需要合成的材料（阶段1 预检查 + 阶段2 取货）。 */
+    private void startPart2() {
+        ChatUtils.info("第一部分完成，接着进入第二部分（收集需要合成的材料）");
+        part2 = new StockPart2Action(task, stage3 == null ? null : stage3.state());
+        part2.start();
+        stage = Stage.PART2;
     }
 
     private static List<String> limit(List<String> list, int max) {

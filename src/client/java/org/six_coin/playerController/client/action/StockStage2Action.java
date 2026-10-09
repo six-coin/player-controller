@@ -32,20 +32,25 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code /pc stock task <名字> start} 的「第一部分 阶段2：取货」。
+ * {@code /pc stock task <名字> start} 的「取货」阶段 —— 第一部分阶段2 和 第二部分阶段2 共用这一套。
  *
  * <p>流程（按需求）：
  * <ol>
- *   <li>读 check.json 的 {@code item_storage_detailed}，建一份**不落盘**的 station_data（{@link StationState}）；</li>
+ *   <li>读 check.json 的 {@code item_storage_detailed}（或者用外面传进来的 station_data），建一份**不落盘**的
+ *       station_data（{@link StationState}）；</li>
  *   <li>按 all_items.json 里每个容器的 {@code cost} 从低到高扫一遍，算出 need_container_list
- *       （能提供 final_final 里东西的容器；这步的扣减只在内存里）；</li>
- *   <li>重新读一份完整的 final_final；</li>
+ *       （能提供要取的东西的容器；这步的扣减只在内存里）；</li>
+ *   <li>重新读一份完整的需求清单；</li>
  *   <li>循环：从当前位置找 need_container_list 里**最近**的容器 → 走到它的 access_position →
- *       取货（拿回 item_list 和 all_cleared）→ 更新 final_final，拿完了就把 id 从列表里去掉；
- *       列表空了就回站立点结束；物品栏 27 格满了就先回站立点卸货（潜影盒进 item_storage，物品进 item_final）；</li>
- *   <li>把物品栏里剩下的潜影盒和物品都存进 item_storage，然后把 station_data 写到
+ *       取货（拿回 item_list 和 all_cleared）→ 更新需求清单，拿完了就把 id 从列表里去掉；
+ *       列表空了就回站立点结束；物品栏 27 格满了就先回站立点卸货；</li>
+ *   <li>把物品栏里剩下的东西都存进 item_storage，然后把 station_data 写到
  *       {@code config/player-controller/debug/station_data.json}，任务结束。</li>
  * </ol>
+ *
+ * <p>两部分不同的地方都从构造器传进来：要取的文件（第一部分 {@code final_final.json} /
+ * 第二部分 {@code final_material.json}）、中途卸货放哪儿（第一部分的散装成品放 item_final，
+ * 第二部分的材料放 item_storage）、要不要接着用外面那份 station_data。
  *
  * <p>station_data 一律**主动更新**：每次 get/put 完就用动作返回的 detail 覆盖记录，
  * 不依赖「关箱子时自动刷新」那一套（会有竞态）。
@@ -79,6 +84,18 @@ public class StockStage2Action extends Action {
     private static final int MAX_TOTAL_TICKS = 20 * 60 * 60;
 
     private final String task;
+    /** 聊天栏里怎么称呼这一段，比如「第一部分阶段2（取货）」。 */
+    private final String phaseName;
+    /** 要取的东西写在哪个文件里；null = 用 {@code final_final.json}。 */
+    @Nullable
+    private final Path needFile;
+    /** 中途卸货时潜影盒放哪。 */
+    private final StationPart dumpBoxPart;
+    /** 中途卸货时散装物品放哪。 */
+    private final StationPart dumpItemPart;
+    /** 外面传进来的 station_data（第二部分接着第一部分用）；null = 自己从 check.json 读。 */
+    @Nullable
+    private final StationState inheritedState;
 
     private StationState state;
     private ItemList need;
@@ -105,7 +122,26 @@ public class StockStage2Action extends Action {
     private int dumped;
 
     public StockStage2Action(String task) {
+        this(task, "第一部分阶段2（取货）", null,
+            StationPart.ITEM_STORAGE, StationPart.ITEM_FINAL, null);
+    }
+
+    /**
+     * @param phaseName      聊天栏里怎么称呼这一段
+     * @param needFile       要取的东西写在哪个文件里（null = {@code final_final.json}）
+     * @param dumpBoxPart    中途卸货时潜影盒放哪
+     * @param dumpItemPart   中途卸货时散装物品放哪
+     * @param inheritedState 接着用哪份 station_data（null = 自己从 check.json 读）
+     */
+    public StockStage2Action(String task, String phaseName, @Nullable Path needFile,
+                             StationPart dumpBoxPart, StationPart dumpItemPart,
+                             @Nullable StationState inheritedState) {
         this.task = task;
+        this.phaseName = phaseName;
+        this.needFile = needFile;
+        this.dumpBoxPart = dumpBoxPart;
+        this.dumpItemPart = dumpItemPart;
+        this.inheritedState = inheritedState;
     }
 
     /**
@@ -121,7 +157,7 @@ public class StockStage2Action extends Action {
 
     @Override
     public String name() {
-        return "备货 " + task + " 阶段2（取货）";
+        return "备货 " + task + " " + phaseName;
     }
 
     // ------------------------------------------------------------------
@@ -136,22 +172,28 @@ public class StockStage2Action extends Action {
 
         int world = PlayerControllerConfig.getWorld();
         try {
-            // 1. station_data（只放在内存里）
-            state = StationState.load(world);
+            // 1. station_data（只放在内存里）；外面传进来的就接着用（第二部分接着第一部分那份）
+            if (inheritedState != null) {
+                state = inheritedState;
+                ChatUtils.debug(phaseName + "：直接用外面交过来的 station_data");
+            } else {
+                state = StationState.load(world);
+            }
 
             // 2. all_items.json
             loadAllItems(world);
 
-            // 3. 完整的 final_final
-            Path finalFile = StockManager.get().currentFinalFinalFile(task);
-            if (!Files.exists(finalFile)) {
-                fail("找不到 " + finalFile + "（阶段1 生成的？）");
+            // 3. 完整的需求清单
+            Path file = needFile != null ? needFile : StockManager.get().currentFinalFinalFile(task);
+            if (!Files.exists(file)) {
+                fail("找不到 " + file + "（前面的阶段生成的？）");
                 return;
             }
-            need = ItemList.parse(Files.readString(finalFile, StandardCharsets.UTF_8));
-            ChatUtils.info("开始取货：final_final " + need.describe() + "；候选容器 " + entries.size() + " 个");
+            need = ItemList.parse(Files.readString(file, StandardCharsets.UTF_8));
+            ChatUtils.info("开始取货：" + file.getFileName() + " " + need.describe()
+                + "；候选容器 " + entries.size() + " 个");
         } catch (Exception e) {
-            fail("准备阶段2 失败：" + e.getMessage());
+            fail("准备" + phaseName + " 失败：" + e.getMessage());
             return;
         }
 
@@ -178,7 +220,7 @@ public class StockStage2Action extends Action {
             case PICK -> pickNext();
             case DONE -> {
                 if (state != null) state.saveDebug();
-                ChatUtils.info("第一部分阶段2（取货）完成：去了 " + fetched + " 个容器，卸货 " + dumped + " 次");
+                ChatUtils.info(phaseName + "完成：去了 " + fetched + " 个容器，卸货 " + dumped + " 次");
                 finish();
             }
             default -> {
@@ -266,7 +308,7 @@ public class StockStage2Action extends Action {
         }
 
         ChatUtils.info("按 cost 需要跑 " + needList.size() + " 个容器：" + needList
-            + "；模拟扣完 final_final " + (probe.isEmpty() ? "清空了（符合预期）" : ("还剩 " + probe.describe())));
+            + "；模拟扣完要取的清单 " + (probe.isEmpty() ? "清空了（符合预期）" : ("还剩 " + probe.describe())));
     }
 
     // ------------------------------------------------------------------
@@ -350,9 +392,9 @@ public class StockStage2Action extends Action {
         child = null;
         switch (next) {
             case DUMP_BOXES -> startPutPhase(ContainerPutAction.Mode.ALL_SHULKER_BOXES,
-                StationPart.ITEM_STORAGE, Stage.DUMP_BOXES, Stage.DUMP_ITEMS);
+                dumpBoxPart, Stage.DUMP_BOXES, Stage.DUMP_ITEMS);
             case DUMP_ITEMS -> startPutPhase(ContainerPutAction.Mode.ALL_ITEMS,
-                StationPart.ITEM_FINAL, Stage.DUMP_ITEMS, Stage.PICK);
+                dumpItemPart, Stage.DUMP_ITEMS, Stage.PICK);
             case HOME_PUT -> startPutPhase(ContainerPutAction.Mode.EVERYTHING,
                 StationPart.ITEM_STORAGE, Stage.HOME_PUT, Stage.DONE);
             default -> stage = next;
@@ -366,7 +408,7 @@ public class StockStage2Action extends Action {
             return;
         }
 
-        ChatUtils.info("到容器 #" + targetId + " 了，开始取货（final_final " + need.describe() + "）");
+        ChatUtils.info("到容器 #" + targetId + " 了，开始取货（还差 " + need.describe() + "）");
         child = new ContainerGetAction(entry.containerPos(), need, true);
         child.start();
         stage = Stage.GETTING;
@@ -382,7 +424,7 @@ public class StockStage2Action extends Action {
         fetched++;
 
         ChatUtils.info("容器 #" + targetId + " 取完：all_cleared=" + cleared
-            + "，final_final 还差 " + need.describe());
+            + "，还差 " + need.describe());
 
         updateStorageFromGet(get, targetId);
 
