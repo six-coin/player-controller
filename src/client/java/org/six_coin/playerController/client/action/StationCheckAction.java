@@ -402,6 +402,7 @@ public class StationCheckAction extends Action {
                 boxes.add(itemsJson(box));
             }
             entry.add("shulker_boxes", boxes);
+            entry.addProperty("free_slots", survey.emptySlots());
             detailed.add(String.valueOf(survey.stationId()), entry);
         }
         report.add("item_storage_detailed", detailed);

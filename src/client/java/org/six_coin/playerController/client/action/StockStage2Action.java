@@ -71,8 +71,8 @@ public class StockStage2Action extends Action {
         DUMP_BOXES,
         DUMP_ITEMS,
         HOME_MOVING,
-        HOME_BOXES,
-        HOME_ITEMS,
+        /** 收尾：把物品栏里剩下的潜影盒和物品**一次**全塞进 item_storage（everything）。 */
+        HOME_PUT,
         DONE
     }
 
@@ -328,8 +328,8 @@ public class StockStage2Action extends Action {
             }
             case GETTING -> afterGet();
             case DUMP_MOVING -> beginPhase(Stage.DUMP_BOXES);
-            case DUMP_BOXES, DUMP_ITEMS, HOME_BOXES, HOME_ITEMS -> afterPut();
-            case HOME_MOVING -> beginPhase(Stage.HOME_BOXES);
+            case DUMP_BOXES, DUMP_ITEMS, HOME_PUT -> afterPut();
+            case HOME_MOVING -> beginPhase(Stage.HOME_PUT);
             default -> { }
         }
     }
@@ -342,10 +342,8 @@ public class StockStage2Action extends Action {
                 StationPart.ITEM_STORAGE, Stage.DUMP_BOXES, Stage.DUMP_ITEMS);
             case DUMP_ITEMS -> startPutPhase(ContainerPutAction.Mode.ALL_ITEMS,
                 StationPart.ITEM_FINAL, Stage.DUMP_ITEMS, Stage.PICK);
-            case HOME_BOXES -> startPutPhase(ContainerPutAction.Mode.ALL_SHULKER_BOXES,
-                StationPart.ITEM_STORAGE, Stage.HOME_BOXES, Stage.HOME_ITEMS);
-            case HOME_ITEMS -> startPutPhase(ContainerPutAction.Mode.ALL_ITEMS,
-                StationPart.ITEM_STORAGE, Stage.HOME_ITEMS, Stage.DONE);
+            case HOME_PUT -> startPutPhase(ContainerPutAction.Mode.EVERYTHING,
+                StationPart.ITEM_STORAGE, Stage.HOME_PUT, Stage.DONE);
             default -> stage = next;
         }
     }
@@ -489,7 +487,7 @@ public class StockStage2Action extends Action {
 
         if (put.detail() != null) {
             if (putPart == StationPart.ITEM_STORAGE) {
-                state.setStorage(putTargetId, put.detail());
+                state.setStorage(putTargetId, put.detail(), put.freeSlots());
             } else if (putPart == StationPart.ITEM_FINAL) {
                 state.setFinalFull(putTargetId, put.containerFull());
             }
@@ -530,8 +528,9 @@ public class StockStage2Action extends Action {
             if (!pos.dimension().equals(entry.dimension())) continue;
             if (!pos.pos().equals(entry.containerPos())) continue;
 
-            state.setStorage(pos.id(), get.detail());
-            ChatUtils.debug("顺手更新了 station_data 里 item_storage #" + pos.id());
+            state.setStorage(pos.id(), get.detail(), get.freeSlots());
+            ChatUtils.debug("顺手更新了 station_data 里 item_storage #" + pos.id()
+                + "（free_slots " + get.freeSlots() + "）");
             return;
         }
     }

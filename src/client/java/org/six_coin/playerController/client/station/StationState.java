@@ -44,11 +44,13 @@ public final class StationState {
         .disableHtmlEscaping()
         .create();
 
-    /** 一个 item_storage 容器：散装物品 + 每个潜影盒的内容。 */
+    /** 一个 item_storage 容器：散装物品 + 每个潜影盒的内容 + 还剩几个空格。 */
     public static final class Storage {
         private final int id;
         private Map<String, Integer> items = new TreeMap<>();
         private List<Map<String, Integer>> shulkerBoxes = new ArrayList<>();
+        /** 还剩几个空格；-1 表示还不知道（卸货时会先试它，put 返回后就有准数了）。 */
+        private int freeSlots = -1;
 
         Storage(int id) {
             this.id = id;
@@ -66,15 +68,15 @@ public final class StationState {
             return shulkerBoxes;
         }
 
-        /** 大概占了多少格（挑「最空」的存储容器时用）。 */
-        public int load() {
-            return items.size() + shulkerBoxes.size();
+        public int freeSlots() {
+            return freeSlots;
         }
 
-        void set(Map<String, Integer> items, List<Map<String, Integer>> boxes) {
+        void set(Map<String, Integer> items, List<Map<String, Integer>> boxes, int freeSlots) {
             this.items = new TreeMap<>(items);
             this.shulkerBoxes = new ArrayList<>();
             for (Map<String, Integer> box : boxes) this.shulkerBoxes.add(new TreeMap<>(box));
+            this.freeSlots = freeSlots;
         }
     }
 
@@ -121,7 +123,8 @@ public final class StationState {
                 if (id <= 0) continue;
 
                 Storage storage = state.itemStorage.computeIfAbsent(id, Storage::new);
-                storage.set(readItems(object.get("items")), readBoxes(object.get("shulker_boxes")));
+                int freeSlots = object.has("free_slots") ? object.get("free_slots").getAsInt() : -1;
+                storage.set(readItems(object.get("items")), readBoxes(object.get("shulker_boxes")), freeSlots);
             }
             ChatUtils.debug("station_data：从 check.json 读到 " + state.itemStorage.size() + " 个存储容器");
         } catch (Exception e) {
@@ -134,10 +137,13 @@ public final class StationState {
     // 查询 / 更新
     // ------------------------------------------------------------------
 
-    /** item_storage 的所有 id（按「东西最少」排，放不下了就试下一个）。 */
+    /** item_storage 的所有 id：**从 1 开始**按 id 升序，只留还有空格的（free_slots 未知 -1 的也算可用）。 */
     public List<Integer> storageTargets() {
-        List<Integer> ids = new ArrayList<>(itemStorage.keySet());
-        ids.sort((a, b) -> Integer.compare(loadOf(a), loadOf(b)));
+        List<Integer> ids = new ArrayList<>();
+        for (Map.Entry<Integer, Storage> entry : itemStorage.entrySet()) {
+            if (entry.getValue().freeSlots() == 0) continue;
+            ids.add(entry.getKey());
+        }
         return ids;
     }
 
@@ -154,15 +160,10 @@ public final class StationState {
         return itemStorage.get(id);
     }
 
-    private int loadOf(int id) {
-        Storage storage = itemStorage.get(id);
-        return storage == null ? 0 : storage.load();
-    }
-
-    /** 用「刚数出来的」结果覆盖某个存储容器的记录。 */
-    public void setStorage(int id, ContainerCacheManager.Breakdown breakdown) {
+    /** 用「刚数出来的」结果覆盖某个存储容器的记录（含还剩几个空格）。 */
+    public void setStorage(int id, ContainerCacheManager.Breakdown breakdown, int freeSlots) {
         Storage storage = itemStorage.computeIfAbsent(id, Storage::new);
-        storage.set(breakdown.items(), breakdown.shulkerBoxes());
+        storage.set(breakdown.items(), breakdown.shulkerBoxes(), freeSlots);
     }
 
     public void setFinalFull(int id, boolean full) {
@@ -211,6 +212,7 @@ public final class StationState {
             com.google.gson.JsonArray boxes = new com.google.gson.JsonArray();
             for (Map<String, Integer> box : entry.shulkerBoxes()) boxes.add(itemsJson(box));
             object.add("shulker_boxes", boxes);
+            object.addProperty("free_slots", entry.freeSlots());
 
             storage.add(String.valueOf(entry.id()), object);
         }

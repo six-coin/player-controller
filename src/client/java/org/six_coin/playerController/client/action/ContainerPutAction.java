@@ -77,6 +77,7 @@ public class ContainerPutAction extends Action {
     private int beforeCount;
     private boolean allCleared;
     private boolean containerFull;
+    private int freeSlots = -1;
     private ContainerCacheManager.Breakdown detail;
 
     public ContainerPutAction(BlockPos pos, Mode mode) {
@@ -109,6 +110,11 @@ public class ContainerPutAction extends Action {
         return detail;
     }
 
+    /** 放完之后容器还剩几个空格（wantDetail 时才有意义）。 */
+    public int freeSlots() {
+        return freeSlots;
+    }
+
     private String modeName() {
         return switch (mode) {
             case ALL_ITEMS -> "all_items";
@@ -138,6 +144,7 @@ public class ContainerPutAction extends Action {
             return;
         }
 
+        ChatUtils.debug("放入模式 %s：物品栏里有 %d 个要放的", modeName(), countInInventory(player));
         ContainerOpener.open(mc, player, pos);
     }
 
@@ -170,10 +177,11 @@ public class ContainerPutAction extends Action {
 
     @Override
     protected void onEnd() {
-        // 先趁界面还开着，把「放完之后容器里剩什么 / 满没满」记下来（备货流程要用）
+        // 先趁界面还开着，把「放完之后容器里剩什么 / 满没满 / 还剩几格」记下来（备货流程要用）
         if (wantDetail && handler != null) {
             detail = ContainerCacheManager.breakdown(handler);
-            containerFull = hasNoEmptyContainerSlot();
+            freeSlots = countFreeSlots();
+            containerFull = freeSlots == 0;
         }
 
         // 放完顺手把容器缓存刷新一下（这个容器在缓存里的话）
@@ -300,8 +308,10 @@ public class ContainerPutAction extends Action {
         return null;
     }
 
-    /** 这一叠算不算「要放的东西」：潜影盒不算物品。 */
+    /** 这一叠算不算「要放的东西」：潜影盒不算物品，everything 什么都算。 */
     private boolean matches(ItemStack stack) {
+        if (mode == Mode.EVERYTHING) return true;
+
         boolean shulker = ShulkerUtils.isShulkerBox(stack);
         return mode == Mode.ALL_SHULKER_BOXES ? shulker : !shulker;
     }
@@ -328,13 +338,14 @@ public class ContainerPutAction extends Action {
         mc.player.closeHandledScreen();
     }
 
-    /** 容器的格子是不是一个空位都没有了。 */
-    private boolean hasNoEmptyContainerSlot() {
-        if (handler == null) return false;
+    /** 容器还剩几个空格。 */
+    private int countFreeSlots() {
+        if (handler == null) return -1;
+        int free = 0;
         for (Slot slot : InventoryUtils.containerSlots(handler)) {
-            if (slot.getStack().isEmpty()) return false;
+            if (slot.getStack().isEmpty()) free++;
         }
-        return true;
+        return free;
     }
 
     private static String describe(ItemStack stack) {

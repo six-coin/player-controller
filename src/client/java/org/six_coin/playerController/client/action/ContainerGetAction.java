@@ -108,6 +108,7 @@ public class ContainerGetAction extends Action {
     /** 要不要把「取完之后容器里剩什么」带出来（备货流程用）。 */
     private final boolean wantDetail;
     private ContainerCacheManager.Breakdown detail;
+    private int freeSlots = -1;
 
     // 当前这次提取
     private Slot source;
@@ -136,6 +137,11 @@ public class ContainerGetAction extends Action {
     /** 取完之后容器里剩什么（wantDetail 时才有意义；散装物品 + 每个潜影盒的内容）。 */
     public ContainerCacheManager.Breakdown detail() {
         return detail;
+    }
+
+    /** 取完之后容器还剩几个空格（wantDetail 时才有意义）。 */
+    public int freeSlots() {
+        return freeSlots;
     }
 
     @Override
@@ -217,9 +223,13 @@ public class ContainerGetAction extends Action {
 
     @Override
     protected void onEnd() {
-        // 先趁界面还开着，把「取完之后容器里剩什么」记下来（备货流程要用）
+        // 先趁界面还开着，把「取完之后容器里剩什么 / 还剩几格」记下来（备货流程要用）
         if (wantDetail && handler != null) {
             detail = ContainerCacheManager.breakdown(handler);
+            freeSlots = 0;
+            for (Slot slot : containerSlots) {
+                if (slot.getStack().isEmpty()) freeSlots++;
+            }
         }
 
         // 拿完东西以后，这个容器要是已经在缓存里，就把缓存里的物品列表刷新一遍
