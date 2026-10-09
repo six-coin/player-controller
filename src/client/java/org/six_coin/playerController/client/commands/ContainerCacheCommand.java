@@ -7,13 +7,10 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
-import com.mojang.brigadier.suggestion.Suggestions;
-import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.command.CommandSource;
 import net.minecraft.text.ClickEvent;
 import net.minecraft.text.HoverEvent;
 import net.minecraft.text.MutableText;
@@ -36,9 +33,6 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 /**
@@ -235,7 +229,7 @@ public final class ContainerCacheCommand {
                         .suggests(LookSuggestions::z)
                         .executes(ContainerCacheCommand::delPosition)
                         .then(ClientCommandManager.argument("dim", StringArgumentType.greedyString())
-                            .suggests(ContainerCacheCommand::suggestDimensions)
+                            .suggests(DimensionSuggestions::suggest)
                             .executes(ContainerCacheCommand::delPosition)))));
     }
 
@@ -295,7 +289,7 @@ public final class ContainerCacheCommand {
             .then(intChain(BOX_ARGS, 0, builder -> {
                 builder.executes(ContainerCacheCommand::delBatch);
                 builder.then(ClientCommandManager.argument("dim", StringArgumentType.greedyString())
-                    .suggests(ContainerCacheCommand::suggestDimensions)
+                    .suggests(DimensionSuggestions::suggest)
                     .executes(ContainerCacheCommand::delBatch));
             }));
     }
@@ -455,18 +449,7 @@ public final class ContainerCacheCommand {
         };
     }
 
-    /** {@code [dim]} 的补全：原版三个维度 + 缓存里已经出现过的维度。 */
-    private static CompletableFuture<Suggestions> suggestDimensions(
-            CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
-        Set<String> dimensions = new TreeSet<>();
-        dimensions.add(DimensionUtils.OVERWORLD);
-        dimensions.add(DimensionUtils.NETHER);
-        dimensions.add(DimensionUtils.END);
-        for (CachedContainer container : ContainerCacheManager.get().all()) {
-            dimensions.add(container.dimension());
-        }
-        return CommandSource.suggestMatching(dimensions, builder);
-    }
+    /** {@code [dim]} 的补全见 {@link DimensionSuggestions}。 */
 
     private static BlockPos readPos(CommandContext<FabricClientCommandSource> context) {
         return new BlockPos(

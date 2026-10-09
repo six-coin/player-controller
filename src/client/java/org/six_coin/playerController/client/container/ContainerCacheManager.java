@@ -301,32 +301,62 @@ public final class ContainerCacheManager {
     // ------------------------------------------------------------------
 
     /**
-     * 把界面里容器格子里的东西统计出来（大箱子的话 54 格都在里面）。
+     * 一个容器的明细：散装物品 + 每个潜影盒各自的内容。
+     *
+     * <p>{@code items} 是散装的（潜影盒本身不算、盒子里的东西也不算），
+     * {@code shulkerBoxes} 是容器里找到的每一个潜影盒，一个盒子一个 map（空盒子就是一个空 map）。
+     */
+    public record Breakdown(Map<String, Integer> items, List<Map<String, Integer>> shulkerBoxes) {
+
+        /** 散装 + 所有潜影盒内容的加和，也就是缓存里存的那一份。 */
+        public Map<String, Integer> all() {
+            Map<String, Integer> total = new TreeMap<>(items);
+            for (Map<String, Integer> box : shulkerBoxes) {
+                for (Map.Entry<String, Integer> entry : box.entrySet()) {
+                    total.merge(entry.getKey(), entry.getValue(), Integer::sum);
+                }
+            }
+            return total;
+        }
+    }
+
+    /**
+     * 把界面里容器格子里的东西分门别类数出来（大箱子的话 54 格都在里面）。
+     *
+     * <p>规则：堆叠上限 1 的、改过名字的物品不算；<b>潜影盒本身永远不记</b>，只记里面的东西。
+     */
+    public static Breakdown breakdown(ScreenHandler handler) {
+        Map<String, Integer> items = new TreeMap<>();
+        List<Map<String, Integer>> boxes = new ArrayList<>();
+
+        for (Slot slot : InventoryUtils.containerSlots(handler)) {
+            ItemStack stack = slot.getStack();
+            if (stack.isEmpty()) continue;
+
+            if (ShulkerUtils.isShulkerBox(stack)) {
+                Map<String, Integer> contents = new TreeMap<>();
+                for (ItemStack inner : ShulkerUtils.consideredContents(stack)) {
+                    add(contents, Registries.ITEM.getId(inner.getItem()).toString(), inner.getCount());
+                }
+                boxes.add(contents);
+                continue;
+            }
+
+            if (ItemRules.isIgnored(stack)) continue;
+            add(items, Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount());
+        }
+
+        return new Breakdown(items, boxes);
+    }
+
+    /**
+     * 把界面里容器格子里的东西统计出来（散装 + 潜影盒内容加在一起），就是缓存里存的那一份。
      *
      * <p>规则：箱子里的物品和潜影盒里的物品都算；<b>潜影盒本身永远不记</b>
      * （不管空的还是装着东西的）；堆叠上限 1 的、改过名字的物品不算。
      */
     public static Map<String, Integer> snapshot(ScreenHandler handler) {
-        Map<String, Integer> items = new TreeMap<>();
-        for (Slot slot : InventoryUtils.containerSlots(handler)) {
-            count(items, slot.getStack());
-        }
-        return items;
-    }
-
-    private static void count(Map<String, Integer> items, ItemStack stack) {
-        if (stack.isEmpty()) return;
-
-        if (ShulkerUtils.isShulkerBox(stack)) {
-            // 盒子本身不记，只记里面要看的东西（空盒子就什么都不记）
-            for (ItemStack inner : ShulkerUtils.consideredContents(stack)) {
-                add(items, Registries.ITEM.getId(inner.getItem()).toString(), inner.getCount());
-            }
-            return;
-        }
-
-        if (ItemRules.isIgnored(stack)) return;
-        add(items, Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount());
+        return breakdown(handler).all();
     }
 
     private static void add(Map<String, Integer> items, String itemId, int count) {

@@ -6,8 +6,6 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import com.mojang.brigadier.suggestion.Suggestions;
-import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.block.BarrelBlock;
@@ -17,7 +15,6 @@ import net.minecraft.block.CraftingTableBlock;
 import net.minecraft.block.StonecutterBlock;
 import net.minecraft.block.enums.ChestType;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.command.CommandSource;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.text.ClickEvent;
 import net.minecraft.text.HoverEvent;
@@ -38,9 +35,6 @@ import org.six_coin.playerController.client.util.PlayerUtils;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * {@code /pc station ...} —— 工作站：站位点、工作台、切石机、任务前物品暂存处、
@@ -445,21 +439,8 @@ public final class StationCommand {
                     .suggests(LookSuggestions::z)
                     .executes(command)
                     .then(ClientCommandManager.argument("dim", StringArgumentType.greedyString())
-                        .suggests(StationCommand::suggestDimensions)
+                        .suggests(DimensionSuggestions::suggest)
                         .executes(command))));
-    }
-
-    /** [dim] 的补全：原版三个维度 + 工作站里已经出现过的维度。 */
-    private static CompletableFuture<Suggestions> suggestDimensions(
-            CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
-        Set<String> dimensions = new TreeSet<>();
-        dimensions.add(DimensionUtils.OVERWORLD);
-        dimensions.add(DimensionUtils.NETHER);
-        dimensions.add(DimensionUtils.END);
-        for (StationPos pos : StationManager.get().allPositions()) {
-            dimensions.add(pos.dimension());
-        }
-        return CommandSource.suggestMatching(dimensions, builder);
     }
 
     private static BlockPos readPos(CommandContext<FabricClientCommandSource> context) {

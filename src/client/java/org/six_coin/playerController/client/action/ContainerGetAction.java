@@ -1,5 +1,7 @@
 package org.six_coin.playerController.client.action;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
@@ -95,6 +97,12 @@ public class ContainerGetAction extends Action {
     private int extractions;
     private boolean pendingClick;
     private String stopReason;
+
+    /** 整个容器的格子都看完了。 */
+    private boolean scannedAll;
+
+    /** 是因为物品栏（27 格主背包）放不下才停的。 */
+    private boolean stoppedForInventory;
 
     // 当前这次提取
     private Slot source;
@@ -201,13 +209,31 @@ public class ContainerGetAction extends Action {
             ChatUtils.info("容器任务结束：" + stopReason);
         }
 
-        String json = itemList.toJson();
-        ChatUtils.debug("一共提取了 %d 次；修改后的 item_list = %s", extractions, json);
+        boolean allCleared = allCleared();
+        String itemListJson = itemList.toJson();
+        JsonObject result = new JsonObject();
+        result.add("item_list", JsonParser.parseString(itemListJson));
+        result.addProperty("all_cleared", allCleared);
 
-        // 指令跑完之后原封不动输出修改过的 item_list
-        ChatUtils.rawCopyable(json);
+        ChatUtils.debug("一共提取了 %d 次；item_list = %s；all_cleared = %s",
+            extractions, itemListJson, allCleared);
+        ChatUtils.info("取物结果：all_cleared=" + allCleared + (allCleared
+            ? "（容器里能拿的都拿完了）"
+            : "（没拿完：多半是物品栏满了，item_list 还差 " + itemList.describe() + "）"));
+
+        // 指令跑完之后输出结果：item_list + all_cleared
+        ChatUtils.rawCopyable(result.toString());
 
         ScreenSuppressor.release();
+    }
+
+    /**
+     * 容器里能拿的都拿完了没有。
+     *
+     * <p>判断方式：整个容器都看完了，或者 item_list 已经满足了，而且不是「因为物品栏放不下」才停的。
+     */
+    private boolean allCleared() {
+        return !stoppedForInventory && (scannedAll || itemList.isEmpty());
     }
 
     // ------------------------------------------------------------------
@@ -333,6 +359,7 @@ public class ContainerGetAction extends Action {
         }
 
         if (source == null) {
+            scannedAll = true;
             stop("容器的格子都看完了，item_list 还差：" + itemList.describe());
             return;
         }
@@ -340,6 +367,7 @@ public class ContainerGetAction extends Action {
         // 每次提取之前都检查一次主背包有没有空位
         Slot empty = InventoryUtils.firstEmptyMainSlot(handler, playerInventory);
         if (empty == null) {
+            stoppedForInventory = true;
             stop("主背包（27 格，不含快捷栏）没有空位了，停止；item_list 还差：" + itemList.describe());
             return;
         }
@@ -357,6 +385,7 @@ public class ContainerGetAction extends Action {
         Slot merge = InventoryUtils.mergeTarget(handler, playerInventory, sourceStack, take);
         target = merge != null ? merge : empty;
         if (!target.canInsert(sourceStack)) {
+            stoppedForInventory = true;
             stop("主背包里找不到能放下 " + describeStack(sourceStack)
                 + " 的格子，停止；item_list 还差：" + itemList.describe());
             return;

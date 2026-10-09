@@ -3,6 +3,7 @@ package org.six_coin.playerController.client.commands;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.client.network.ClientPlayerEntity;
@@ -156,7 +157,11 @@ public final class MoveCommand {
                     IntegerArgumentType.getInteger(context, "id"))));
     }
 
-    /** {@code to_position <x> <y> <z>}：是路径点就直接走，在边上就先建点，都不是就报错。 */
+    /**
+     * {@code to_position <x> <y> <z> [dim]}：是路径点就直接走，在边上就先建点，都不是就报错。
+     *
+     * <p>不写 {@code [dim]} 就是当前维度（补全会给维度）。
+     */
     private static LiteralArgumentBuilder<FabricClientCommandSource> moveToPositionNode() {
         return ClientCommandManager.literal("to_position")
             .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
@@ -165,10 +170,29 @@ public final class MoveCommand {
                     .suggests(LookSuggestions::y)
                     .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
                         .suggests(LookSuggestions::z)
-                        .executes(context -> moveToPosition(context.getSource(), new BlockPos(
-                            IntegerArgumentType.getInteger(context, "x"),
-                            IntegerArgumentType.getInteger(context, "y"),
-                            IntegerArgumentType.getInteger(context, "z")))))));
+                        .executes(context -> moveToPosition(context.getSource(), readPos(context),
+                            DimensionUtils.current()))
+                        .then(ClientCommandManager.argument("dim", StringArgumentType.greedyString())
+                            .suggests(DimensionSuggestions::suggest)
+                            .executes(context -> moveToPosition(context.getSource(), readPos(context),
+                                readDimension(context)))))));
+    }
+
+    private static BlockPos readPos(CommandContext<FabricClientCommandSource> context) {
+        return new BlockPos(
+            IntegerArgumentType.getInteger(context, "x"),
+            IntegerArgumentType.getInteger(context, "y"),
+            IntegerArgumentType.getInteger(context, "z"));
+    }
+
+    /** 可选的 [dim]：没写就是当前维度。 */
+    private static String readDimension(CommandContext<FabricClientCommandSource> context) {
+        try {
+            String dim = StringArgumentType.getString(context, "dim");
+            return dim == null || dim.isBlank() ? DimensionUtils.current() : dim.trim();
+        } catch (IllegalArgumentException e) {
+            return DimensionUtils.current();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -209,21 +233,22 @@ public final class MoveCommand {
      * <p>① 这个坐标已经是路径点 → 直接按编号走；
      * ② 这个坐标在某条边中间 → 先在那边新建一个路径点（边会被切开，点留着不回退），再走；
      * ③ 都不是 → 报错。
+     *
+     * <p>{@code dimension} 是终点所在的维度（不写就是当前维度）；跨维度的话路径会自动经过传送门边。
      */
-    private static int moveToPosition(FabricClientCommandSource source, BlockPos target) {
+    private static int moveToPosition(FabricClientCommandSource source, BlockPos target, String dimension) {
         WaypointGraph graph = WaypointManager.get().graph();
-        String dimension = DimensionUtils.current();
 
         Waypoint to = graph.at(dimension, target);
         if (to != null) {
-            ChatUtils.debug("to_position：" + target.toShortString()
+            ChatUtils.debug("to_position：" + DimensionUtils.display(dimension) + " " + target.toShortString()
                 + " 已经是路径点 #" + to.id() + "，直接走");
             return startPath(source, to);
         }
 
         WaypointGraph.EdgeEntry edge = graph.edgeAt(dimension, target);
         if (edge == null) {
-            source.sendError(Text.literal("当前维度（" + DimensionUtils.display(dimension) + "）的 "
+            source.sendError(Text.literal(DimensionUtils.display(dimension) + " 的 "
                 + target.toShortString() + " 既不是路径点，也不在任何边上"));
             return 0;
         }
@@ -231,8 +256,8 @@ public final class MoveCommand {
         to = WaypointManager.get().createWaypoint(dimension, target);
         ChatUtils.debug("to_position：" + target.toShortString() + " 在边 #" + edge.id()
             + " 上，已新建路径点 #" + to.id());
-        source.sendFeedback(Text.literal("目标 " + target.toShortString() + " 在边 #" + edge.id()
-            + " 上，已在那边新建路径点 #" + to.id()));
+        source.sendFeedback(Text.literal("目标 " + DimensionUtils.display(dimension) + " "
+            + target.toShortString() + " 在边 #" + edge.id() + " 上，已在那边新建路径点 #" + to.id()));
         return startPath(source, to);
     }
 

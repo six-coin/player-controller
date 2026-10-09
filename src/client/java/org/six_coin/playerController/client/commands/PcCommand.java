@@ -31,10 +31,11 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " move <x|y|z> <blocks> §8- §7沿轴移动（会先对齐方块中心）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " move face <blocks> §8- §7朝当前朝向移动（抬头/低头就是上下）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " move to <x y z|name> §8- §7沿路径点图走过去（走的都是已知边，不记录任何东西）"));
-                source.sendFeedback(Text.literal("§7    §7也可以写 to_name <名字> / to_id <编号> / to_position <x> <y> <z>"));
+                source.sendFeedback(Text.literal("§7    §7也可以写 to_name <名字> / to_id <编号> / to_position <x> <y> <z> [dim]"));
                 source.sendFeedback(Text.literal("§7    §7终点坐标在边上会先在那边建个路径点；起点在边上也会先建点，都不在就报错"));
                 source.sendFeedback(Text.literal("§7  /" + name + " move cancel §8- §7取消所有移动任务"));
-                source.sendFeedback(Text.literal("§7  /" + name + " container get from_target|from_id ... <item_list> §8- §7打开容器取物品（from_id 用缓存编号；跑完输出剩下的 item_list 并刷新缓存）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " container get from_target|from_id ... <item_list> §8- §7打开容器取物品（输出 item_list + all_cleared，并刷新缓存）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " container put to_id|to_position ... all_items|all_shulker_boxes §8- §7把物品栏 27 格里的东西放进容器（输出 all_cleared）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " container cache ... §8- §7容器缓存（add/add_position/add_target/add_batch、del/del_id/del_position/del_target/del_batch、optimize、list、show、get_all_items）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " station ... §8- §7工作站（各部分的 set/set_target/add/del/list、show 高亮、check 检查并导出报告）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " recipe crafting_table|stonecutter <item> <count> §8- §7在工作站上合成 / 切石（成品 QuickMove 进快捷栏）"));

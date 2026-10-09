@@ -13,6 +13,7 @@ import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.action.ContainerGetAction;
+import org.six_coin.playerController.client.action.ContainerPutAction;
 import org.six_coin.playerController.client.container.CachedContainer;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -49,7 +50,31 @@ public final class ContainerCommand {
                     .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
                         .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
                             .executes(ContainerCommand::getFromId)))))
+            .then(ClientCommandManager.literal("put")
+                .then(ClientCommandManager.literal("to_id")
+                    .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
+                        .then(putMode("all_items",
+                            context -> putToId(context, ContainerPutAction.Mode.ALL_ITEMS)))
+                        .then(putMode("all_shulker_boxes",
+                            context -> putToId(context, ContainerPutAction.Mode.ALL_SHULKER_BOXES)))))
+                .then(ClientCommandManager.literal("to_position")
+                    .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
+                        .suggests(LookSuggestions::x)
+                        .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+                            .suggests(LookSuggestions::y)
+                            .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                                .suggests(LookSuggestions::z)
+                                .then(putMode("all_items",
+                                    context -> putToPosition(context, ContainerPutAction.Mode.ALL_ITEMS)))
+                                .then(putMode("all_shulker_boxes",
+                                    context -> putToPosition(context, ContainerPutAction.Mode.ALL_SHULKER_BOXES))))))))
             .then(ContainerCacheCommand.build());
+    }
+
+    /** 一个模式字面量（all_items / all_shulker_boxes）。 */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> putMode(
+            String name, com.mojang.brigadier.Command<FabricClientCommandSource> command) {
+        return ClientCommandManager.literal(name).executes(command);
     }
 
     // ------------------------------------------------------------------
@@ -92,6 +117,73 @@ public final class ContainerCommand {
 
         ChatUtils.debug("from_id #" + id + " → " + cached.type() + " " + cached.coordString());
         return startGet(source, cached.pos(), itemList);
+    }
+
+    // ------------------------------------------------------------------
+    // put
+    // ------------------------------------------------------------------
+
+    private static int putToId(CommandContext<FabricClientCommandSource> context, ContainerPutAction.Mode mode) {
+        FabricClientCommandSource source = context.getSource();
+        if (!hasPlayer(source)) return 0;
+
+        int id = IntegerArgumentType.getInteger(context, "id");
+        CachedContainer cached = ContainerCacheManager.get().byId(id);
+        if (cached == null) {
+            source.sendError(Text.literal("容器缓存里没有 #" + id));
+            return 0;
+        }
+
+        String dimension = DimensionUtils.current();
+        if (!cached.dimension().equals(dimension)) {
+            source.sendError(Text.literal("缓存 #" + id + " 在 " + DimensionUtils.display(cached.dimension())
+                + "，你现在在 " + DimensionUtils.display(dimension) + "，够不着"));
+            return 0;
+        }
+
+        ChatUtils.debug("put to_id #" + id + " → " + cached.type() + " " + cached.coordString());
+        return startPut(source, cached.pos(), mode);
+    }
+
+    private static int putToPosition(CommandContext<FabricClientCommandSource> context, ContainerPutAction.Mode mode) {
+        FabricClientCommandSource source = context.getSource();
+        if (!hasPlayer(source)) return 0;
+
+        BlockPos pos = new BlockPos(
+            IntegerArgumentType.getInteger(context, "x"),
+            IntegerArgumentType.getInteger(context, "y"),
+            IntegerArgumentType.getInteger(context, "z"));
+        return startPut(source, pos, mode);
+    }
+
+    /** {@code put} 共用的部分：校验触及范围和容器，然后提交任务。 */
+    private static int startPut(FabricClientCommandSource source, BlockPos pos, ContainerPutAction.Mode mode) {
+        if (!PlayerUtils.isWithinReach(pos)) {
+            source.sendError(Text.literal("方块 " + pos.toShortString() + " 超出触及范围（距离 "
+                + String.format("%.2f", PlayerUtils.eyeDistanceTo(pos))
+                + "，触及范围 " + String.format("%.2f", PlayerUtils.reach()) + "）"));
+            return 0;
+        }
+
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.world == null) {
+            source.sendError(Text.literal("没有世界"));
+            return 0;
+        }
+        if (mc.world.getBlockState(pos).isAir()) {
+            source.sendError(Text.literal(pos.toShortString() + " 是空气，不是容器"));
+            return 0;
+        }
+        if (!(mc.world.getBlockEntity(pos) instanceof Inventory)) {
+            source.sendError(Text.literal(pos.toShortString() + " 不是容器（没有物品栏）"));
+            return 0;
+        }
+
+        ActionManager.get().submit(new ContainerPutAction(pos, mode));
+        source.sendFeedback(Text.literal("已提交任务：把物品栏 27 格（不含快捷栏）里的 "
+            + (mode == ContainerPutAction.Mode.ALL_ITEMS ? "物品（潜影盒不算）" : "潜影盒")
+            + " 放进 " + pos.toShortString() + "（结束后输出 all_cleared）"));
+        return 1;
     }
 
     // ------------------------------------------------------------------

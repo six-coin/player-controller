@@ -2,6 +2,7 @@ package org.six_coin.playerController.client.action;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
@@ -29,6 +30,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
@@ -70,12 +72,17 @@ public class StationCheckAction extends Action {
         .create();
 
     /** 一个要开的容器。 */
-    private record Target(StationPart part, BlockPos pos) {
+    private record Target(StationPart part, BlockPos pos, int stationId) {
     }
 
     /** 开完一个容器数出来的东西。 */
-    private record Survey(BlockPos pos, Map<String, Integer> items, int totalSlots, int emptySlots,
-                          boolean allEmpty, boolean allEmptyShulkerBoxes) {
+    private record Survey(BlockPos pos, int stationId, ContainerCacheManager.Breakdown breakdown,
+                          int totalSlots, int emptySlots, boolean allEmpty, boolean allEmptyShulkerBoxes) {
+
+        /** 散装 + 潜影盒内容加在一起（和容器缓存里存的一样）。 */
+        Map<String, Integer> items() {
+            return breakdown.all();
+        }
     }
 
     private final List<Target> targets = new ArrayList<>();
@@ -239,7 +246,7 @@ public class StationCheckAction extends Action {
             BlockPos other = ContainerTypes.otherHalf(world, configured);
             BlockPos canonical = other == null || configured.compareTo(other) <= 0 ? configured : other;
             if (!seen.add(canonical)) continue;
-            targets.add(new Target(part, configured));
+            targets.add(new Target(part, configured, stationPos.id()));
         }
     }
 
@@ -282,7 +289,7 @@ public class StationCheckAction extends Action {
     // ------------------------------------------------------------------
 
     private void survey(Target target) {
-        Map<String, Integer> items = ContainerCacheManager.snapshot(handler);
+        ContainerCacheManager.Breakdown breakdown = ContainerCacheManager.breakdown(handler);
         int totalSlots = 0;
         int emptySlots = 0;
         boolean allEmpty = true;
@@ -300,10 +307,13 @@ public class StationCheckAction extends Action {
         }
 
         surveys.computeIfAbsent(target.part(), key -> new ArrayList<>())
-            .add(new Survey(target.pos(), items, totalSlots, emptySlots, allEmpty, allEmptyShulkerBoxes));
+            .add(new Survey(target.pos(), target.stationId(), breakdown,
+                totalSlots, emptySlots, allEmpty, allEmptyShulkerBoxes));
 
-        ChatUtils.debug("工作站检查：" + target.part().display() + " " + target.pos().toShortString()
-            + " —— " + totalSlots + " 格，空 " + emptySlots + " 格，物品 " + items.size() + " 种"
+        ChatUtils.debug("工作站检查：" + target.part().display() + " #" + target.stationId() + " "
+            + target.pos().toShortString() + " —— " + totalSlots + " 格，空 " + emptySlots + " 格，物品 "
+            + breakdown.all().size() + " 种（散装 " + breakdown.items().size() + " 种 + 潜影盒 "
+            + breakdown.shulkerBoxes().size() + " 个）"
             + (allEmpty ? "，全空" : "")
             + (!allEmpty && allEmptyShulkerBoxes && emptySlots == 0 ? "，整箱都是空潜影盒" : ""));
     }
@@ -377,6 +387,25 @@ public class StationCheckAction extends Action {
     private void writeReport(int freeStorage, int freeFinal) {
         JsonObject report = new JsonObject();
         report.add("item_storage", itemsJson(aggregate(StationPart.ITEM_STORAGE)));
+
+        // 每个存储容器各自一份明细：散装物品 + 每个潜影盒里各自的东西
+        JsonObject detailed = new JsonObject();
+        List<Survey> storageSurveys = new ArrayList<>(surveys.getOrDefault(StationPart.ITEM_STORAGE, List.of()));
+        storageSurveys.sort(Comparator.comparingInt(Survey::stationId));
+        for (Survey survey : storageSurveys) {
+            JsonObject entry = new JsonObject();
+            entry.addProperty("id", survey.stationId());
+            entry.add("items", itemsJson(survey.breakdown().items()));
+
+            JsonArray boxes = new JsonArray();
+            for (Map<String, Integer> box : survey.breakdown().shulkerBoxes()) {
+                boxes.add(itemsJson(box));
+            }
+            entry.add("shulker_boxes", boxes);
+            detailed.add(String.valueOf(survey.stationId()), entry);
+        }
+        report.add("item_storage_detailed", detailed);
+
         report.addProperty("free_storage_slots", freeStorage);
         report.addProperty("free_final_slots", freeFinal);
 
