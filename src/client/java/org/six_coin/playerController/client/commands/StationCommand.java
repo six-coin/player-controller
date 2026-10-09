@@ -32,11 +32,9 @@ import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.station.StationManager;
 import org.six_coin.playerController.client.station.StationPart;
 import org.six_coin.playerController.client.station.StationPos;
+import org.six_coin.playerController.client.station.StationPrecheck;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
-import org.six_coin.playerController.client.waypoint.Waypoint;
-import org.six_coin.playerController.client.waypoint.WaypointGraph;
-import org.six_coin.playerController.client.waypoint.WaypointManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -71,9 +69,6 @@ import java.util.concurrent.CompletableFuture;
 public final class StationCommand {
 
     private static final String ROOT = "/pc station ";
-
-    /** check 要求至少这么多个潜影盒摆放处。 */
-    private static final int REQUIRED_PLACEMENTS = 10;
 
     private StationCommand() {
     }
@@ -402,134 +397,13 @@ public final class StationCommand {
             return 0;
         }
 
-        StationManager manager = StationManager.get();
-        String dimension = DimensionUtils.current();
+        // 不开箱子就能查的那部分（/pc stock task start 用的是同一套）
+        StationPrecheck.Result result = StationPrecheck.run(mc);
+        for (String hint : result.hints()) source.sendFeedback(Text.literal("§e提示：" + hint));
 
-        // 必须站在站立点上（同一个维度、同一个坐标）
-        StationPos stand = manager.single(StationPart.STAND_POINT);
-        if (stand == null) {
-            source.sendError(Text.literal("还没有设置站立点：站到工作站中间，然后 /pc station stand_point set_here"));
-            return 0;
-        }
-        if (!stand.dimension().equals(dimension)) {
-            source.sendError(Text.literal("站立点在 " + stand.describe() + "，你现在在 "
-                + DimensionUtils.display(dimension) + "，先过去再检查"));
-            return 0;
-        }
-        BlockPos here = PlayerUtils.currentBlockPos();
-        if (here == null || !here.equals(stand.pos())) {
-            source.sendError(Text.literal("必须站在站立点 " + stand.coordString() + " 才能开始检查（你现在在 "
-                + (here == null ? "?" : here.toShortString()) + "）"));
-            return 0;
-        }
-
-        List<String> problems = new ArrayList<>();
-        List<String> hints = new ArrayList<>();
-        WaypointGraph graph = WaypointManager.get().graph();
-
-        // 站立点本身必须是路径点
-        Waypoint standNode = graph.at(dimension, stand.pos());
-        if (standNode == null) {
-            problems.add("站立点 " + stand.coordString()
-                + " 本身还不是路径点（站在这里用 /pc w waypoint_add_here 加一个）");
-        }
-
-        // 所有提及的方块都要和站立点同维度、且在其触及范围内
-        for (StationPart part : StationPart.values()) {
-            for (StationPos pos : manager.positions(part)) {
-                if (!pos.dimension().equals(stand.dimension())) {
-                    problems.add(part.display() + " " + pos.describe() + " 和站立点不在一个维度");
-                    continue;
-                }
-                if (!PlayerUtils.isWithinReachFrom(stand.pos(), pos.pos())) {
-                    problems.add(part.display() + " " + pos.coordString() + " 不在站立点的触及范围内（距离 "
-                        + format(PlayerUtils.eyeDistanceFrom(stand.pos(), pos.pos())) + " > "
-                        + format(PlayerUtils.reach()) + "）");
-                }
-            }
-        }
-
-        // 任务前物品暂存处：一处、大箱子
-        StationPos temp = manager.single(StationPart.ITEM_TEMP);
-        if (temp == null) {
-            problems.add("还没有设置任务前物品暂存处（item_temp）");
-        } else {
-            BlockState state = mc.world.getBlockState(temp.pos());
-            if (!(state.getBlock() instanceof ChestBlock)) {
-                problems.add("任务前物品暂存处 " + temp.coordString() + " 不是箱子（现在是 "
-                    + ContainerTypes.idOf(state) + "）");
-            } else if (state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) {
-                problems.add("任务前物品暂存处 " + temp.coordString() + " 是单格箱子，必须是大箱子");
-            }
-        }
-
-        // 空潜影盒提供处：一处、木桶
-        StationPos provider = manager.single(StationPart.SHULKER_BOX_PROVIDER);
-        if (provider == null) {
-            problems.add("还没有设置空潜影盒提供处（shulker_box_provider）");
-        } else if (!(mc.world.getBlockState(provider.pos()).getBlock() instanceof BarrelBlock)) {
-            problems.add("空潜影盒提供处 " + provider.coordString() + " 不是木桶（现在是 "
-                + ContainerTypes.idOf(mc.world.getBlockState(provider.pos())) + "）");
-        }
-
-        // 工作台
-        StationPos table = manager.single(StationPart.CRAFTING_TABLE);
-        if (table == null) {
-            problems.add("还没有设置工作台（crafting_table）");
-        } else if (!(mc.world.getBlockState(table.pos()).getBlock() instanceof CraftingTableBlock)) {
-            problems.add("工作台 " + table.coordString() + " 那里不是工作台方块（现在是 "
-                + ContainerTypes.idOf(mc.world.getBlockState(table.pos())) + "）");
-        }
-
-        // 切石机：设了就顺便看一眼（需求里的清单没有它，所以只提示不报错）
-        StationPos cutter = manager.single(StationPart.STONECUTTER);
-        if (cutter != null && !(mc.world.getBlockState(cutter.pos()).getBlock() instanceof StonecutterBlock)) {
-            hints.add("切石机 " + cutter.coordString() + " 那里不是切石机方块（现在是 "
-                + ContainerTypes.idOf(mc.world.getBlockState(cutter.pos())) + "）");
-        }
-
-        // 潜影盒摆放处：数量、空气、上方空气、本身是路径点、从站立点走得到
-        List<StationPos> placements = manager.list(StationPart.SHULKER_BOX_PLACEMENT);
-        if (placements.size() < REQUIRED_PLACEMENTS) {
-            problems.add("潜影盒摆放处只有 " + placements.size() + " 个，至少要 " + REQUIRED_PLACEMENTS + " 个");
-        }
-        for (StationPos stationPos : placements) {
-            BlockPos pos = stationPos.pos();
-            BlockState state = mc.world.getBlockState(pos);
-            // 本身是空气、上面是空气、下面不是空气（潜影盒要摆在这一格、站在上面那一格去开）
-            if (!state.isAir()) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 本身不是空气（现在是 "
-                    + ContainerTypes.idOf(state) + "）");
-            }
-            if (!mc.world.getBlockState(pos.up()).isAir()) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面不是空气（那里应该是能站人的地方）");
-            }
-            if (mc.world.getBlockState(pos.down()).isAir()) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 下面一格是空气（潜影盒没地方放）");
-            }
-
-            // 路径点要在上面那一格（站上去开潜影盒），本身不能是路径点
-            if (graph.at(stationPos.dimension(), pos) != null) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 本身不该是路径点（路径点应该在它上面那一格）");
-            }
-            Waypoint above = graph.at(stationPos.dimension(), pos.up());
-            if (above == null) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面那一格 "
-                    + pos.up().toShortString() + " 还不是路径点");
-            } else if (standNode != null && graph.shortestPath(standNode.id(), above.id()) == null) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面那一格从站立点走不到");
-            }
-        }
-
-        // 物资存储地 / 最终产物地：都要有、都要是容器（容量和内容在动作里数）
-        checkContainerList(mc, manager, StationPart.ITEM_STORAGE, problems);
-        checkContainerList(mc, manager, StationPart.ITEM_FINAL, problems);
-
-        for (String hint : hints) source.sendFeedback(Text.literal("§e提示：" + hint));
-
-        if (!problems.isEmpty()) {
-            source.sendError(Text.literal("工作站检查没通过（" + problems.size() + " 条）："));
-            for (String problem : problems) source.sendError(Text.literal("  · " + problem));
+        if (!result.ok()) {
+            source.sendError(Text.literal("工作站检查没通过（" + result.problems().size() + " 条）："));
+            for (String problem : result.problems()) source.sendError(Text.literal("  · " + problem));
             return 0;
         }
 
@@ -537,22 +411,6 @@ public final class StationCommand {
         source.sendFeedback(Text.literal("方块都对了，开始逐个打开容器数内容"
             + "（物品暂存处、空潜影盒提供处、存储区、产物区；不显示界面，要几秒）"));
         return 1;
-    }
-
-    private static void checkContainerList(MinecraftClient mc, StationManager manager,
-                                           StationPart part, List<String> problems) {
-        List<StationPos> positions = manager.list(part);
-        if (positions.isEmpty()) {
-            problems.add("还没有设置" + part.display() + "（" + part.id() + "）");
-            return;
-        }
-        for (StationPos stationPos : positions) {
-            BlockPos pos = stationPos.pos();
-            if (!(mc.world.getBlockEntity(pos) instanceof Inventory)) {
-                problems.add(part.display() + " " + stationPos.coordString() + " 不是容器（现在是 "
-                    + ContainerTypes.idOf(mc.world.getBlockState(pos)) + "）");
-            }
-        }
     }
 
     // ------------------------------------------------------------------

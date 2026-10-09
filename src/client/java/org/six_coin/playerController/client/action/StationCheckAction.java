@@ -88,6 +88,14 @@ public class StationCheckAction extends Action {
     private int settleTicks;
     private int totalTicks;
 
+    /** 全部通过、报告也写出来了（备货流程要用它判断预检查过没过）。 */
+    private boolean passed;
+
+    /** 检查是不是全部通过（报告写出来了才算）。 */
+    public boolean passed() {
+        return passed;
+    }
+
     @Override
     public String name() {
         return "工作站检查";
@@ -369,7 +377,6 @@ public class StationCheckAction extends Action {
     private void writeReport(int freeStorage, int freeFinal) {
         JsonObject report = new JsonObject();
         report.add("item_storage", itemsJson(aggregate(StationPart.ITEM_STORAGE)));
-        report.add("item_final", itemsJson(aggregate(StationPart.ITEM_FINAL)));
         report.addProperty("free_storage_slots", freeStorage);
         report.addProperty("free_final_slots", freeFinal);
 
@@ -384,6 +391,7 @@ public class StationCheckAction extends Action {
             return;
         }
 
+        passed = true;
         ChatUtils.info("工作站检查通过，报告已写到 " + file);
         ChatUtils.info("物资存储地 " + freeStorage + " 格空位（物品 " + describe(aggregate(StationPart.ITEM_STORAGE))
             + "）；最终产物地 " + freeFinal + " 格空位（物品 " + describe(aggregate(StationPart.ITEM_FINAL)) + "）");
