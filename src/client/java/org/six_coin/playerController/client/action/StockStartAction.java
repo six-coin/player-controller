@@ -31,11 +31,14 @@ public class StockStartAction extends Action {
         /** 工作站检查（开容器，多 tick）。 */
         PRECHECK,
         /** 容器物品汇总 + 材料处理。 */
-        FINISH_MATERIAL
+        FINISH_MATERIAL,
+        /** 阶段2：取货。 */
+        STAGE2
     }
 
     private final String task;
     private StationCheckAction check;
+    private StockStage2Action stage2;
     private Stage stage = Stage.PRECHECK;
 
     public StockStartAction(String task) {
@@ -86,6 +89,17 @@ public class StockStartAction extends Action {
                 stage = Stage.FINISH_MATERIAL;
             }
             case FINISH_MATERIAL -> finishMaterial();
+            case STAGE2 -> {
+                stage2.update();
+                if (!stage2.isFinished()) return;
+
+                stage2.cleanup();
+                if (stage2.failureReason() != null) {
+                    fail("阶段2 失败：" + stage2.failureReason());
+                    return;
+                }
+                finish();
+            }
         }
     }
 
@@ -128,8 +142,10 @@ public class StockStartAction extends Action {
                     + String.join("、", limit(result.shortItems(), 6)));
             }
             ChatUtils.info("已复制一份到 " + result.finalFile());
-            ChatUtils.info("备货 " + task + " 的第一部分阶段1 完成（取货 / 分盒 / 合成还没做）");
-            finish();
+            ChatUtils.info("第一部分阶段1 完成，接着进入阶段2（取货）");
+            stage2 = new StockStage2Action(task);
+            stage2.start();
+            stage = Stage.STAGE2;
         } catch (Exception e) {
             fail("处理材料清单失败：" + e.getMessage());
         }

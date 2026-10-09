@@ -12,6 +12,7 @@ import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
+import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerCacheUpdater;
 import org.six_coin.playerController.client.container.ContainerOpener;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
@@ -104,6 +105,10 @@ public class ContainerGetAction extends Action {
     /** 是因为物品栏（27 格主背包）放不下才停的。 */
     private boolean stoppedForInventory;
 
+    /** 要不要把「取完之后容器里剩什么」带出来（备货流程用）。 */
+    private final boolean wantDetail;
+    private ContainerCacheManager.Breakdown detail;
+
     // 当前这次提取
     private Slot source;
     private ItemStack sourceStack;
@@ -115,9 +120,22 @@ public class ContainerGetAction extends Action {
     private int clickCursorCount;
 
     public ContainerGetAction(BlockPos pos, ItemList itemList) {
+        this(pos, itemList, false);
+    }
+
+    /**
+     * @param wantDetail 要不要把「取完之后容器里剩什么」也带出来（备货流程用；命令输出不受影响）
+     */
+    public ContainerGetAction(BlockPos pos, ItemList itemList, boolean wantDetail) {
         this.pos = pos.toImmutable();
         this.itemList = itemList;
         this.requestText = itemList.describe();
+        this.wantDetail = wantDetail;
+    }
+
+    /** 取完之后容器里剩什么（wantDetail 时才有意义；散装物品 + 每个潜影盒的内容）。 */
+    public ContainerCacheManager.Breakdown detail() {
+        return detail;
     }
 
     @Override
@@ -199,6 +217,11 @@ public class ContainerGetAction extends Action {
 
     @Override
     protected void onEnd() {
+        // 先趁界面还开着，把「取完之后容器里剩什么」记下来（备货流程要用）
+        if (wantDetail && handler != null) {
+            detail = ContainerCacheManager.breakdown(handler);
+        }
+
         // 拿完东西以后，这个容器要是已经在缓存里，就把缓存里的物品列表刷新一遍
         if (handler != null) {
             ContainerCacheUpdater.refresh(MinecraftClient.getInstance(), pos, handler);
@@ -232,7 +255,7 @@ public class ContainerGetAction extends Action {
      *
      * <p>判断方式：整个容器都看完了，或者 item_list 已经满足了，而且不是「因为物品栏放不下」才停的。
      */
-    private boolean allCleared() {
+    public boolean allCleared() {
         return !stoppedForInventory && (scannedAll || itemList.isEmpty());
     }
 

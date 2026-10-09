@@ -354,6 +354,37 @@ public final class WaypointGraph {
     }
 
     /**
+     * 从某个点出发到所有点的最短路代价（同维度按方块距离、传送门边 0 代价）。走不到的点不会出现在结果里。
+     *
+     * <p>和 {@link #shortestPath} 用的是同一套权重；备货流程拿它找「最近的容器」。
+     */
+    public Map<Integer, Double> distancesFrom(int fromId) {
+        Map<Integer, Double> dist = new HashMap<>();
+        if (get(fromId) == null) return dist;
+
+        PriorityQueue<Node> queue = new PriorityQueue<>();
+        dist.put(fromId, 0.0);
+        queue.add(new Node(fromId, 0.0));
+
+        while (!queue.isEmpty()) {
+            Node node = queue.poll();
+            if (node.dist() > dist.getOrDefault(node.id(), Double.MAX_VALUE)) continue;
+
+            for (int next : outgoing(node.id())) {
+                double weight = weight(node.id(), next);
+                if (weight == Double.MAX_VALUE) continue;
+
+                double candidate = node.dist() + weight;
+                if (candidate < dist.getOrDefault(next, Double.MAX_VALUE)) {
+                    dist.put(next, candidate);
+                    queue.add(new Node(next, candidate));
+                }
+            }
+        }
+        return dist;
+    }
+
+    /**
      * 走完这条路的代价：每一段都用 {@link #weight} 加起来，也就是同维度按方块距离、
      * 传送门（跨维度）那一段算 0，和 {@link #shortestPath} 里用的权重是同一套。
      */

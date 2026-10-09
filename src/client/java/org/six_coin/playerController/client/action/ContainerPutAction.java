@@ -11,6 +11,7 @@ import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerCacheTracker;
 import org.six_coin.playerController.client.container.ContainerCacheUpdater;
 import org.six_coin.playerController.client.container.ContainerOpener;
@@ -40,7 +41,9 @@ public class ContainerPutAction extends Action {
         /** 所有物品（潜影盒不算物品）。 */
         ALL_ITEMS,
         /** 所有潜影盒。 */
-        ALL_SHULKER_BOXES
+        ALL_SHULKER_BOXES,
+        /** 什么都放（物品 + 潜影盒）。 */
+        EVERYTHING
     }
 
     /** 打开界面之后等几 tick 再动。 */
@@ -61,6 +64,8 @@ public class ContainerPutAction extends Action {
 
     private final BlockPos pos;
     private final Mode mode;
+    /** 要不要把「放完之后容器里剩什么」也带出来（备货流程用；命令输出不受影响）。 */
+    private final boolean wantDetail;
 
     private ScreenHandler handler;
     private Phase phase = Phase.OPENING;
@@ -71,10 +76,17 @@ public class ContainerPutAction extends Action {
     private int moved;
     private int beforeCount;
     private boolean allCleared;
+    private boolean containerFull;
+    private ContainerCacheManager.Breakdown detail;
 
     public ContainerPutAction(BlockPos pos, Mode mode) {
+        this(pos, mode, false);
+    }
+
+    public ContainerPutAction(BlockPos pos, Mode mode, boolean wantDetail) {
         this.pos = pos;
         this.mode = mode;
+        this.wantDetail = wantDetail;
     }
 
     @Override
@@ -87,8 +99,22 @@ public class ContainerPutAction extends Action {
         return allCleared;
     }
 
+    /** 容器是不是一格空位都没有了（wantDetail 时才有意义）。 */
+    public boolean containerFull() {
+        return containerFull;
+    }
+
+    /** 放完之后容器里剩什么（wantDetail 时才有意义；散装物品 + 每个潜影盒的内容）。 */
+    public ContainerCacheManager.Breakdown detail() {
+        return detail;
+    }
+
     private String modeName() {
-        return mode == Mode.ALL_ITEMS ? "all_items" : "all_shulker_boxes";
+        return switch (mode) {
+            case ALL_ITEMS -> "all_items";
+            case ALL_SHULKER_BOXES -> "all_shulker_boxes";
+            case EVERYTHING -> "everything";
+        };
     }
 
     // ------------------------------------------------------------------
@@ -144,6 +170,12 @@ public class ContainerPutAction extends Action {
 
     @Override
     protected void onEnd() {
+        // 先趁界面还开着，把「放完之后容器里剩什么 / 满没满」记下来（备货流程要用）
+        if (wantDetail && handler != null) {
+            detail = ContainerCacheManager.breakdown(handler);
+            containerFull = hasNoEmptyContainerSlot();
+        }
+
         // 放完顺手把容器缓存刷新一下（这个容器在缓存里的话）
         if (handler != null) {
             ContainerCacheUpdater.refresh(MinecraftClient.getInstance(), pos, handler);
@@ -294,6 +326,15 @@ public class ContainerPutAction extends Action {
         if (mc.player == null || handler == null) return;
         if (mc.player.currentScreenHandler != handler) return;
         mc.player.closeHandledScreen();
+    }
+
+    /** 容器的格子是不是一个空位都没有了。 */
+    private boolean hasNoEmptyContainerSlot() {
+        if (handler == null) return false;
+        for (Slot slot : InventoryUtils.containerSlots(handler)) {
+            if (slot.getStack().isEmpty()) return false;
+        }
+        return true;
     }
 
     private static String describe(ItemStack stack) {

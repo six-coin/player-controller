@@ -2,7 +2,9 @@ package org.six_coin.playerController.client.commands;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
@@ -20,6 +22,8 @@ import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.ItemList;
 import org.six_coin.playerController.client.util.PlayerUtils;
+
+import java.util.function.BiFunction;
 
 /**
  * {@code /pc container get ...} —— 打开容器，按 item_list 把东西拿进主背包。
@@ -46,35 +50,71 @@ public final class ContainerCommand {
                 .then(ClientCommandManager.literal("from_target")
                     .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
                         .executes(ContainerCommand::getFromTarget)))
-                .then(ClientCommandManager.literal("from_id")
-                    .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
-                        .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
-                            .executes(ContainerCommand::getFromId)))))
-            .then(ClientCommandManager.literal("put")
-                .then(ClientCommandManager.literal("to_id")
-                    .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
-                        .then(putMode("all_items",
-                            context -> putToId(context, ContainerPutAction.Mode.ALL_ITEMS)))
-                        .then(putMode("all_shulker_boxes",
-                            context -> putToId(context, ContainerPutAction.Mode.ALL_SHULKER_BOXES)))))
-                .then(ClientCommandManager.literal("to_position")
+                .then(ClientCommandManager.literal("from_position")
                     .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
                         .suggests(LookSuggestions::x)
                         .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
                             .suggests(LookSuggestions::y)
                             .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
                                 .suggests(LookSuggestions::z)
-                                .then(putMode("all_items",
-                                    context -> putToPosition(context, ContainerPutAction.Mode.ALL_ITEMS)))
-                                .then(putMode("all_shulker_boxes",
-                                    context -> putToPosition(context, ContainerPutAction.Mode.ALL_SHULKER_BOXES))))))))
+                                .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
+                                    .executes(ContainerCommand::getFromPosition))))))
+                .then(ClientCommandManager.literal("from_id")
+                    .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
+                        .then(ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
+                            .executes(ContainerCommand::getFromId)))))
+            .then(ClientCommandManager.literal("put")
+                .then(putToTargetNode())
+                .then(putToIdNode())
+                .then(putToPositionNode()))
             .then(ContainerCacheCommand.build());
     }
 
-    /** 一个模式字面量（all_items / all_shulker_boxes）。 */
-    private static LiteralArgumentBuilder<FabricClientCommandSource> putMode(
-            String name, com.mojang.brigadier.Command<FabricClientCommandSource> command) {
-        return ClientCommandManager.literal(name).executes(command);
+    /** {@code put to_target <模式>}：准星指着的容器。 */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> putToTargetNode() {
+        LiteralArgumentBuilder<FabricClientCommandSource> node = ClientCommandManager.literal("to_target");
+        attachModes(node, (context, mode) -> putToTarget(context, mode));
+        return node;
+    }
+
+    /** {@code put to_id <id> <模式>}：容器缓存编号。 */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> putToIdNode() {
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> id =
+            ClientCommandManager.argument("id", IntegerArgumentType.integer());
+        attachModes(id, (context, mode) -> putToId(context, mode));
+        return ClientCommandManager.literal("to_id").then(id);
+    }
+
+    /** {@code put to_position <x> <y> <z> <模式>}：当前维度的坐标。 */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> putToPositionNode() {
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> z =
+            ClientCommandManager.argument("z", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
+        attachModes(z, (context, mode) -> putToPosition(context, mode));
+
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> y =
+            ClientCommandManager.argument("y", IntegerArgumentType.integer()).suggests(LookSuggestions::y).then(z);
+
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> x =
+            ClientCommandManager.argument("x", IntegerArgumentType.integer()).suggests(LookSuggestions::x).then(y);
+
+        return ClientCommandManager.literal("to_position").then(x);
+    }
+
+    /**
+     * 把一个父节点下面挂上 all_items / all_shulker_boxes / everything 三个**兄弟**模式字面量。
+     *
+     * <p>注意别把它们串成父子（{@code all_items} 下面挂 {@code all_shulker_boxes}），
+     * 那样命令根本走不通。
+     */
+    private static void attachModes(ArgumentBuilder<FabricClientCommandSource, ?> parent,
+                                    BiFunction<CommandContext<FabricClientCommandSource>,
+                                        ContainerPutAction.Mode, Integer> runner) {
+        parent.then(ClientCommandManager.literal("all_items")
+            .executes(context -> runner.apply(context, ContainerPutAction.Mode.ALL_ITEMS)));
+        parent.then(ClientCommandManager.literal("all_shulker_boxes")
+            .executes(context -> runner.apply(context, ContainerPutAction.Mode.ALL_SHULKER_BOXES)));
+        parent.then(ClientCommandManager.literal("everything")
+            .executes(context -> runner.apply(context, ContainerPutAction.Mode.EVERYTHING)));
     }
 
     // ------------------------------------------------------------------
@@ -91,6 +131,20 @@ public final class ContainerCommand {
             source.sendError(Text.literal("你没有看向任何方块"));
             return 0;
         }
+        return startGet(source, pos, itemList);
+    }
+
+    private static int getFromPosition(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        if (!hasPlayer(source)) return 0;
+
+        ItemList itemList = readItemList(source, context);
+        if (itemList == null) return 0;
+
+        BlockPos pos = new BlockPos(
+            IntegerArgumentType.getInteger(context, "x"),
+            IntegerArgumentType.getInteger(context, "y"),
+            IntegerArgumentType.getInteger(context, "z"));
         return startGet(source, pos, itemList);
     }
 
@@ -122,6 +176,18 @@ public final class ContainerCommand {
     // ------------------------------------------------------------------
     // put
     // ------------------------------------------------------------------
+
+    private static int putToTarget(CommandContext<FabricClientCommandSource> context, ContainerPutAction.Mode mode) {
+        FabricClientCommandSource source = context.getSource();
+        if (!hasPlayer(source)) return 0;
+
+        BlockPos pos = PlayerUtils.lookedAtBlock();
+        if (pos == null) {
+            source.sendError(Text.literal("你没有看向任何方块"));
+            return 0;
+        }
+        return startPut(source, pos, mode);
+    }
 
     private static int putToId(CommandContext<FabricClientCommandSource> context, ContainerPutAction.Mode mode) {
         FabricClientCommandSource source = context.getSource();

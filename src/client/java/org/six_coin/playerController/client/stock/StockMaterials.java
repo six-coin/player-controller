@@ -183,8 +183,9 @@ public final class StockMaterials {
         return items;
     }
 
+    /** 解析一个物品 id（带不带 minecraft: 都行）；认不出来返回 null。 */
     @Nullable
-    private static Item parseItem(String raw) {
+    public static Item parseItem(String raw) {
         Identifier identifier = Identifier.tryParse(raw.contains(":") ? raw : "minecraft:" + raw);
         if (identifier == null) {
             ChatUtils.error("认不出的物品 id：" + raw);
