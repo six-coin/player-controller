@@ -102,7 +102,7 @@ public final class ContainerCommand {
     }
 
     /**
-     * 把一个父节点下面挂上 all_items / all_shulker_boxes / everything 三个**兄弟**模式字面量。
+     * 把一个父节点下面挂上各种模式字面量。
      *
      * <p>注意别把它们串成父子（{@code all_items} 下面挂 {@code all_shulker_boxes}），
      * 那样命令根本走不通。
@@ -116,6 +116,8 @@ public final class ContainerCommand {
             .executes(context -> runner.apply(context, ContainerPutAction.Mode.ALL_SHULKER_BOXES)));
         parent.then(ClientCommandManager.literal("everything")
             .executes(context -> runner.apply(context, ContainerPutAction.Mode.EVERYTHING)));
+        parent.then(ClientCommandManager.literal("everything_include_hotbar")
+            .executes(context -> runner.apply(context, ContainerPutAction.Mode.EVERYTHING_INCLUDE_HOTBAR)));
     }
 
     // ------------------------------------------------------------------
@@ -299,10 +301,20 @@ public final class ContainerCommand {
         }
 
         ActionManager.get().submit(new ContainerPutAction(pos, mode));
-        source.sendFeedback(Text.literal("已提交任务：把物品栏 27 格（不含快捷栏）里的 "
-            + (mode == ContainerPutAction.Mode.ALL_ITEMS ? "物品（潜影盒不算）" : "潜影盒")
-            + " 放进 " + pos.toShortString() + "（结束后输出 all_cleared）"));
+        source.sendFeedback(Text.literal("已提交任务：" + putDescription(mode) + " 放进 "
+            + pos.toShortString() + "（结束后输出 all_cleared）"));
         return 1;
+    }
+
+    /** put 的提示文字：说清楚这一次会动哪几格。 */
+    private static String putDescription(ContainerPutAction.Mode mode) {
+        return switch (mode) {
+            case ALL_ITEMS -> "把主背包 27 格（不含快捷栏）里的物品（潜影盒不算）";
+            case ALL_SHULKER_BOXES -> "把主背包 27 格（不含快捷栏）里的潜影盒";
+            case EVERYTHING -> "把主背包 27 格（不含快捷栏）里的东西（物品 + 潜影盒）";
+            case EVERYTHING_INCLUDE_HOTBAR -> "把整个物品栏（27 格主背包 + 快捷栏 9 格）里的东西";
+            case WANTED -> "把物品栏里 item_list 还要的东西";
+        };
     }
 
     // ------------------------------------------------------------------

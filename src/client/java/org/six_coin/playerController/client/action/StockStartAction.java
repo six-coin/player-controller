@@ -1,8 +1,10 @@
 package org.six_coin.playerController.client.action;
 
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.Registries;
 import org.six_coin.playerController.client.container.ContainerItemsExporter;
 import org.six_coin.playerController.client.station.StationManager;
 import org.six_coin.playerController.client.station.StationPart;
@@ -22,7 +24,8 @@ import java.util.List;
  * <ol>
  *   <li>跑一遍工作站检查（{@link StationCheckAction}，和 {@code /pc station check} 同一个动作），
  *       生成 {@code station/check.json}；</li>
- *   <li>把物品栏 27 格里的东西全放进任务前物品暂存处（item_temp）；</li>
+ *   <li>把**整个物品栏**（27 格主背包 + 快捷栏 9 格，也就是 {@code everything_include_hotbar}）
+ *       里的东西全放进任务前物品暂存处（item_temp）；</li>
  *   <li>从 item_temp 里拿一把**剩余耐久 ≥ 1000** 的钻石镐，放进快捷栏第一格
  *       （没有这样的镐就终止，拒绝执行）；</li>
  *   <li>跑一遍容器物品汇总（{@link ContainerItemsExporter}，和
@@ -46,7 +49,7 @@ public class StockStartAction extends Action {
     private enum Stage {
         /** 工作站检查（开容器，多 tick）。 */
         PRECHECK,
-        /** 把物品栏里的东西全放进 item_temp。 */
+        /** 把整个物品栏（含快捷栏）里的东西全放进 item_temp。 */
         PUT_TEMP,
         /** 取钻石镐放进快捷栏第一格。 */
         TAKE_PICKAXE,
@@ -137,19 +140,14 @@ public class StockStartAction extends Action {
                     fail("取钻石镐失败：" + takePickaxe.failureReason());
                     return;
                 }
+
                 if (!takePickaxe.found()) {
-                    fail("任务前物品暂存处里没有剩余耐久 ≥ " + REQUIRED_PICKAXE_DURABILITY
-                        + " 的钻石镐，终止，拒绝执行");
+                    fail("任务前物品暂存处里没有能用的钻石镐，终止，拒绝执行："
+                        + takePickaxe.notFoundReason()
+                        + "（要求剩余耐久 ≥ " + REQUIRED_PICKAXE_DURABILITY + "）");
                     return;
                 }
-                ItemStack tool = takePickaxe.taken();
-                int left = tool.getMaxDamage() - tool.getDamage();
-                if (left < REQUIRED_PICKAXE_DURABILITY) {
-                    fail("取出来的钻石镐只剩 " + left + " 耐久（要求 ≥ "
-                        + REQUIRED_PICKAXE_DURABILITY + "），终止，拒绝执行");
-                    return;
-                }
-                ChatUtils.info("钻石镐（剩余耐久 " + left + "）已经放进快捷栏第一格，继续");
+                if (!checkPickaxeReady("取钻石镐")) return;
                 stage = Stage.FINISH_MATERIAL;
             }
             case FINISH_MATERIAL -> finishMaterial();
@@ -187,7 +185,7 @@ public class StockStartAction extends Action {
 
     // ------------------------------------------------------------------
 
-    /** 第 2 步：把物品栏 27 格（不含快捷栏）里的东西全放进任务前物品暂存处。 */
+    /** 第 2 步：把**整个物品栏**（27 格主背包 + 快捷栏 9 格）里的东西全放进任务前物品暂存处。 */
     private void startPutTemp() {
         StationPos temp = StationManager.get().single(StationPart.ITEM_TEMP);
         if (temp == null) {
@@ -195,8 +193,8 @@ public class StockStartAction extends Action {
             return;
         }
 
-        ChatUtils.info("先把物品栏里的东西都放进任务前物品暂存处 " + temp.coordString());
-        putTemp = new ContainerPutAction(temp.pos(), ContainerPutAction.Mode.EVERYTHING);
+        ChatUtils.info("先把整个物品栏（连快捷栏）里的东西都放进任务前物品暂存处 " + temp.coordString());
+        putTemp = new ContainerPutAction(temp.pos(), ContainerPutAction.Mode.EVERYTHING_INCLUDE_HOTBAR);
         putTemp.start();
         stage = Stage.PUT_TEMP;
     }
@@ -211,12 +209,54 @@ public class StockStartAction extends Action {
 
         ChatUtils.info("从任务前物品暂存处取一把钻石镐（要求剩余耐久 ≥ "
             + REQUIRED_PICKAXE_DURABILITY + "）放进快捷栏第一格");
-        takePickaxe = new TakeItemAction(temp.pos(), PICKAXE_HOTBAR, stack ->
-            stack.isOf(Items.DIAMOND_PICKAXE)
-                && stack.getMaxDamage() - stack.getDamage() >= REQUIRED_PICKAXE_DURABILITY,
-            "够耐久的钻石镐");
+        takePickaxe = new TakeItemAction(temp.pos(), PICKAXE_HOTBAR,
+            StockStartAction::isUsablePickaxe,
+            "够耐久的钻石镐",
+            stack -> stack.isOf(Items.DIAMOND_PICKAXE)
+                ? "钻石镐（剩余耐久 " + remainingDurability(stack) + "）"
+                : null);
         takePickaxe.start();
         stage = Stage.TAKE_PICKAXE;
+    }
+
+    // ------------------------------------------------------------------
+    // 钻石镐
+    // ------------------------------------------------------------------
+
+    /** 这一叠算不算「能用的钻石镐」：是钻石镐、而且剩余耐久够。 */
+    private static boolean isUsablePickaxe(ItemStack stack) {
+        return !stack.isEmpty()
+            && stack.isOf(Items.DIAMOND_PICKAXE)
+            && remainingDurability(stack) >= REQUIRED_PICKAXE_DURABILITY;
+    }
+
+    /** 剩余耐久（没耐久的物品就是 0）。 */
+    private static int remainingDurability(ItemStack stack) {
+        return stack.getMaxDamage() - stack.getDamage();
+    }
+
+    private static ItemStack inventoryStack(int index) {
+        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        return player == null ? ItemStack.EMPTY : player.getInventory().getStack(index);
+    }
+
+    /** 确认快捷栏第一格真的就位了。 */
+    private boolean checkPickaxeReady(String what) {
+        ItemStack stack = inventoryStack(PICKAXE_HOTBAR);
+        if (!isUsablePickaxe(stack)) {
+            fail(what + "之后，快捷栏第一格里不是能用的钻石镐（现在是 " + describeStack(stack)
+                + "，要求剩余耐久 ≥ " + REQUIRED_PICKAXE_DURABILITY + "）");
+            return false;
+        }
+        ChatUtils.info("钻石镐就位：快捷栏第一格，剩余耐久 " + remainingDurability(stack));
+        return true;
+    }
+
+    private static String describeStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return "空";
+        return Items.DIAMOND_PICKAXE == stack.getItem()
+            ? "钻石镐（剩余耐久 " + remainingDurability(stack) + "）"
+            : Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount();
     }
 
     /** 第 4、5 步：容器物品汇总 + 材料处理（都是同步的）。 */

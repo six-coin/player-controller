@@ -22,8 +22,11 @@ import org.six_coin.playerController.client.util.ItemList;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 
 /**
- * {@code /pc container put to_id|to_position ... all_items|all_shulker_boxes} 的执行体：
- * 把主背包 27 格（不含快捷栏）里的物品 / 潜影盒全部放进指定容器。
+ * {@code /pc container put to_id|to_position ... all_items|all_shulker_boxes|everything|everything_include_hotbar}
+ * 的执行体：把物品栏里的物品 / 潜影盒全部放进指定容器。
+ *
+ * <p>除了 {@link Mode#EVERYTHING_INCLUDE_HOTBAR} 以外，都只动**主背包 27 格（不含快捷栏）**；
+ * {@code everything_include_hotbar} 连快捷栏一起放（备货第一阶段清空物品栏用）。
  *
  * <p>流程（按需求）：
  * <ol>
@@ -43,11 +46,19 @@ public class ContainerPutAction extends Action {
         ALL_ITEMS,
         /** 所有潜影盒。 */
         ALL_SHULKER_BOXES,
-        /** 什么都放（物品 + 潜影盒）。 */
+        /** 什么都放（物品 + 潜影盒），只动主背包 27 格。 */
         EVERYTHING,
         /** 只放 item_list 还要的东西（备货阶段3 往暂存盒里放成品用，见构造器里的 wanted）。 */
-        WANTED
+        WANTED,
+        /** 什么都放，**连快捷栏也放**（备货阶段1 把物品栏清空用）。 */
+        EVERYTHING_INCLUDE_HOTBAR
     }
+
+    /** 主背包（27 格，不含快捷栏）在玩家背包里的下标范围。 */
+    private static final int MAIN_START = 9;
+
+    /** 整个物品栏（含快捷栏）的结束下标（不含）。副手不算。 */
+    private static final int INVENTORY_END = 36;
 
     /** 打开界面之后等几 tick 再动。 */
     private static final int SETTLE_TICKS = 2;
@@ -134,7 +145,24 @@ public class ContainerPutAction extends Action {
             case ALL_SHULKER_BOXES -> "all_shulker_boxes";
             case EVERYTHING -> "everything";
             case WANTED -> "item_list 里还要的东西";
+            case EVERYTHING_INCLUDE_HOTBAR -> "everything_include_hotbar";
         };
+    }
+
+    /** 这个模式动不动快捷栏。 */
+    public boolean includesHotbar() {
+        return mode == Mode.EVERYTHING_INCLUDE_HOTBAR;
+    }
+
+    /** 要动的背包下标从哪个开始（含快捷栏的模式从 0 开始）。 */
+    private int rangeStart() {
+        return includesHotbar() ? 0 : MAIN_START;
+    }
+
+    /** 一句话说清楚这个模式管哪几格。 */
+    private String rangeName() {
+        return includesHotbar() ? "整个物品栏（27 格主背包 + 快捷栏 9 格）"
+            : "物品栏（27 格，不含快捷栏）";
     }
 
     // ------------------------------------------------------------------
@@ -153,12 +181,13 @@ public class ContainerPutAction extends Action {
         // 第 1 步：物品栏里没有这类东西就别开容器了
         if (countInInventory(player) == 0) {
             allCleared = true;
-            ChatUtils.info("物品栏（27 格，不含快捷栏）里没有" + modeName() + "，没什么可放的");
+            ChatUtils.info(rangeName() + "里没有" + modeName() + "，没什么可放的");
             finish();
             return;
         }
 
-        ChatUtils.debug("放入模式 %s：物品栏里有 %d 个要放的", modeName(), countInInventory(player));
+        ChatUtils.debug("放入模式 %s：%s 里有 %d 个要放的",
+            modeName(), rangeName(), countInInventory(player));
         ContainerOpener.open(mc, player, pos);
     }
 
@@ -215,7 +244,7 @@ public class ContainerPutAction extends Action {
 
         ChatUtils.debug("放物结果：all_cleared=%s，一共搬了 %d 次", allCleared, moved);
         ChatUtils.info("放物结果：all_cleared=" + allCleared + (allCleared
-            ? "（物品栏里的" + modeName() + "都放进去了）"
+            ? "（" + rangeName() + "里要放的都放进去了）"
             : "（没放完：容器满了）"));
         ChatUtils.rawCopyable(result.toString());
     }
@@ -298,10 +327,10 @@ public class ContainerPutAction extends Action {
 
     // ------------------------------------------------------------------
 
-    /** 主背包 27 格（不含快捷栏）里这类东西一共有多少。 */
+    /** 要动的那几格（默认 27 格主背包，everything_include_hotbar 时连快捷栏）里这类东西一共有多少。 */
     private int countInInventory(ClientPlayerEntity player) {
         int total = 0;
-        for (int i = 9; i < 36; i++) {
+        for (int i = rangeStart(); i < INVENTORY_END; i++) {
             ItemStack stack = player.getInventory().getStack(i);
             if (stack.isEmpty() || !matches(stack)) continue;
             total += stack.getCount();
@@ -309,12 +338,12 @@ public class ContainerPutAction extends Action {
         return total;
     }
 
-    /** 主背包 27 格里第一个匹配的格子。 */
+    /** 要动的那几格里第一个匹配的格子。 */
     @Nullable
     private Slot findSource() {
         for (Slot slot : handler.slots) {
             if (!(slot.inventory instanceof PlayerInventory)) continue;
-            if (slot.getIndex() < 9 || slot.getIndex() >= 36) continue;
+            if (slot.getIndex() < rangeStart() || slot.getIndex() >= INVENTORY_END) continue;
             ItemStack stack = slot.getStack();
             if (stack.isEmpty() || !matches(stack)) continue;
             return slot;
@@ -325,7 +354,7 @@ public class ContainerPutAction extends Action {
     /** 这一叠算不算「要放的东西」：潜影盒不算物品，everything 什么都算，wanted 只认 item_list。 */
     private boolean matches(ItemStack stack) {
         if (mode == Mode.WANTED) return wanted != null && wanted.wants(stack.getItem());
-        if (mode == Mode.EVERYTHING) return true;
+        if (mode == Mode.EVERYTHING || mode == Mode.EVERYTHING_INCLUDE_HOTBAR) return true;
 
         boolean shulker = ShulkerUtils.isShulkerBox(stack);
         return mode == Mode.ALL_SHULKER_BOXES ? shulker : !shulker;

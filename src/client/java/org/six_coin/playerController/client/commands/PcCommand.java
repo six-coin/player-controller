@@ -37,7 +37,8 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " container get from_target|from_position|from_id ... <item_list> §8- §7打开容器取物品（输出 item_list + all_cleared，并刷新缓存）"));
                 source.sendFeedback(Text.literal("§7    §7两个特殊模式：/" + name + " container special_get from_* §fonly_item§7|§fonly_one_shulker§7 <item_list>"));
                 source.sendFeedback(Text.literal("§7    §7only_item 只拿物品形态的（潜影盒无视）；only_one_shulker 只取一个装着所需东西的潜影盒放进快捷栏第三格"));
-                source.sendFeedback(Text.literal("§7  /" + name + " container put to_target|to_id|to_position ... all_items|all_shulker_boxes|everything §8- §7把物品栏 27 格里的东西放进容器（输出 all_cleared）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " container put to_target|to_id|to_position ... all_items|all_shulker_boxes|everything §8- §7把物品栏 27 格（不含快捷栏）里的东西放进容器（输出 all_cleared）"));
+                source.sendFeedback(Text.literal("§7    §7everything_include_hotbar：连快捷栏 9 格一起放（清空整个物品栏用）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " container cache ... §8- §7容器缓存（add/add_position/add_target/add_batch、del/del_id/del_position/del_target/del_batch、optimize、list、show、get_all_items）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " station ... §8- §7工作站（各部分的 set/set_target/add/del/list、show 高亮、check 检查并导出报告）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " recipe crafting_table|stonecutter <item> <count> §8- §7在工作站上合成 / 切石（成品 QuickMove 进快捷栏）"));

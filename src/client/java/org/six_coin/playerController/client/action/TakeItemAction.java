@@ -18,6 +18,8 @@ import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.InventoryUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Predicate;
 
 /**
@@ -57,6 +59,9 @@ public class TakeItemAction extends Action {
     private final Predicate<ItemStack> filter;
     /** 日志里怎么称呼要找的东西。 */
     private final String what;
+    /** 没找到的时候，用来说明「为什么这一叠不合格」（返回 null 就是不相关的物品）。 */
+    @Nullable
+    private final java.util.function.Function<ItemStack, String> explain;
 
     private ScreenHandler handler;
     private Phase phase = Phase.OPENING;
@@ -72,16 +77,44 @@ public class TakeItemAction extends Action {
     private boolean found;
     private ItemStack taken = ItemStack.EMPTY;
 
+    /** 没找到的时候记下来的现场：容器里有几格东西、哪些是「差不多但不合格」的。 */
+    private int nonEmptySlots;
+    private final List<String> nearMiss = new ArrayList<>();
+
     /**
      * @param hotbarIndex 目标快捷栏格（背包下标 0~8，也就是「快捷栏第 N 格」的 N-1）
      * @param filter      什么样的物品算「要找的」
      * @param what        日志用的名字，比如「钻石镐」「空潜影盒」
      */
     public TakeItemAction(BlockPos pos, int hotbarIndex, Predicate<ItemStack> filter, String what) {
+        this(pos, hotbarIndex, filter, what, null);
+    }
+
+    /**
+     * @param explain 没找到时用的「为什么不合格」说明（比如「钻石镐（剩余耐久 500）」）；
+     *                不是相关的物品就返回 null
+     */
+    public TakeItemAction(BlockPos pos, int hotbarIndex, Predicate<ItemStack> filter, String what,
+                          @Nullable java.util.function.Function<ItemStack, String> explain) {
         this.pos = pos.toImmutable();
         this.hotbarIndex = hotbarIndex;
         this.filter = filter;
         this.what = what;
+        this.explain = explain;
+    }
+
+    /** 没找到的时候，一句能说清楚「容器里到底有什么」的话。 */
+    public String notFoundReason() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("容器 ").append(pos.toShortString()).append(" 里没有").append(what);
+        if (!nearMiss.isEmpty()) {
+            sb.append("（有类似的不合格：").append(String.join("、", nearMiss)).append("）");
+        } else if (nonEmptySlots > 0) {
+            sb.append("（里面 ").append(nonEmptySlots).append(" 格有东西，但都不是）");
+        } else {
+            sb.append("（里面是空的）");
+        }
+        return sb.toString();
     }
 
     /** 有没有找到并拿走。 */
@@ -172,7 +205,7 @@ public class TakeItemAction extends Action {
             if (found) {
                 ChatUtils.debug("取到了 %s，已经在快捷栏第 %d 格", describe(taken), hotbarIndex + 1);
             } else {
-                ChatUtils.debug("容器里没有符合条件的%s", what);
+                ChatUtils.debug("%s", notFoundReason());
             }
         }
     }
@@ -196,16 +229,29 @@ public class TakeItemAction extends Action {
 
     private void tickFind() {
         source = null;
+        nonEmptySlots = 0;
+        nearMiss.clear();
+
         for (Slot slot : InventoryUtils.containerSlots(handler)) {
             ItemStack stack = slot.getStack();
-            if (stack.isEmpty() || !filter.test(stack)) continue;
-            source = slot;
-            break;
+            if (stack.isEmpty()) continue;
+
+            if (filter.test(stack)) {
+                source = slot;
+                break;
+            }
+
+            nonEmptySlots++;
+            ChatUtils.debug("第 %d 格 %s 不符合条件", slot.id, describe(stack));
+            if (explain != null) {
+                String reason = explain.apply(stack);
+                if (reason != null) nearMiss.add(reason);
+            }
         }
 
         if (source == null) {
             found = false;
-            ChatUtils.debug("容器里没有符合条件的%s", what);
+            ChatUtils.debug("%s", notFoundReason());
             finish();
             return;
         }
@@ -310,8 +356,16 @@ public class TakeItemAction extends Action {
         mc.player.closeHandledScreen();
     }
 
+    /** 日志用：物品 id、数量，有耐久的把剩余耐久也带上（不然「为什么不合格」看不出来）。 */
     private static String describe(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "空";
-        return Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(Registries.ITEM.getId(stack.getItem())).append(" x").append(stack.getCount());
+        if (stack.isDamageable() && stack.getMaxDamage() > 0) {
+            sb.append("（剩余耐久 ").append(stack.getMaxDamage() - stack.getDamage())
+                .append("/").append(stack.getMaxDamage()).append("）");
+        }
+        return sb.toString();
     }
 }
