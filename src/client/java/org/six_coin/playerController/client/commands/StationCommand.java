@@ -164,9 +164,10 @@ public final class StationCommand {
         return 1;
     }
 
-    /** 一行的显示：[主] [x y z] + （列表才有）删除按钮。 */
+    /** 一行的显示：{@code #id [主] [x y z]} + （列表才有）删除按钮。 */
     private static Text line(StationPart part, StationPos stationPos) {
-        MutableText text = dimensionTag(stationPos.dimension());
+        MutableText text = Text.literal("#" + stationPos.id() + " ").formatted(Formatting.DARK_GRAY);
+        text.append(dimensionTag(stationPos.dimension()));
         text.append(Text.literal(" "));
         text.append(Text.literal("[" + stationPos.coordString() + "]")
             .setStyle(Style.EMPTY

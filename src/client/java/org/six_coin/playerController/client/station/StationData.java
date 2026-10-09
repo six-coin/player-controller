@@ -76,32 +76,22 @@ public final class StationData {
     }
 
     /**
-     * 把没有维度的坐标丢掉（老格式 / 手改坏的文件），别让它在后面炸掉。
+     * 按「每个部分内部从 1 开始」重新编 id：单点固定 1，列表按顺序 1..n。
      *
-     * <p>新格式每个坐标都带 dimension，这里只是防脏数据。
+     * <p>读文件和写文件前都会调一次，所以文件里的 id 永远是连着的。
      */
-    void sanitize() {
-        if (!valid(stand_point)) stand_point = null;
-        if (!valid(crafting_table)) crafting_table = null;
-        if (!valid(stonecutter)) stonecutter = null;
-        if (!valid(item_temp)) item_temp = null;
-        if (!valid(shulker_box_provider)) shulker_box_provider = null;
+    void resequence() {
+        if (stand_point != null) stand_point.id(1);
+        if (crafting_table != null) crafting_table.id(1);
+        if (stonecutter != null) stonecutter.id(1);
+        if (item_temp != null) item_temp.id(1);
+        if (shulker_box_provider != null) shulker_box_provider.id(1);
 
-        shulker_box_placement = validList(shulker_box_placement);
-        item_storage = validList(item_storage);
-        item_final = validList(item_final);
-    }
-
-    private static boolean valid(StationPos pos) {
-        return pos == null || (pos.dimension() != null && !pos.dimension().isBlank());
-    }
-
-    private static List<StationPos> validList(List<StationPos> source) {
-        List<StationPos> result = new ArrayList<>();
-        if (source == null) return result;
-        for (StationPos pos : source) {
-            if (pos != null && valid(pos)) result.add(pos);
-        }
-        return result;
+        int id = 1;
+        for (StationPos pos : shulkerBoxPlacement()) pos.id(id++);
+        id = 1;
+        for (StationPos pos : itemStorage()) pos.id(id++);
+        id = 1;
+        for (StationPos pos : itemFinal()) pos.id(id++);
     }
 }

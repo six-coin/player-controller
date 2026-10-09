@@ -37,6 +37,7 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " container get from_target|from_id ... <item_list> §8- §7打开容器取物品（from_id 用缓存编号；跑完输出剩下的 item_list 并刷新缓存）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " container cache ... §8- §7容器缓存（add/add_position/add_target/add_batch、del/del_id/del_position/del_target/del_batch、optimize、list、show、get_all_items）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " station ... §8- §7工作站（各部分的 set/set_target/add/del/list、show 高亮、check 检查并导出报告）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " recipe crafting_table|stonecutter <item> <count> §8- §7在工作站上合成 / 切石（成品 QuickMove 进快捷栏）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " w ... §8- §7路径点 / 边 / 出生点（等价写法：/" + name + " waypoints ...）"));
                 source.sendFeedback(Text.literal("§7    §7子命令：waypoint_add、waypoint_add_here、waypoint_name、waypoint_name_del、spawn_set_by_name、edge_add、del、optimize、list、show、edit"));
                 source.sendFeedback(Text.literal("§7    §7清理：del_unreachable_list（列出从当前位置不可达的点和边）、del_unreachable_execute（先备份再删掉它们）"));
@@ -47,6 +48,7 @@ public final class PcCommand {
             .then(MoveCommand.build())
             .then(ContainerCommand.build())
             .then(StationCommand.build())
+            .then(RecipeCommand.build())
             // /pc w ... 和 /pc waypoints ... 是同一条命令的两种写法
             .then(WaypointsCommand.build("w"))
             .then(WaypointsCommand.build("waypoints"))

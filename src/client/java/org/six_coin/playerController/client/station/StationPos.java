@@ -3,9 +3,11 @@ package org.six_coin.playerController.client.station;
 import net.minecraft.util.math.BlockPos;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
-/** station.json 里的一个坐标：{@code {"dimension": "minecraft:overworld", "x": .., "y": .., "z": ..}}。 */
+/** station.json 里的一个坐标：{@code {"id": .., "dimension": "..", "x": .., "y": .., "z": ..}}。 */
 public final class StationPos {
 
+    /** 每个部分内部从 1 开始编号（单点固定 1，列表按顺序 1..n），写文件 / 读文件前统一重编。 */
+    private int id;
     private String dimension;
     private int x;
     private int y;
@@ -24,6 +26,14 @@ public final class StationPos {
 
     public static StationPos of(String dimension, BlockPos pos) {
         return new StationPos(dimension, pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    public int id() {
+        return id;
+    }
+
+    void id(int value) {
+        this.id = value;
     }
 
     public String dimension() {

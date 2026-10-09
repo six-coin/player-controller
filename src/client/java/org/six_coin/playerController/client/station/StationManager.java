@@ -95,7 +95,7 @@ public final class StationManager {
         try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             StationData loaded = GSON.fromJson(reader, StationData.class);
             if (loaded != null) data = loaded;
-            data.sanitize();
+            data.resequence();
             loadedOk = true;
             ChatUtils.debug("已加载 world_" + world + " 的工作站：" + totalCount() + " 个坐标");
         } catch (Exception e) {
@@ -116,6 +116,7 @@ public final class StationManager {
     public void save() {
         if (loadedWorld < 0 || !loadedOk) return;
 
+        data.resequence();
         Path path = stationFile(loadedWorld);
         try {
             Files.createDirectories(path.getParent());

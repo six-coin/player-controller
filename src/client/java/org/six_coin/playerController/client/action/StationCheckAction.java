@@ -189,6 +189,7 @@ public class StationCheckAction extends Action {
 
         // 内容相关的硬性要求
         checkItemTemp();
+        checkFinalEmpty();
         checkProvider();
 
         int freeStorage = freeSlots(StationPart.ITEM_STORAGE);
@@ -317,6 +318,21 @@ public class StationCheckAction extends Action {
         if (!survey.allEmpty()) {
             addProblem("任务前物品暂存处 " + survey.pos().toShortString() + " 里还有东西（占用了 "
                 + (survey.totalSlots() - survey.emptySlots()) + " 格），必须清空");
+        }
+    }
+
+    /** 最终产物地必须全空（成品还没开始往里放）。 */
+    private void checkFinalEmpty() {
+        List<Survey> list = surveys.get(StationPart.ITEM_FINAL);
+        if (list == null || list.isEmpty()) {
+            addProblem("最终产物地没有检查到（没打开成功）");
+            return;
+        }
+        for (Survey survey : list) {
+            if (!survey.allEmpty()) {
+                addProblem("最终产物地 " + survey.pos().toShortString() + " 里还有东西（占用了 "
+                    + (survey.totalSlots() - survey.emptySlots()) + " 格），必须清空");
+            }
         }
     }
 
