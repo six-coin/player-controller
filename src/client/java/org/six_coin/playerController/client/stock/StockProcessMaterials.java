@@ -38,7 +38,8 @@ import java.util.Map;
  * 第五步：把 2_4 里所有原材料摊平成 item_list → 2_5_material_cleaner.json
  * 第六步：2_5 扣掉 current_item_storage 里已经有的部分 → 2_6_material_final.json
  * 第七步：2_6 复制成 final_material.json、2_4 复制成 final_process.json
- * 第八步：把 final_process 摊平成一步步的合成步骤 → final_steps.json（附件 2.1.4）
+ * 第八步：把 final_process 摊平成一步步的合成步骤 → final_steps.json（附件 2.1.4，
+ *          数量**原样保留**，不取整到单次产量的倍数）
  * 第九步：算出整个过程拿不到的最终产物 → unreachable.json
  * </pre>
  *
@@ -54,18 +55,6 @@ public final class StockProcessMaterials {
         .setPrettyPrinting()
         .disableHtmlEscaping()
         .create();
-
-    /**
-     * 查「某个配方单次合成出几个」。
-     *
-     * <p>生成 final_steps 的时候要把数量取整到单次产量的整数倍（比如 55 个泥砖取整到 56，
-     * 因为一次出 4 个）。实现由外面注入，这样这套处理逻辑离线也能测。
-     */
-    @FunctionalInterface
-    public interface CraftOutput {
-        /** @return 单次产量；查不到返回 0（那就只记一条提示、数量不动） */
-        int perCraft(String recipeType, String itemId);
-    }
 
     /** 处理结果，给聊天栏汇总用。 */
     public record Result(int rawProducts,
@@ -84,7 +73,6 @@ public final class StockProcessMaterials {
                          int unreachableKinds,
                          int unreachableTotal,
                          List<String> unreachable,
-                         List<String> stepWarnings,
                          Path processRawFile,
                          Path materialRawFile,
                          Path materialCleanFile,
@@ -140,17 +128,6 @@ public final class StockProcessMaterials {
             manager.currentUnreachableFile(task));
     }
 
-    /**
-     * 正常跑的时候用的「单次产量」查询：拿客户端配方书 / 切石机配方来查。
-     */
-    public static CraftOutput recipeOutputs() {
-        return (recipeType, itemId) -> {
-            Item item = StockMaterials.parseItem(itemId);
-            if (item == null) return 0;
-            return org.six_coin.playerController.client.recipe.RecipePlanner.perCraft(recipeType, item);
-        };
-    }
-
     private StockProcessMaterials() {
     }
 
@@ -158,8 +135,8 @@ public final class StockProcessMaterials {
      * @param currentItemStorageAndShulkerBoxes 「现在有多少东西」：第一部分阶段3 交过来的 station_data
      *        反推出来的 item_storage 物品列表，**加上**摆放处上那些盒子里的（id=1 的暂存盒除外）
      */
-    public static Result process(StockFiles files, Map<String, Integer> currentItemStorageAndShulkerBoxes,
-                                 CraftOutput outputs) throws IOException {
+    public static Result process(StockFiles files, Map<String, Integer> currentItemStorageAndShulkerBoxes)
+        throws IOException {
         // 提前处理：反推仓库 + 摆放处上的盒子（第三步、第六步都用它）
         ChatUtils.debug("第二部分 current_item_storage_and_shulker_boxes："
             + currentItemStorageAndShulkerBoxes.size() + " 种");
@@ -260,8 +237,7 @@ public final class StockProcessMaterials {
         Files.copy(files.processClean(), finalProcessFile, StandardCopyOption.REPLACE_EXISTING);
 
         // 第八步：final_process -> final_steps（附件 2.1.4）
-        List<String> stepWarnings = new ArrayList<>();
-        JsonArray steps = buildSteps(clean, outputs, stepWarnings);
+        JsonArray steps = buildSteps(clean);
         writeTree(files.finalSteps(), steps);
         ChatUtils.debug("final_steps：" + steps.size() + " 步 -> " + files.finalSteps());
 
@@ -299,7 +275,7 @@ public final class StockProcessMaterials {
             materialRaw.size(), rawTotal, materialClean.size(), shortItems.size(),
             shortItems, droppedProducts, materialCleaner.size(), cleanerTotal,
             materialFinal.size(), finalTotal,
-            steps.size(), unreachable.size(), unreachableTotal, unreachableNames, stepWarnings,
+            steps.size(), unreachable.size(), unreachableTotal, unreachableNames,
             files.processRaw(), files.materialRaw(), files.materialClean(), files.processClean(),
             files.materialCleaner(), files.materialFinal(), finalMaterialFile, finalProcessFile,
             files.finalSteps(), files.unreachable());
@@ -315,18 +291,20 @@ public final class StockProcessMaterials {
      * <p>顺序是**后序**（子节点在前、父节点在后），也就是「先做零件再组装」；
      * {@code final} 标记打在最外层那一步上（那是最终产物，要放进最终产物暂存处，
      * 中间产物都进 item_storage 好让后面的步骤能接着拿）。
+     *
+     * <p><b>数量原样保留，不取整</b>：比如要 53 个栅栏（一次出 3 个）就写 53，
+     * 「合成时向上取整、多出来的放回 item_storage」是阶段3 和 {@code /pc recipe} 的事。
+     * 这样「我要几个」这个信息不会在生成步骤时就被丢掉。
      */
-    private static JsonArray buildSteps(JsonArray processClean, CraftOutput outputs,
-                                        List<String> warnings) {
+    private static JsonArray buildSteps(JsonArray processClean) {
         JsonArray steps = new JsonArray();
         for (JsonElement root : processClean) {
-            walkStep(root, true, steps, outputs, warnings);
+            walkStep(root, true, steps);
         }
         return steps;
     }
 
-    private static void walkStep(JsonElement element, boolean isRoot, JsonArray out,
-                                 CraftOutput outputs, List<String> warnings) {
+    private static void walkStep(JsonElement element, boolean isRoot, JsonArray out) {
         if (element == null || !element.isJsonObject()) return;
         JsonObject object = element.getAsJsonObject();
         if (isBase(object)) return;   // 原材料不是步骤
@@ -336,28 +314,18 @@ public final class StockProcessMaterials {
         // 先把子节点（非 base 的）变成步骤
         if (subs != null && subs.isJsonArray()) {
             for (JsonElement sub : subs.getAsJsonArray()) {
-                walkStep(sub, false, out, outputs, warnings);
+                walkStep(sub, false, out);
             }
         }
 
         String id = canonicalId(object);
         if (id == null) return;
 
-        String recipeType = recipeTypeOf(object);
-        int count = countOf(object);
-        int perCraft = outputs.perCraft(recipeType, id);
-        int rounded = count;
-        if (perCraft > 1) {
-            rounded = ((count + perCraft - 1) / perCraft) * perCraft;
-        } else if (perCraft <= 0) {
-            warnings.add(id + "：查不到单次产量，数量就按 " + count + " 记");
-        }
-
         JsonObject step = new JsonObject();
         step.addProperty("item", id);
-        step.addProperty("count", rounded);
+        step.addProperty("count", countOf(object));
         step.addProperty("final", isRoot);
-        step.addProperty("recipe_type", recipeType);
+        step.addProperty("recipe_type", recipeTypeOf(object));
 
         JsonObject materials = new JsonObject();
         if (subs != null && subs.isJsonArray()) {

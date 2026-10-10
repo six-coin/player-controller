@@ -153,6 +153,8 @@ public class StockPart2Stage3Action extends Action {
     private int totalTicks;
     private int pickupHotbar = PICKUP_HOTBAR;
     private int boxesMined;
+    /** 刚刚那次合成**实际**做出来多少个（数量不是单次产量整数倍时会比要求的多）。 */
+    private int lastCraftActual;
     /** 刚从 item_storage 拿出来的那个盒子里装着什么（拿去记账）。 */
     private Map<String, Integer> takenBoxContents = Map.of();
     /** 拿盒子之前那个 item_storage 里有哪些盒子。 */
@@ -602,23 +604,19 @@ public class StockPart2Stage3Action extends Action {
             }
             ChatUtils.info("单背包最大合成：" + MaxCraft.describe(item, max));
 
-            int perCraft = Math.max(1, max.perCraft());
+            // 数量不做任何取整：要 53 个就切 53 个一段，最后一段不是单次产量的整数倍也没关系
+            //（合成的时候会向上取整，多出来的由 final=true 的步骤放回 item_storage）
             List<Integer> segments = new ArrayList<>();
             int left = step.count();
             while (left > 0) {
                 int size = Math.min(max.resultCount(), left);
-                size = (size / perCraft) * perCraft;   // 必须是单次产量的整数倍
                 if (size <= 0) break;
                 segments.add(size);
                 left -= size;
             }
             if (segments.isEmpty()) {
-                fail(step.count() + " 个 " + step.itemId() + " 分不出合法的一段（一次出 "
-                    + perCraft + " 个）");
+                fail(step.count() + " 个 " + step.itemId() + " 分不出合法的一段");
                 return;
-            }
-            if (left > 0) {
-                ChatUtils.error("有 " + left + " 个 " + step.itemId() + " 凑不成整次合成，先跳过");
             }
             ChatUtils.info("分成 " + segments.size() + " 次合成：" + segments);
 
@@ -644,7 +642,8 @@ public class StockPart2Stage3Action extends Action {
 
         pushSync("准备第 " + (index + 1) + " 段（" + want + " 个 " + step.itemId() + "）", () -> {
             // 这一段要的材料：先按配方算「单次合成要多少」，再乘这一段的合成次数
-            int craftTimes = Math.max(1, want / perCraft);
+            // （合成次数是**向上取整**的，因为数量可能不是单次产量的整数倍）
+            int craftTimes = (want + perCraft - 1) / perCraft;
             Map<String, Integer> perCraftNeed = new LinkedHashMap<>();
             for (Map.Entry<Item, Integer> entry : max.materials().entrySet()) {
                 String id = Registries.ITEM.getId(entry.getKey()).toString();
@@ -666,7 +665,8 @@ public class StockPart2Stage3Action extends Action {
                 fail("材料不够合 " + step.itemId() + "（要 " + perCraftNeed + "）");
                 return;
             }
-            int segmentCount = crafts * perCraft;
+            // 缩小的那一段就按整数倍来（不想再产生多余的产物）
+            int segmentWant = crafts == craftTimes ? want : crafts * perCraft;
 
             Map<String, Integer> actualNeed = new LinkedHashMap<>();
             for (Map.Entry<String, Integer> entry : perCraftNeed.entrySet()) {
@@ -675,9 +675,9 @@ public class StockPart2Stage3Action extends Action {
 
             ItemList fetch = itemList(actualNeed);
             pushFetchFromStorage(fetch, actualNeed, () -> {
-                pushCraft(step, segmentCount, () -> pushPutResult(step, segmentCount, () -> {
+                pushCraft(step, segmentWant, () -> pushPutResult(step, segmentWant, lastCraftActual, () -> {
                     craftedSegments++;
-                    craftedCount += segmentCount;
+                    craftedCount += segmentWant;
                     pushSegmentLoop(step, max, segments, index + 1);
                 }));
             });
@@ -747,6 +747,7 @@ public class StockPart2Stage3Action extends Action {
             }
 
             CraftPlan plan = planned.plan();
+            lastCraftActual = plan.actualCount();
             ChatUtils.info("合成：" + plan.describe());
             StationPos station = StationManager.get().single(
                 stonecutter ? StationPart.STONECUTTER : StationPart.CRAFTING_TABLE);
@@ -761,11 +762,15 @@ public class StockPart2Stage3Action extends Action {
         });
     }
 
-    /** 把快捷栏 4~9 格的成品放进目标容器。 */
-    private void pushPutResult(StepData step, int count, Runnable next) {
-        if (step.isFinal()) {
-            pushPutResultToStaging(next);
-        } else {
+    /**
+     * 把快捷栏 4~9 格的成品放进目标容器。
+     *
+     * <p>{@code final=true} 的步骤：先把整叠都放进最终产物暂存盒，再把**多出来的**
+     * （{@code crafted - requested}，因为数量不是单次产量整数倍时会多合一点）拿回来放 item_storage。
+     * 这样暂存盒里最终就正好是要求的数量。
+     */
+    private void pushPutResult(StepData step, int requested, int crafted, Runnable next) {
+        if (!step.isFinal()) {
             // 中间产物：成品在快捷栏 4~9 格，放进 item_storage（后面的步骤再拿出来用）
             pushSync("把中间产物放进 item_storage", () -> {
                 List<Integer> ids = new ArrayList<>(state.storageTargets());
@@ -775,7 +780,37 @@ public class StockPart2Stage3Action extends Action {
                 }
                 putHotbarToStorage(ids, 0, next);
             });
+            return;
         }
+
+        int surplus = crafted - requested;
+        pushPutResultToStaging(() -> {
+            if (surplus <= 0) {
+                next.run();
+                return;
+            }
+            pushTakeBackSurplus(step.itemId(), surplus, next);
+        });
+    }
+
+    /** 把暂存盒里多出来的那点成品拿回来，然后存进 item_storage。 */
+    private void pushTakeBackSurplus(String itemId, int surplus, Runnable next) {
+        pushSync("把多出来的 " + surplus + " 个 " + itemId + " 放回 item_storage", () -> {
+            StationPos spot = placement(STAGING_ID);
+            if (spot == null) {
+                fail("找不到摆放处 #" + STAGING_ID);
+                return;
+            }
+
+            ItemList want = itemListOf(itemId, surplus);
+            pushChild("从暂存盒把多出来的 " + surplus + " 个 " + itemId + " 拿回来",
+                () -> new ContainerGetAction(spot.pos(), want, true),
+                action -> {
+                    ContainerGetAction get = (ContainerGetAction) action;
+                    if (get.detail() != null) state.setPlacement(STAGING_ID, get.detail().all());
+                    pushStoreInventoryToStorage(next);
+                });
+        });
     }
 
     private void putHotbarToStorage(List<Integer> ids, int index, Runnable next) {

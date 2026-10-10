@@ -174,8 +174,7 @@ public class StockPart2Action extends Action {
             }
 
             StockProcessMaterials.Result result = StockProcessMaterials.process(
-                StockProcessMaterials.filesFor(task), currentItemStorageAndShulkerBoxes,
-                StockProcessMaterials.recipeOutputs());
+                StockProcessMaterials.filesFor(task), currentItemStorageAndShulkerBoxes);
 
             ChatUtils.info("2_1 去掉收过的最终产物，剩 " + result.rawProducts() + " 个 → " + result.processRawFile());
             ChatUtils.info("2_2 原材料：" + result.rawMaterialKinds() + " 种 / "
@@ -199,10 +198,6 @@ public class StockPart2Action extends Action {
                 + "，复制成 " + result.finalMaterialFile());
             ChatUtils.info("final_process.json（阶段3 合成用）也写好了 → " + result.finalProcessFile());
             ChatUtils.info("final_steps.json：" + result.stepCount() + " 步 → " + result.finalStepsFile());
-            if (!result.stepWarnings().isEmpty()) {
-                ChatUtils.info("（有 " + result.stepWarnings().size() + " 步查不到单次产量："
-                    + join(result.stepWarnings()) + "）");
-            }
             ChatUtils.info("unreachable.json（整个过程拿不到的最终产物）："
                 + result.unreachableKinds() + " 种 / " + result.unreachableTotal() + " 个 → "
                 + result.unreachableFile());

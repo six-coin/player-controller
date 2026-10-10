@@ -152,7 +152,8 @@ public class CraftAction extends Action {
             return;
         }
 
-        ChatUtils.info(name() + "完成：" + id(plan.target()) + " x" + plan.count()
+        ChatUtils.info(name() + "完成：" + id(plan.target()) + " x" + plan.actualCount()
+            + (plan.actualCount() == plan.count() ? "" : "（要 " + plan.count() + " 个，向上取整）")
             + "（点了 " + clicks + " 次成品格，摆了 " + (round + (phase == Phase.DONE ? 0 : 1)) + " 轮）");
     }
 

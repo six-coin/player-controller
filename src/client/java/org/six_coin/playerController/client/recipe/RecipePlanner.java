@@ -181,7 +181,13 @@ public final class RecipePlanner {
         for (Option option : options) {
             CraftPlan plan = planFromOption(CraftPlan.Station.CRAFTING_TABLE, option, target,
                 count, available, rejected);
-            if (plan != null) return ok(plan);
+            if (plan == null) continue;
+            if (plan.actualCount() > maxCount) {
+                rejected.add("向上取整到 " + plan.actualCount() + " 个，超过快捷栏第 4~9 格能装的 "
+                    + maxCount + " 个");
+                continue;
+            }
+            return ok(plan);
         }
 
         return fail("这些配方都不行：" + String.join("；", rejected));
@@ -213,7 +219,13 @@ public final class RecipePlanner {
         for (Option option : options) {
             CraftPlan plan = planFromOption(CraftPlan.Station.STONECUTTER, option, target,
                 count, available, rejected);
-            if (plan != null) return ok(plan);
+            if (plan == null) continue;
+            if (plan.actualCount() > maxCount) {
+                rejected.add("向上取整到 " + plan.actualCount() + " 个，超过快捷栏第 4~9 格能装的 "
+                    + maxCount + " 个");
+                continue;
+            }
+            return ok(plan);
         }
 
         return fail("这些配方都不行：" + String.join("；", rejected));
@@ -229,12 +241,12 @@ public final class RecipePlanner {
                                             List<String> rejected) {
         int perCraft = option.perCraft();
         if (perCraft <= 0) return null;
-        if (count % perCraft != 0) {
-            rejected.add(name(target) + " 一次 " + perCraft + " 个，" + count + " 除不尽");
-            return null;
-        }
 
-        int crafts = count / perCraft;
+        // 数量不是单次产量的整数倍就**向上取整**（要 53 个栅栏、一次出 3 个 → 合 18 次 = 54 个）。
+        // 多出来的那部分由调用方处理（备货里 final=true 的步骤会把多余的放回 item_storage）。
+        int crafts = (count + perCraft - 1) / perCraft;
+        if (crafts <= 0) return null;
+
         Map<Item, Integer> left = new HashMap<>(available);
         List<CraftPlan.Cell> cells = new ArrayList<>();
         int roundCrafts = Integer.MAX_VALUE;
@@ -269,24 +281,6 @@ public final class RecipePlanner {
     // ------------------------------------------------------------------
     // 小工具
     // ------------------------------------------------------------------
-
-    /**
-     * 某个配方单次合成出几个（生成第二部分的 final_steps 时，要把数量取整到它的整数倍）。
-     *
-     * @param recipeType {@code stonecutting} 走切石机配方，其它走工作台配方
-     * @return 查不到返回 0
-     */
-    public static int perCraft(@Nullable String recipeType, Item item) {
-        List<Option> options = recipeType != null && recipeType.startsWith("stonecutting")
-            ? stonecuttingOptions(item)
-            : craftingOptions(item);
-
-        int best = 0;
-        for (Option option : options) {
-            best = Math.max(best, option.perCraft());
-        }
-        return best;
-    }
 
     /** 快捷栏第 4~9 格（背包下标 3~8）空着几格。 */
     public static int hotbarFreeSlots(ClientPlayerEntity player) {

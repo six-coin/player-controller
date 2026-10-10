@@ -69,6 +69,11 @@ public final class CraftPlan {
         return perCraft;
     }
 
+    /** 实际会做出多少个（= 合的次数 × 单次产量；请求数不是单次产量整数倍时会多一些）。 */
+    public int actualCount() {
+        return crafts * perCraft;
+    }
+
     /** 一轮最多合几次（受「一格能叠多少」限制）。 */
     public int roundCrafts() {
         return roundCrafts;
@@ -92,7 +97,10 @@ public final class CraftPlan {
     public String describe() {
         StringBuilder sb = new StringBuilder();
         sb.append(station == Station.CRAFTING_TABLE ? "工作台" : "切石机").append("：");
-        sb.append(id(target)).append(" x").append(count);
+        sb.append(id(target)).append(" x").append(actualCount());
+        if (actualCount() != count) {
+            sb.append("（要 ").append(count).append(" 个，向上取整）");
+        }
         sb.append("（每次 ").append(perCraft).append(" 个，合 ").append(crafts).append(" 次");
         if (rounds() > 1) {
             sb.append("，分 ").append(rounds()).append(" 轮，每轮最多 ").append(roundCrafts).append(" 次");
