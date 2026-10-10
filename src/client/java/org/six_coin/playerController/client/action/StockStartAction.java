@@ -93,6 +93,12 @@ public class StockStartAction extends Action {
             return;
         }
 
+        // 预检查开头：确保关掉路径点编辑模式
+        // （备货过程中有一大堆移动，开着编辑模式会顺手记一堆路径点和边，把图搞乱）
+        if (WaypointManager.get().setEditMode(false)) {
+            ChatUtils.info("检测到路径点编辑模式开着，已自动关闭（备货全程不需要它）");
+        }
+
         // 第 1 步的一半：先做「不用开箱子」的预检查（和 /pc station check 同一套）
         StationPrecheck.Result pre = StationPrecheck.run(mc);
         for (String hint : pre.hints()) ChatUtils.info("提示：" + hint);

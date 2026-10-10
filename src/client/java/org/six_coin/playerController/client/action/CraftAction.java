@@ -49,6 +49,14 @@ public class CraftAction extends Action {
     /** 一轮里最多点几次成品格（正常一次就够，材料没被清空时才补点）。 */
     private static final int MAX_ROUND_CLICKS = 3;
 
+    /**
+     * 「一格要放 N 个」但手上那叠比 N 多时，一个 tick 里最多右键连点几下（一次放 1 个）。
+     *
+     * <p>客户端点击是本地预测、同步生效的，所以不用点一下等一个 tick。
+     * 连点完下一 tick 会按格子里实际有多少个接着算，不会多放。
+     */
+    private static final int PLACE_CLICKS_PER_TICK = 8;
+
     private enum Phase {
         OPENING,
         SETTLE,
@@ -214,9 +222,15 @@ public class CraftAction extends Action {
             }
             if (cursor.getCount() <= need) {
                 click(mc, player, slotId, 0, SlotActionType.PICKUP);   // 整叠放进去
-            } else {
-                click(mc, player, slotId, 1, SlotActionType.PICKUP);   // 右键放一个
+                return;
             }
+            // 手上比要的多：右键一次放 1 个，一个 tick 里连点几下（不然 41 个要 41 tick）
+            int batch = Math.min(Math.min(need, PLACE_CLICKS_PER_TICK), cursor.getCount());
+            for (int i = 0; i < batch; i++) {
+                clickQuiet(mc, player, slotId, 1, SlotActionType.PICKUP);
+            }
+            ChatUtils.debug("一次 tick 里往格子 " + cell.gridSlot() + " 放了 " + batch
+                + " 个（这一格还要 " + (need - batch) + " 个）");
             return;
         }
 
@@ -370,6 +384,12 @@ public class CraftAction extends Action {
     }
 
     private void click(MinecraftClient mc, ClientPlayerEntity player, int slotId, int button, SlotActionType type) {
+        mc.interactionManager.clickSlot(handler.syncId, slotId, button, type, player);
+    }
+
+    /** 跟 {@link #click} 一样，但**不逐次打日志**（一次 tick 连点好几下时用）。 */
+    private void clickQuiet(MinecraftClient mc, ClientPlayerEntity player, int slotId, int button,
+                            SlotActionType type) {
         mc.interactionManager.clickSlot(handler.syncId, slotId, button, type, player);
     }
 

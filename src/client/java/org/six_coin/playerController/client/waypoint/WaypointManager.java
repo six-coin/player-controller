@@ -86,6 +86,19 @@ public final class WaypointManager {
         return editMode;
     }
 
+    /**
+     * 直接设置编辑模式（{@code /pc stock task ... start} 开头会用它把编辑模式关掉：
+     * 备货过程中有大量移动，开着编辑模式会顺手记一堆路径点和边）。
+     *
+     * @return 之前是不是开着
+     */
+    public boolean setEditMode(boolean value) {
+        boolean before = editMode;
+        editMode = value;
+        if (editMode) show = true;
+        return before;
+    }
+
     // ------------------------------------------------------------------
     // 文件
     // ------------------------------------------------------------------

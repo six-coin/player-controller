@@ -76,6 +76,15 @@ public class ContainerGetAction extends Action {
     /** 一次点击最多等这么多 tick 生效。 */
     private static final int MAX_STEP_WAIT_TICKS = 60;
 
+    /**
+     * 「一个一个放」（右键往目标格放 1 个）时，一个 tick 里最多连点几下。
+     *
+     * <p>客户端点击是**本地预测、同步生效**的（{@code clickSlot} 内部就会改本地状态），
+     * 所以没必要点一下等一个 tick —— 一个 tick 连点几下能快好几倍。
+     * 每一批点完下一 tick 会按「光标少了多少」核对一次，服务端少接受几下也能自己纠正。
+     */
+    private static final int PLACE_CLICKS_PER_TICK = 8;
+
     /** 等容器界面打开最久。 */
     private static final int MAX_OPEN_WAIT_TICKS = 60;
 
@@ -585,13 +594,18 @@ public class ContainerGetAction extends Action {
         }
 
         ItemStack cursor = handler.getCursorStack();
+
+        // 上一批点完了：光标少了多少就是实际放进去多少（服务端少接受几下的情况也能自愈）
         if (pendingClick) {
-            int expectedCursor = sourceCount - placed - 1;
-            if (cursor.getCount() == expectedCursor) {
-                placed++;
+            int nowPlaced = sourceCount - cursor.getCount();
+            if (nowPlaced != placed) {
+                if (nowPlaced > placed) {
+                    ChatUtils.debug("一批点完，实际放进去了 %d 个（本来算的是 %d 个），按实际的来",
+                        nowPlaced, placed);
+                }
+                placed = nowPlaced;
                 pendingClick = false;
                 stepWaitTicks = 0;
-                // 一个一个放，别每一步都刷屏（几秒钟能放几十个）；放完了在 finishPlacing 里报一句
                 if (placed >= take) finishPlacing();
                 return;
             }
@@ -603,7 +617,26 @@ public class ContainerGetAction extends Action {
             return;
         }
 
-        clickQuiet(target, 1, SlotActionType.PICKUP);
+        // 一个 tick 里连点几下（右键一次放 1 个），别一个一个等 tick
+        int room = target.getStack().isEmpty() ? 0
+            : Math.min(target.getMaxItemCount(sourceStack), sourceStack.getMaxCount())
+                - target.getStack().getCount();
+        int batch = Math.min(take - placed, Math.min(PLACE_CLICKS_PER_TICK, cursor.getCount()));
+        if (!target.getStack().isEmpty()) {
+            batch = Math.min(batch, Math.max(0, room));
+        }
+        if (batch <= 0) {
+            fail("目标格 " + InventoryUtils.describe(target) + " 放不下更多了（还要放 "
+                + (take - placed) + " 个）");
+            return;
+        }
+
+        for (int i = 0; i < batch; i++) {
+            clickQuiet(target, 1, SlotActionType.PICKUP);
+        }
+        clickCursorCount = cursor.getCount();
+        pendingClick = true;
+        stepWaitTicks = 0;
     }
 
     /** 该放的都放完了：还有剩的就放回源格，没剩就直接结账。 */
