@@ -37,6 +37,8 @@ import java.util.Map;
  * 第五步：把 2_4 里所有原材料摊平成 item_list → 2_5_material_cleaner.json
  * 第六步：2_5 扣掉 current_item_storage 里已经有的部分 → 2_6_material_final.json
  * 第七步：2_6 复制成 final_material.json、2_4 复制成 final_process.json
+ * 第八步：把 final_process 摊平成一步步的合成步骤 → final_steps.json（附件 2.1.4）
+ * 第九步：算出整个过程拿不到的最终产物 → unreachable.json
  * </pre>
  *
  * <p>第一步看的是 {@code final_pack.json}（第一部分要**装盒**的完整清单），不是 {@code final_final.json}
@@ -52,6 +54,18 @@ public final class StockProcessMaterials {
         .disableHtmlEscaping()
         .create();
 
+    /**
+     * 查「某个配方单次合成出几个」。
+     *
+     * <p>生成 final_steps 的时候要把数量取整到单次产量的整数倍（比如 55 个泥砖取整到 56，
+     * 因为一次出 4 个）。实现由外面注入，这样这套处理逻辑离线也能测。
+     */
+    @FunctionalInterface
+    public interface CraftOutput {
+        /** @return 单次产量；查不到返回 0（那就只记一条提示、数量不动） */
+        int perCraft(String recipeType, String itemId);
+    }
+
     /** 处理结果，给聊天栏汇总用。 */
     public record Result(int rawProducts,
                          int keptProducts,
@@ -65,6 +79,11 @@ public final class StockProcessMaterials {
                          int cleanerMaterialTotal,
                          int finalMaterialKinds,
                          int finalMaterialTotal,
+                         int stepCount,
+                         int unreachableKinds,
+                         int unreachableTotal,
+                         List<String> unreachable,
+                         List<String> stepWarnings,
                          Path processRawFile,
                          Path materialRawFile,
                          Path materialCleanFile,
@@ -72,7 +91,9 @@ public final class StockProcessMaterials {
                          Path materialCleanerFile,
                          Path materialFinalFile,
                          Path finalMaterialFile,
-                         Path finalProcessFile) {
+                         Path finalProcessFile,
+                         Path finalStepsFile,
+                         Path unreachableFile) {
     }
 
     /**
@@ -91,7 +112,9 @@ public final class StockProcessMaterials {
                              Path materialCleaner,
                              Path materialFinal,
                              Path finalMaterial,
-                             Path finalProcess) {
+                             Path finalProcess,
+                             Path finalSteps,
+                             Path unreachable) {
     }
 
     /** 一个备货任务对应的那些文件。 */
@@ -111,7 +134,20 @@ public final class StockProcessMaterials {
             manager.currentMaterialCleanerFile(task),
             manager.currentMaterialFinalFile(task),
             manager.currentFinalMaterialFile(task),
-            manager.currentFinalProcessFile(task));
+            manager.currentFinalProcessFile(task),
+            manager.currentFinalStepsFile(task),
+            manager.currentUnreachableFile(task));
+    }
+
+    /**
+     * 正常跑的时候用的「单次产量」查询：拿客户端配方书 / 切石机配方来查。
+     */
+    public static CraftOutput recipeOutputs() {
+        return (recipeType, itemId) -> {
+            Item item = StockMaterials.parseItem(itemId);
+            if (item == null) return 0;
+            return org.six_coin.playerController.client.recipe.RecipePlanner.perCraft(recipeType, item);
+        };
     }
 
     private StockProcessMaterials() {
@@ -120,7 +156,8 @@ public final class StockProcessMaterials {
     /**
      * @param currentItemStorage 第一部分阶段3 交过来的 station_data 反推出来的「仓库里有什么」
      */
-    public static Result process(StockFiles files, Map<String, Integer> currentItemStorage) throws IOException {
+    public static Result process(StockFiles files, Map<String, Integer> currentItemStorage,
+                                 CraftOutput outputs) throws IOException {
         // 提前处理：反推仓库（这一步只用来做第三步的判断）
         ChatUtils.debug("第二部分 current_item_storage：" + currentItemStorage.size() + " 种");
 
@@ -219,19 +256,136 @@ public final class StockProcessMaterials {
         Files.copy(files.materialFinal(), finalMaterialFile, StandardCopyOption.REPLACE_EXISTING);
         Files.copy(files.processClean(), finalProcessFile, StandardCopyOption.REPLACE_EXISTING);
 
+        // 第八步：final_process -> final_steps（附件 2.1.4）
+        List<String> stepWarnings = new ArrayList<>();
+        JsonArray steps = buildSteps(clean, outputs, stepWarnings);
+        writeTree(files.finalSteps(), steps);
+        ChatUtils.debug("final_steps：" + steps.size() + " 步 -> " + files.finalSteps());
+
+        // 第九步：拿不到的最终产物
+        Map<String, Integer> wantAll = new LinkedHashMap<>();
+        for (JsonElement element : tree) {
+            if (element == null || !element.isJsonObject()) continue;
+            String id = itemOf(element);
+            if (id == null) continue;
+            wantAll.merge(id, countOf(element.getAsJsonObject()), Integer::sum);
+        }
+        Map<String, Integer> unreachable = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : wantAll.entrySet()) {
+            if (collected.containsKey(entry.getKey())) continue;          // 第一部分已经装盒了
+            if (rootItems(clean).contains(entry.getKey())) continue;      // 第二部分会合成出来
+            unreachable.put(entry.getKey(), entry.getValue());
+        }
+        writeItemList(files.unreachable(), unreachable);
+        ChatUtils.debug("unreachable：" + unreachable.size() + " 种 -> " + files.unreachable());
+
         int rawTotal = 0;
         for (int count : materialRaw.values()) rawTotal += count;
         int cleanerTotal = 0;
         for (int count : materialCleaner.values()) cleanerTotal += count;
         int finalTotal = 0;
         for (int count : materialFinal.values()) finalTotal += count;
+        int unreachableTotal = 0;
+        List<String> unreachableNames = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : unreachable.entrySet()) {
+            unreachableTotal += entry.getValue();
+            unreachableNames.add(entry.getKey() + " x" + entry.getValue());
+        }
 
         return new Result(raw.size(), clean.size(),
             materialRaw.size(), rawTotal, materialClean.size(), shortItems.size(),
             shortItems, droppedProducts, materialCleaner.size(), cleanerTotal,
             materialFinal.size(), finalTotal,
+            steps.size(), unreachable.size(), unreachableTotal, unreachableNames, stepWarnings,
             files.processRaw(), files.materialRaw(), files.materialClean(), files.processClean(),
-            files.materialCleaner(), files.materialFinal(), finalMaterialFile, finalProcessFile);
+            files.materialCleaner(), files.materialFinal(), finalMaterialFile, finalProcessFile,
+            files.finalSteps(), files.unreachable());
+    }
+
+    // ------------------------------------------------------------------
+    // final_steps（附件 2.1.4）
+    // ------------------------------------------------------------------
+
+    /**
+     * 把 final_process 的每一棵树摊平成一步步的配方。
+     *
+     * <p>顺序是**后序**（子节点在前、父节点在后），也就是「先做零件再组装」；
+     * {@code final} 标记打在最外层那一步上（那是最终产物，要放进最终产物暂存处，
+     * 中间产物都进 item_storage 好让后面的步骤能接着拿）。
+     */
+    private static JsonArray buildSteps(JsonArray processClean, CraftOutput outputs,
+                                        List<String> warnings) {
+        JsonArray steps = new JsonArray();
+        for (JsonElement root : processClean) {
+            walkStep(root, true, steps, outputs, warnings);
+        }
+        return steps;
+    }
+
+    private static void walkStep(JsonElement element, boolean isRoot, JsonArray out,
+                                 CraftOutput outputs, List<String> warnings) {
+        if (element == null || !element.isJsonObject()) return;
+        JsonObject object = element.getAsJsonObject();
+        if (isBase(object)) return;   // 原材料不是步骤
+
+        JsonElement subs = object.get("sub_materials");
+
+        // 先把子节点（非 base 的）变成步骤
+        if (subs != null && subs.isJsonArray()) {
+            for (JsonElement sub : subs.getAsJsonArray()) {
+                walkStep(sub, false, out, outputs, warnings);
+            }
+        }
+
+        String id = canonicalId(object);
+        if (id == null) return;
+
+        String recipeType = recipeTypeOf(object);
+        int count = countOf(object);
+        int perCraft = outputs.perCraft(recipeType, id);
+        int rounded = count;
+        if (perCraft > 1) {
+            rounded = ((count + perCraft - 1) / perCraft) * perCraft;
+        } else if (perCraft <= 0) {
+            warnings.add(id + "：查不到单次产量，数量就按 " + count + " 记");
+        }
+
+        JsonObject step = new JsonObject();
+        step.addProperty("item", id);
+        step.addProperty("count", rounded);
+        step.addProperty("final", isRoot);
+        step.addProperty("recipe_type", recipeType);
+
+        JsonObject materials = new JsonObject();
+        if (subs != null && subs.isJsonArray()) {
+            for (JsonElement sub : subs.getAsJsonArray()) {
+                if (sub == null || !sub.isJsonObject()) continue;
+                JsonObject subObject = sub.getAsJsonObject();
+                String subId = canonicalId(subObject);
+                if (subId == null) continue;
+                int before = materials.has(subId) ? materials.get(subId).getAsInt() : 0;
+                materials.addProperty(subId, before + countOf(subObject));
+            }
+        }
+        step.add("sub_materials", materials);
+        out.add(step);
+    }
+
+    /** 这棵树的 recipe_type（没有就按有形状的合成算）。 */
+    @Nullable
+    private static String recipeTypeOf(JsonObject object) {
+        JsonElement type = object.get("recipe_type");
+        return type == null || !type.isJsonPrimitive() ? "crafting_shaped" : type.getAsString();
+    }
+
+    /** 一批树的顶层物品 id。 */
+    private static List<String> rootItems(JsonArray trees) {
+        List<String> items = new ArrayList<>();
+        for (JsonElement element : trees) {
+            String id = itemOf(element);
+            if (id != null) items.add(id);
+        }
+        return items;
     }
 
     // ------------------------------------------------------------------

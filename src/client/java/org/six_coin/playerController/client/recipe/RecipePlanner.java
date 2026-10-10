@@ -37,12 +37,17 @@ import java.util.Set;
  *   <li>1.21.11 的客户端拿不到完整的合成配方表（{@code RecipeManager} 只剩原料属性表和切石机），
  *       能用的只有配方书里同步过来的显示数据，也就是**已经解锁过的配方** —— 没解锁的找不到；</li>
  *   <li>材料只看主背包 27 格（不含快捷栏 9 格）；</li>
- *   <li>「一次摆完」的检查：每个格子要放 {@code 合成次数} 个，不能超过那个物品的堆叠上限
- *       （比如发射器中间那把弓，堆叠上限 1，所以一次只能做一个）；</li>
- *   <li>产物数量必须是单次产量的整数倍，而且 1~64。</li>
+ *   <li>材料一格装不下（要合的次数超过堆叠上限）就**分几轮**：每轮摆能摆的最大值，合完再摆下一轮，
+ *       不再因此拒绝执行（需求里明说的）；</li>
+ *   <li>产物数量必须是单次产量的整数倍，而且不超过「快捷栏第 4~9 格的空位 × 64」
+ *       （成品会被 QuickMove 到快捷栏靠后的格子）。</li>
  * </ul>
  */
 public final class RecipePlanner {
+
+    /** 成品会被 QuickMove 到快捷栏的这几格（背包下标 3~8，也就是第 4~9 格）。 */
+    public static final int RESULT_HOTBAR_FROM = 3;
+    public static final int RESULT_HOTBAR_TO = 8;
 
     /** 规划结果：成功了给计划，失败了给一句为什么。 */
     public record Result(@Nullable CraftPlan plan, @Nullable String error) {
@@ -51,31 +56,35 @@ public final class RecipePlanner {
         }
     }
 
+    /**
+     * 一个候选配方：单次产量 + 每个格子可以放哪些物品（空列表 = 空格子）。
+     *
+     * @param shaped 有形状的配方要按 width 摆进 3×3；无序配方就一格一个
+     */
+    public record Option(String recipeType, int perCraft, boolean shaped, int width,
+                         List<List<Item>> cells) {
+    }
+
     private RecipePlanner() {
     }
 
     // ------------------------------------------------------------------
-    // 工作台
+    // 候选配方
     // ------------------------------------------------------------------
 
-    public static Result planCrafting(Item target, int count) {
+    /** 配方书里所有能做出 {@code target} 的工作台配方。 */
+    public static List<Option> craftingOptions(Item target) {
         MinecraftClient mc = MinecraftClient.getInstance();
         ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) return fail("没有玩家或世界");
-        if (count < 1 || count > 64) return fail("数量要在 1~64 之间");
+        if (player == null || mc.world == null) return List.of();
 
         ContextParameterMap context = SlotDisplayContexts.createParameters(mc.world);
-        Map<Item, Integer> available = inventoryCounts(player);
-
         List<RecipeDisplayEntry> entries = new ArrayList<>();
         for (RecipeResultCollection collection : player.getRecipeBook().getOrderedResults()) {
             entries.addAll(collection.getAllRecipes());
         }
-        if (entries.isEmpty()) {
-            return fail("配方书里还没有合成配方（服务器没同步，或者一个都没解锁？）");
-        }
 
-        List<String> rejected = new ArrayList<>();
+        List<Option> options = new ArrayList<>();
         Set<String> seen = new HashSet<>();
 
         for (RecipeDisplayEntry entry : entries) {
@@ -84,14 +93,17 @@ public final class RecipePlanner {
             List<SlotDisplay> ingredients;
             boolean shaped;
             int width;
+            String recipeType;
             if (display instanceof ShapedCraftingRecipeDisplay shapedDisplay) {
                 shaped = true;
                 ingredients = shapedDisplay.ingredients();
                 width = Math.max(1, shapedDisplay.width());
+                recipeType = "crafting_shaped";
             } else if (display instanceof ShapelessCraftingRecipeDisplay shapelessDisplay) {
                 shaped = false;
                 ingredients = shapelessDisplay.ingredients();
                 width = 3;
+                recipeType = "crafting_shapeless";
             } else {
                 continue;
             }
@@ -100,56 +112,78 @@ public final class RecipePlanner {
             if (result.isEmpty() || !result.isOf(target)) continue;
             if (!seen.add(entry.id() + " " + ingredients.size())) continue;
 
-            int perCraft = result.getCount();
-            if (perCraft <= 0) continue;
-            if (count % perCraft != 0) {
-                rejected.add(name(target) + " 一次 " + perCraft + " 个，" + count + " 除不尽");
-                continue;
-            }
-            int crafts = count / perCraft;
-
-            List<CraftPlan.Cell> cells = new ArrayList<>();
-            Map<Item, Integer> left = new HashMap<>(available);
-            String problem = null;
-
-            for (int i = 0; i < ingredients.size(); i++) {
-                List<ItemStack> accepted = ingredients.get(i).getStacks(context);
-                if (accepted.isEmpty()) continue;   // 空格子
-
-                int gridSlot = shaped ? (i / width) * 3 + (i % width) : i;
-                if (gridSlot >= 9) {
-                    problem = "这个配方有 " + ingredients.size() + " 格，3×3 摆不下";
-                    break;
+            List<List<Item>> cells = new ArrayList<>();
+            for (SlotDisplay slot : ingredients) {
+                List<Item> accepted = new ArrayList<>();
+                for (ItemStack option : slot.getStacks(context)) {
+                    if (!option.isEmpty()) accepted.add(option.getItem());
                 }
-
-                Item chosen = choose(accepted, left, crafts);
-                if (chosen == null) {
-                    problem = acceptedNames(accepted) + " 不够（每格要放 " + crafts + " 个）";
-                    break;
-                }
-                if (crafts > chosen.getMaxCount()) {
-                    problem = name(chosen) + " 一格最多放 " + chosen.getMaxCount()
-                        + " 个，这次每个格子要放 " + crafts + " 个";
-                    break;
-                }
-
-                left.put(chosen, left.getOrDefault(chosen, 0) - crafts);
-                cells.add(new CraftPlan.Cell(gridSlot, chosen, crafts));
+                cells.add(accepted);
             }
 
-            if (problem != null) {
-                rejected.add(problem);
-                continue;
-            }
-            if (cells.isEmpty()) continue;
+            options.add(new Option(recipeType, Math.max(1, result.getCount()), shaped, width, cells));
+        }
+        return options;
+    }
 
-            return ok(new CraftPlan(CraftPlan.Station.CRAFTING_TABLE, target,
-                count, crafts, perCraft, cells));
+    /** 服务器同步过来的、能切出 {@code target} 的切石机配方。 */
+    public static List<Option> stonecuttingOptions(Item target) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.world == null || mc.getNetworkHandler() == null) return List.of();
+
+        RecipeManager manager = mc.getNetworkHandler().getRecipeManager();
+        if (manager == null) return List.of();
+        CuttingRecipeDisplay.Grouping<StonecuttingRecipe> grouping = manager.getStonecutterRecipes();
+        if (grouping == null || grouping.isEmpty()) return List.of();
+
+        ContextParameterMap context = SlotDisplayContexts.createParameters(mc.world);
+        List<Option> options = new ArrayList<>();
+
+        for (CuttingRecipeDisplay.GroupEntry<StonecuttingRecipe> entry : grouping.entries()) {
+            ItemStack result = firstMatch(entry.recipe().optionDisplay().getStacks(context), target);
+            if (result == null) continue;
+
+            List<Item> accepted = new ArrayList<>();
+            for (RegistryEntry<Item> item : entry.input().getMatchingItems().toList()) {
+                accepted.add(item.value());
+            }
+            if (accepted.isEmpty()) continue;
+
+            options.add(new Option("stonecutting", Math.max(1, result.getCount()),
+                false, 1, List.of(accepted)));
+        }
+        return options;
+    }
+
+    // ------------------------------------------------------------------
+    // 工作台
+    // ------------------------------------------------------------------
+
+    public static Result planCrafting(Item target, int count) {
+        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        if (player == null || MinecraftClient.getInstance().world == null) return fail("没有玩家或世界");
+        if (count < 1) return fail("数量至少 1");
+
+        int maxCount = maxResultCount(player);
+        if (count > maxCount) {
+            return fail("数量最多 " + maxCount + "（快捷栏第 4~9 格空着 "
+                + hotbarFreeSlots(player) + " 格，每格最多 64 个）");
         }
 
-        if (rejected.isEmpty()) {
+        List<Option> options = craftingOptions(target);
+        if (options.isEmpty()) {
             return fail("配方书里没有能做出 " + name(target) + " 的配方（没解锁的配方客户端看不到）");
         }
+
+        Map<Item, Integer> available = inventoryCounts(player);
+        List<String> rejected = new ArrayList<>();
+
+        for (Option option : options) {
+            CraftPlan plan = planFromOption(CraftPlan.Station.CRAFTING_TABLE, option, target,
+                count, available, rejected);
+            if (plan != null) return ok(plan);
+        }
+
         return fail("这些配方都不行：" + String.join("；", rejected));
     }
 
@@ -158,92 +192,134 @@ public final class RecipePlanner {
     // ------------------------------------------------------------------
 
     public static Result planStonecutting(Item target, int count) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) return fail("没有玩家或世界");
-        if (count < 1 || count > 64) return fail("数量要在 1~64 之间");
+        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        if (player == null || MinecraftClient.getInstance().world == null) return fail("没有玩家或世界");
+        if (count < 1) return fail("数量至少 1");
 
-        RecipeManager manager = mc.getNetworkHandler() == null ? null : mc.getNetworkHandler().getRecipeManager();
-        if (manager == null) return fail("还没连上服务器，拿不到切石机配方");
+        int maxCount = maxResultCount(player);
+        if (count > maxCount) {
+            return fail("数量最多 " + maxCount + "（快捷栏第 4~9 格空着 "
+                + hotbarFreeSlots(player) + " 格，每格最多 64 个）");
+        }
 
-        CuttingRecipeDisplay.Grouping<StonecuttingRecipe> grouping = manager.getStonecutterRecipes();
-        if (grouping == null || grouping.isEmpty()) return fail("服务器没同步切石机配方");
+        List<Option> options = stonecuttingOptions(target);
+        if (options.isEmpty()) {
+            return fail("切石机配方里没有能切出 " + name(target) + " 的（或者还没连上服务器）");
+        }
 
-        ContextParameterMap context = SlotDisplayContexts.createParameters(mc.world);
         Map<Item, Integer> available = inventoryCounts(player);
         List<String> rejected = new ArrayList<>();
 
-        for (CuttingRecipeDisplay.GroupEntry<StonecuttingRecipe> entry : grouping.entries()) {
-            ItemStack result = firstMatch(entry.recipe().optionDisplay().getStacks(context), target);
-            if (result == null) continue;
-
-            int perCraft = Math.max(1, result.getCount());
-            if (count % perCraft != 0) {
-                rejected.add(name(target) + " 一次 " + perCraft + " 个，" + count + " 除不尽");
-                continue;
-            }
-            int crafts = count / perCraft;
-
-            Item input = chooseInput(entry.input(), available, crafts);
-            if (input == null) {
-                rejected.add(inputNames(entry.input()) + " 不够（要 " + crafts + " 个）");
-                continue;
-            }
-            if (crafts > input.getMaxCount()) {
-                rejected.add(name(input) + " 一格最多放 " + input.getMaxCount()
-                    + " 个，这次要放 " + crafts + " 个");
-                continue;
-            }
-
-            List<CraftPlan.Cell> cells = List.of(new CraftPlan.Cell(0, input, crafts));
-            return ok(new CraftPlan(CraftPlan.Station.STONECUTTER, target, count, crafts, perCraft, cells));
+        for (Option option : options) {
+            CraftPlan plan = planFromOption(CraftPlan.Station.STONECUTTER, option, target,
+                count, available, rejected);
+            if (plan != null) return ok(plan);
         }
 
-        if (rejected.isEmpty()) return fail("切石机配方里没有能切出 " + name(target) + " 的");
         return fail("这些配方都不行：" + String.join("；", rejected));
+    }
+
+    // ------------------------------------------------------------------
+    // 把一个候选配方变成计划
+    // ------------------------------------------------------------------
+
+    @Nullable
+    private static CraftPlan planFromOption(CraftPlan.Station station, Option option, Item target,
+                                            int count, Map<Item, Integer> available,
+                                            List<String> rejected) {
+        int perCraft = option.perCraft();
+        if (perCraft <= 0) return null;
+        if (count % perCraft != 0) {
+            rejected.add(name(target) + " 一次 " + perCraft + " 个，" + count + " 除不尽");
+            return null;
+        }
+
+        int crafts = count / perCraft;
+        Map<Item, Integer> left = new HashMap<>(available);
+        List<CraftPlan.Cell> cells = new ArrayList<>();
+        int roundCrafts = Integer.MAX_VALUE;
+
+        for (int i = 0; i < option.cells().size(); i++) {
+            List<Item> accepted = option.cells().get(i);
+            if (accepted.isEmpty()) continue;   // 空格子
+
+            int gridSlot = option.shaped()
+                ? (i / option.width()) * 3 + (i % option.width())
+                : i;
+            if (gridSlot >= 9) {
+                rejected.add("这个配方有 " + option.cells().size() + " 格，3×3 摆不下");
+                return null;
+            }
+
+            Item chosen = choose(accepted, left, crafts);
+            if (chosen == null) {
+                rejected.add(acceptedNames(accepted) + " 不够（要 " + crafts + " 个）");
+                return null;
+            }
+
+            left.put(chosen, left.getOrDefault(chosen, 0) - crafts);
+            cells.add(new CraftPlan.Cell(gridSlot, chosen));
+            roundCrafts = Math.min(roundCrafts, Math.max(1, chosen.getMaxCount()));
+        }
+
+        if (cells.isEmpty()) return null;
+        return new CraftPlan(station, target, count, perCraft, crafts, roundCrafts, cells);
     }
 
     // ------------------------------------------------------------------
     // 小工具
     // ------------------------------------------------------------------
 
+    /**
+     * 某个配方单次合成出几个（生成第二部分的 final_steps 时，要把数量取整到它的整数倍）。
+     *
+     * @param recipeType {@code stonecutting} 走切石机配方，其它走工作台配方
+     * @return 查不到返回 0
+     */
+    public static int perCraft(@Nullable String recipeType, Item item) {
+        List<Option> options = recipeType != null && recipeType.startsWith("stonecutting")
+            ? stonecuttingOptions(item)
+            : craftingOptions(item);
+
+        int best = 0;
+        for (Option option : options) {
+            best = Math.max(best, option.perCraft());
+        }
+        return best;
+    }
+
+    /** 快捷栏第 4~9 格（背包下标 3~8）空着几格。 */
+    public static int hotbarFreeSlots(ClientPlayerEntity player) {
+        int free = 0;
+        for (int i = RESULT_HOTBAR_FROM; i <= RESULT_HOTBAR_TO; i++) {
+            if (player.getInventory().getStack(i).isEmpty()) free++;
+        }
+        return free;
+    }
+
+    /** 一次最多能做多少个：快捷栏第 4~9 格的空位 × 64。 */
+    public static int maxResultCount(ClientPlayerEntity player) {
+        return hotbarFreeSlots(player) * 64;
+    }
+
     /** 主背包 27 格（不含快捷栏）里每种物品有多少。 */
     public static Map<Item, Integer> inventoryCounts(ClientPlayerEntity player) {
         Map<Item, Integer> counts = new LinkedHashMap<>();
-        for (int i = 0; i < player.getInventory().size(); i++) {
-            if (i >= 9 && i < 36) {   // 主背包
-                ItemStack stack = player.getInventory().getStack(i);
-                if (stack.isEmpty()) continue;
-                counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
-            }
+        for (int i = 9; i < 36; i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
         }
         return counts;
     }
 
     /** 从可接受的物品里挑一个：扣除这次要用的量之后还剩最多的那个。 */
     @Nullable
-    private static Item choose(List<ItemStack> accepted, Map<Item, Integer> left, int crafts) {
+    public static Item choose(List<Item> accepted, Map<Item, Integer> left, int crafts) {
         Item best = null;
         int bestLeft = -1;
-        for (ItemStack option : accepted) {
-            Item item = option.getItem();
+        for (Item item : accepted) {
             int remaining = left.getOrDefault(item, 0) - crafts;
-            if (remaining < 0) continue;
-            if (remaining > bestLeft) {
-                bestLeft = remaining;
-                best = item;
-            }
-        }
-        return best;
-    }
-
-    @Nullable
-    private static Item chooseInput(Ingredient ingredient, Map<Item, Integer> available, int crafts) {
-        Item best = null;
-        int bestLeft = -1;
-        for (RegistryEntry<Item> entry : ingredient.getMatchingItems().toList()) {
-            Item item = entry.value();
-            int remaining = available.getOrDefault(item, 0) - crafts;
             if (remaining < 0) continue;
             if (remaining > bestLeft) {
                 bestLeft = remaining;
@@ -273,17 +349,23 @@ public final class RecipePlanner {
         return Registries.ITEM.getId(item).toString();
     }
 
-    private static String acceptedNames(List<ItemStack> accepted) {
+    private static String acceptedNames(List<Item> accepted) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < accepted.size() && i < 4; i++) {
             if (i > 0) sb.append("/");
-            sb.append(name(accepted.get(i).getItem()));
+            sb.append(name(accepted.get(i)));
         }
         if (accepted.size() > 4) sb.append("/…");
         return sb.toString();
     }
 
-    private static String inputNames(Ingredient ingredient) {
+    /** 日志用：这个物品一格最多叠多少。 */
+    public static int maxStackOf(Item item) {
+        return Math.max(1, item.getMaxCount());
+    }
+
+    /** 切石机的输入（{@link Ingredient}）名字，错误信息用。 */
+    public static String inputNames(Ingredient ingredient) {
         StringBuilder sb = new StringBuilder();
         List<RegistryEntry<Item>> items = ingredient.getMatchingItems().toList();
         for (int i = 0; i < items.size() && i < 4; i++) {

@@ -40,6 +40,8 @@ import java.util.stream.Stream;
  * stock/&lt;名字&gt;/2_6_material_final.json     第二部分阶段1 第 6 步产物
  * stock/&lt;名字&gt;/final_material.json         第二部分阶段2 照着它取货（2_6 的副本）
  * stock/&lt;名字&gt;/final_process.json          第二部分阶段3 合成用（2_4 的副本）
+ * stock/&lt;名字&gt;/final_steps.json            第二部分阶段3 照着它一步步合成（final_process 摊平）
+ * stock/&lt;名字&gt;/unreachable.json            整个过程中拿不到的最终产物
  * </pre>
  */
 public final class StockManager {
@@ -154,6 +156,16 @@ public final class StockManager {
         return taskDir(world, task).resolve("final_process.json");
     }
 
+    /** {@code final_steps.json}：把 final_process 摊平成「一步一个配方」的合成步骤（附件 2.1.4）。 */
+    public static Path finalStepsFile(int world, String task) {
+        return taskDir(world, task).resolve("final_steps.json");
+    }
+
+    /** {@code unreachable.json}：整个过程中拿不到的最终产物（item_list）。 */
+    public static Path unreachableFile(int world, String task) {
+        return taskDir(world, task).resolve("unreachable.json");
+    }
+
     public static boolean isValidName(String name) {
         return name != null && NAME_PATTERN.matcher(name).matches();
     }
@@ -220,6 +232,14 @@ public final class StockManager {
 
     public Path currentFinalProcessFile(String task) {
         return finalProcessFile(world(), task);
+    }
+
+    public Path currentFinalStepsFile(String task) {
+        return finalStepsFile(world(), task);
+    }
+
+    public Path currentUnreachableFile(String task) {
+        return unreachableFile(world(), task);
     }
 
     private int world() {

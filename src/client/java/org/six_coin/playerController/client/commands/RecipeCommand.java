@@ -30,15 +30,18 @@ import org.six_coin.playerController.client.util.PlayerUtils;
  * <p>在**工作站**的工作台 / 切石机上做东西。执行前会依次检查：
  * <ol>
  *   <li>你本人站在工作站的站立点上，工作站设了对应方块、而且那里真的是那个方块；</li>
- *   <li>快捷栏第 3~9 格有足够空位（成品会被 QuickMove 到快捷栏靠后的格子）；</li>
- *   <li>主背包 27 格（不含快捷栏）里有这个配方需要的材料，而且能一次摆进格子里
- *       （每格要放「合成次数」个，不能超过那个物品的堆叠上限）；</li>
- *   <li>数量是 1~64，而且是单次产量的整数倍。</li>
+ *   <li>快捷栏第 4~9 格有足够空位（成品会被 QuickMove 到快捷栏靠后的格子）；</li>
+ *   <li>主背包 27 格（不含快捷栏）里有这个配方需要的材料
+ *       （一格摆不下就分几轮摆，见 {@link CraftAction}）；</li>
+ *   <li>数量是「单次产量的整数倍」，而且 1 ~ 64×（快捷栏第 4~9 格的空位数）。</li>
  * </ol>
  *
  * <p>规划细节见 {@link RecipePlanner}，执行细节见 {@link CraftAction}。
  */
 public final class RecipeCommand {
+
+    /** 数量硬上限：快捷栏第 4~9 格一共 6 格，每格最多 64 个。 */
+    private static final int MAX_COUNT_ARGUMENT = 64 * 6;
 
     private RecipeCommand() {
     }
@@ -47,11 +50,13 @@ public final class RecipeCommand {
         return ClientCommandManager.literal("recipe")
             .then(ClientCommandManager.literal("crafting_table")
                 .then(ClientCommandManager.argument("item", ItemIdArgumentType.itemId())
-                    .then(ClientCommandManager.argument("count", IntegerArgumentType.integer(1, 64))
+                    .then(ClientCommandManager.argument("count",
+                            IntegerArgumentType.integer(1, MAX_COUNT_ARGUMENT))
                         .executes(context -> run(context, false)))))
             .then(ClientCommandManager.literal("stonecutter")
                 .then(ClientCommandManager.argument("item", ItemIdArgumentType.itemId())
-                    .then(ClientCommandManager.argument("count", IntegerArgumentType.integer(1, 64))
+                    .then(ClientCommandManager.argument("count",
+                            IntegerArgumentType.integer(1, MAX_COUNT_ARGUMENT))
                         .executes(context -> run(context, true)))));
     }
 
@@ -109,12 +114,17 @@ public final class RecipeCommand {
             return 0;
         }
 
-        // 2. 快捷栏第 3~9 格要有足够空位（成品 QuickMove 到快捷栏靠后的格子）
+        // 2. 快捷栏第 4~9 格要有足够空位（成品 QuickMove 到快捷栏靠后的格子）
         int neededSlots = (count + item.getMaxCount() - 1) / item.getMaxCount();
-        int freeSlots = freeHotbarSlots(player);
+        int freeSlots = RecipePlanner.hotbarFreeSlots(player);
         if (freeSlots < neededSlots) {
-            source.sendError(Text.literal("快捷栏第 3~9 格只剩 " + freeSlots + " 个空位，装 "
+            source.sendError(Text.literal("快捷栏第 4~9 格只剩 " + freeSlots + " 个空位，装 "
                 + count + " 个 " + id(item) + " 需要 " + neededSlots + " 格"));
+            return 0;
+        }
+        if (count > RecipePlanner.maxResultCount(player)) {
+            source.sendError(Text.literal("数量最多 " + RecipePlanner.maxResultCount(player)
+                + "（快捷栏第 4~9 格空着 " + freeSlots + " 格，每格最多 64 个）"));
             return 0;
         }
 
@@ -133,13 +143,9 @@ public final class RecipeCommand {
         return 1;
     }
 
-    /** 快捷栏第 3~9 格（背包下标 2~8）空着几格。 */
+    /** 快捷栏第 4~9 格（背包下标 3~8）空着几格 —— 这里只是给提示用，真正的判断在 {@link RecipePlanner}。 */
     private static int freeHotbarSlots(ClientPlayerEntity player) {
-        int free = 0;
-        for (int i = 2; i <= 8; i++) {
-            if (player.getInventory().getStack(i).isEmpty()) free++;
-        }
-        return free;
+        return RecipePlanner.hotbarFreeSlots(player);
     }
 
     private static String id(Item item) {

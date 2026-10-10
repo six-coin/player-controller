@@ -154,10 +154,11 @@ public class StockPart2Action extends Action {
             + " 个容器，overall " + gathered.overallKinds() + " 种 / " + gathered.overallCount() + " 个 → "
             + gathered.file());
 
-        // 第 3 步：material.json -> 2_x 一堆文件
+        // 第 3 步：material.json -> 2_x 一堆文件 + final_steps + unreachable
         try {
             StockProcessMaterials.Result result =
-                StockProcessMaterials.process(StockProcessMaterials.filesFor(task), state.storageItems());
+                StockProcessMaterials.process(StockProcessMaterials.filesFor(task), state.storageItems(),
+                    StockProcessMaterials.recipeOutputs());
 
             ChatUtils.info("2_1 去掉收过的最终产物，剩 " + result.rawProducts() + " 个 → " + result.processRawFile());
             ChatUtils.info("2_2 原材料：" + result.rawMaterialKinds() + " 种 / "
@@ -180,6 +181,17 @@ public class StockPart2Action extends Action {
                 + result.finalMaterialTotal() + " 个 → " + result.materialFinalFile()
                 + "，复制成 " + result.finalMaterialFile());
             ChatUtils.info("final_process.json（阶段3 合成用）也写好了 → " + result.finalProcessFile());
+            ChatUtils.info("final_steps.json：" + result.stepCount() + " 步 → " + result.finalStepsFile());
+            if (!result.stepWarnings().isEmpty()) {
+                ChatUtils.info("（有 " + result.stepWarnings().size() + " 步查不到单次产量："
+                    + join(result.stepWarnings()) + "）");
+            }
+            ChatUtils.info("unreachable.json（整个过程拿不到的最终产物）："
+                + result.unreachableKinds() + " 种 / " + result.unreachableTotal() + " 个 → "
+                + result.unreachableFile());
+            if (!result.unreachable().isEmpty()) {
+                ChatUtils.info("  拿不到的：" + join(result.unreachable()));
+            }
 
             // 阶段2：取货（用第二部分自己的文件，卸货都进 item_storage）
             stage2 = new StockStage2Action(task, "第二阶段2（取货）",

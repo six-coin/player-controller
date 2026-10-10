@@ -30,6 +30,9 @@ import java.util.List;
  * 然后反复 QuickMove 成品（原版 QuickMove 是从最后一格往前填，所以成品会进快捷栏靠后的格子）。
  *
  * <p>材料只从主背包 27 格（不含快捷栏）里拿；每 tick 只点一下，点完看本地状态决定下一步。
+ *
+ * <p>要合的次数超过一格能叠的上限时，{@link CraftPlan#rounds()} 会是好几轮：
+ * 摆一轮 → 合完（原版一次 QuickMove 会把这一轮能合的都合掉）→ 再摆下一轮。
  */
 public class CraftAction extends Action {
 
@@ -42,6 +45,9 @@ public class CraftAction extends Action {
     private static final int MAX_OPEN_WAIT_TICKS = 60;
 
     private static final int MAX_TOTAL_TICKS = 20 * 600;
+
+    /** 一轮里最多点几次成品格（正常一次就够，材料没被清空时才补点）。 */
+    private static final int MAX_ROUND_CLICKS = 3;
 
     private enum Phase {
         OPENING,
@@ -63,6 +69,12 @@ public class CraftAction extends Action {
     private int cellIndex;
     /** 点了几次成品格（原版一次 shift 点击会把能合成的都合掉，所以通常只有 1 次）。 */
     private int clicks;
+    /** 这一轮点了几次成品格。 */
+    private int roundClicks;
+    /** 第几轮（0 开始）。 */
+    private int round;
+    /** 已经摆出去合的次数。 */
+    private int placedCrafts;
     private int recipeIndex = -1;
 
     public CraftAction(CraftPlan plan, BlockPos stationPos) {
@@ -133,7 +145,7 @@ public class CraftAction extends Action {
         }
 
         ChatUtils.info(name() + "完成：" + id(plan.target()) + " x" + plan.count()
-            + "（点了 " + clicks + " 次成品格）");
+            + "（点了 " + clicks + " 次成品格，摆了 " + (round + (phase == Phase.DONE ? 0 : 1)) + " 轮）");
     }
 
     // ------------------------------------------------------------------
@@ -172,19 +184,26 @@ public class CraftAction extends Action {
         phase = Phase.PLACE;
     }
 
-    /** 摆材料：每 tick 一下点击。 */
+    /** 摆这一轮的材料：每 tick 一下点击。 */
     private void tickPlace(MinecraftClient mc, ClientPlayerEntity player) {
+        int amount = plan.amountForRound(round);
+
         if (cellIndex >= plan.cells().size()) {
+            placedCrafts += amount;
             clicks = 0;
+            roundClicks = 0;
+            recipeIndex = -1;   // 切石机换了输入之后要重新选一次配方
             settleTicks = 0;
             phase = Phase.WAIT_RESULT;
+            ChatUtils.debug("第 " + (round + 1) + "/" + plan.rounds() + " 轮材料摆好了（每格 "
+                + amount + " 个）");
             return;
         }
 
         CraftPlan.Cell cell = plan.cells().get(cellIndex);
         int slotId = gridSlotId(cell.gridSlot());
         int have = slotStack(slotId).getCount();
-        int need = cell.amount() - have;
+        int need = amount - have;
         ItemStack cursor = handler.getCursorStack();
 
         // 手上有东西
@@ -203,14 +222,13 @@ public class CraftAction extends Action {
 
         if (need <= 0) {
             cellIndex++;
-            ChatUtils.debug("格子 " + cell.gridSlot() + " 摆好了（" + cell.amount() + " 个 "
-                + id(cell.item()) + "）");
             return;
         }
 
         int source = findSource(cell.item(), need);
         if (source < 0) {
-            fail("主背包里找不到足够的 " + id(cell.item()) + "（还差 " + need + " 个）");
+            fail("主背包里找不到足够的 " + id(cell.item()) + "（这一轮每格要 " + amount
+                + " 个，还差 " + need + " 个）");
             return;
         }
         click(mc, player, source, 0, SlotActionType.PICKUP);
@@ -226,9 +244,8 @@ public class CraftAction extends Action {
     /**
      * QuickMove 成品。
      *
-     * <p>注意：原版 shift+点击成品格是「一次把所有能合成的都合成掉」（工作台就是这样），
-     * 所以绝大多数情况点一次就够了。这里用「材料还在不在格子里」来判断还需不需要再点：
-     * 材料被清空就收工，还剩（例如切石机一次只切一个）就再来一下。
+     * <p>注意：原版 shift+点击成品格是「一次把这一轮能合成的都合成掉」（工作台就是这样），
+     * 所以绝大多数情况点一次就够了。这里用「材料还在不在格子里」来判断还需不需要再点。
      */
     private void tickCraft(MinecraftClient mc, ClientPlayerEntity player) {
         // 切石机：先把要切的配方选上
@@ -237,22 +254,23 @@ public class CraftAction extends Action {
             return;
         }
 
-        // 格子里没材料了 → 完事
+        // 格子里没材料了 → 这一轮完事
         if (!hasMaterials()) {
-            phase = Phase.DONE;
+            endRound();
             return;
         }
 
-        if (clicks >= plan.crafts()) {
-            ChatUtils.debug("已经点了 " + clicks + " 次成品，格子里还剩材料，先收工（理论上应该正好取完）");
-            phase = Phase.DONE;
+        if (roundClicks >= MAX_ROUND_CLICKS) {
+            ChatUtils.debug("这一轮点了 " + roundClicks + " 次成品，格子里还剩材料，先收工（理论上应该正好取完）");
+            endRound();
             return;
         }
 
         int resultSlot = resultSlotId();
         ItemStack result = slotStack(resultSlot);
         if (result.isEmpty()) {
-            fail("成品格是空的（第 " + (clicks + 1) + "/" + plan.crafts() + " 次），材料可能没摆对");
+            fail("成品格是空的（第 " + (round + 1) + "/" + plan.rounds() + " 轮，已点 "
+                + roundClicks + " 次），材料可能没摆对");
             return;
         }
         if (!result.isOf(plan.target())) {
@@ -262,8 +280,22 @@ public class CraftAction extends Action {
 
         click(mc, player, resultSlot, 0, SlotActionType.QUICK_MOVE);
         clicks++;
+        roundClicks++;
         settleTicks = 0;
         phase = Phase.WAIT_RESULT;
+    }
+
+    /** 这一轮结束：还有轮次就接着摆，没有就收工。 */
+    private void endRound() {
+        round++;
+        cellIndex = 0;
+        if (round >= plan.rounds()) {
+            phase = Phase.DONE;
+            return;
+        }
+        settleTicks = 0;
+        phase = Phase.PLACE;
+        ChatUtils.debug("接着摆第 " + (round + 1) + "/" + plan.rounds() + " 轮材料");
     }
 
     /** 格子里还有没有材料：工作台看 9 个输入格，切石机看那唯一一格。 */
