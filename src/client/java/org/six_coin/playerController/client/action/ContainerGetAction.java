@@ -591,7 +591,7 @@ public class ContainerGetAction extends Action {
                 placed++;
                 pendingClick = false;
                 stepWaitTicks = 0;
-                ChatUtils.debug("已放入 %d/%d 个（目标格 %s）", placed, take, InventoryUtils.describe(target));
+                // 一个一个放，别每一步都刷屏（几秒钟能放几十个）；放完了在 finishPlacing 里报一句
                 if (placed >= take) finishPlacing();
                 return;
             }
@@ -603,7 +603,7 @@ public class ContainerGetAction extends Action {
             return;
         }
 
-        click(target, 1, SlotActionType.PICKUP, "右键放 1 个进 " + InventoryUtils.describe(target));
+        clickQuiet(target, 1, SlotActionType.PICKUP);
     }
 
     /** 该放的都放完了：还有剩的就放回源格，没剩就直接结账。 */
@@ -612,6 +612,9 @@ public class ContainerGetAction extends Action {
         stepWaitTicks = 0;
 
         int back = sourceCount - take;
+        if (take > 1) {
+            ChatUtils.debug("往 %s 放了 %d 个（一次一个，这里只报一句）", InventoryUtils.describe(target), take);
+        }
         if (back <= 0) {
             ChatUtils.debug("%d 个都放进去了，源格也空了", take);
             completeExtraction();
@@ -742,6 +745,24 @@ public class ContainerGetAction extends Action {
         }
         ChatUtils.debug("点击：%s（slot=%d，button=%d，%s，光标=%s）",
             what, slot.id, button, type, describeStack(handler.getCursorStack()));
+        clickCursorCount = handler.getCursorStack().getCount();
+        mc.interactionManager.clickSlot(handler.syncId, slot.id, button, type, mc.player);
+        pendingClick = true;
+        stepWaitTicks = 0;
+    }
+
+    /**
+     * 跟 {@link #click} 一样，但**不打日志**。
+     *
+     * <p>「一个一个往背包里放」那种循环会点几十上百次，每次都刷一行日志没有意义
+     * （放完会有一句汇总）。
+     */
+    private void clickQuiet(Slot slot, int button, SlotActionType type) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.interactionManager == null || mc.player == null) {
+            fail("拿不到 interactionManager");
+            return;
+        }
         clickCursorCount = handler.getCursorStack().getCount();
         mc.interactionManager.clickSlot(handler.syncId, slot.id, button, type, mc.player);
         pendingClick = true;

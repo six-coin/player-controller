@@ -29,7 +29,8 @@ import java.util.Map;
  *
  * <pre>
  * 提前处理：把第一部分阶段3 交过来的 station_data 反推成 check.json 里 item_storage 那种
- *          最简单的 item_list，记作 current_item_storage（只在这里用，用完就扔）
+ *          最简单的 item_list，**再加上摆放处上那些盒子里的东西**（id=1 的暂存盒除外），
+ *          记作 current_item_storage_and_shulker_boxes（只在这次处理里用，用完就扔）
  * 第一步：material.json 里去掉 **final_pack** 已经处理过的最终产物 → 2_1_process_raw.json
  * 第二步：把 2_1 里所有「原材料」（recipe_type = base）摊平成 item_list → 2_2_material_raw.json
  * 第三步：all_items 的 overall + current_item_storage 凑得齐的才留 → 2_3_material_clean.json
@@ -154,12 +155,14 @@ public final class StockProcessMaterials {
     }
 
     /**
-     * @param currentItemStorage 第一部分阶段3 交过来的 station_data 反推出来的「仓库里有什么」
+     * @param currentItemStorageAndShulkerBoxes 「现在有多少东西」：第一部分阶段3 交过来的 station_data
+     *        反推出来的 item_storage 物品列表，**加上**摆放处上那些盒子里的（id=1 的暂存盒除外）
      */
-    public static Result process(StockFiles files, Map<String, Integer> currentItemStorage,
+    public static Result process(StockFiles files, Map<String, Integer> currentItemStorageAndShulkerBoxes,
                                  CraftOutput outputs) throws IOException {
-        // 提前处理：反推仓库（这一步只用来做第三步的判断）
-        ChatUtils.debug("第二部分 current_item_storage：" + currentItemStorage.size() + " 种");
+        // 提前处理：反推仓库 + 摆放处上的盒子（第三步、第六步都用它）
+        ChatUtils.debug("第二部分 current_item_storage_and_shulker_boxes："
+            + currentItemStorageAndShulkerBoxes.size() + " 种");
 
         // material.json
         if (!Files.exists(files.material())) {
@@ -198,7 +201,7 @@ public final class StockProcessMaterials {
         List<String> shortItems = new ArrayList<>();
         for (Map.Entry<String, Integer> entry : materialRaw.entrySet()) {
             int need = entry.getValue();
-            int haveStorage = currentItemStorage.getOrDefault(entry.getKey(), 0);
+            int haveStorage = currentItemStorageAndShulkerBoxes.getOrDefault(entry.getKey(), 0);
             int haveContainers = overall.getOrDefault(entry.getKey(), 0);
             if (haveStorage + haveContainers < need) {
                 shortItems.add(entry.getKey() + "（要 " + need + "，仓库 " + haveStorage
@@ -237,7 +240,7 @@ public final class StockProcessMaterials {
         Map<String, Integer> materialFinal = new LinkedHashMap<>();
         int coveredByStorage = 0;
         for (Map.Entry<String, Integer> entry : materialCleaner.entrySet()) {
-            int have = currentItemStorage.getOrDefault(entry.getKey(), 0);
+            int have = currentItemStorageAndShulkerBoxes.getOrDefault(entry.getKey(), 0);
             int left = entry.getValue() - have;
             if (left <= 0) {
                 coveredByStorage++;

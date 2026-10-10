@@ -44,8 +44,7 @@ import java.util.Map;
  *   <li>循环：从当前位置找 need_container_list 里**最近**的容器 → 走到它的 access_position →
  *       取货（拿回 item_list 和 all_cleared）→ 更新需求清单，拿完了就把 id 从列表里去掉；
  *       列表空了就回站立点结束；物品栏 27 格满了就先回站立点卸货；</li>
- *   <li>把物品栏里剩下的东西都存进 item_storage，然后把 station_data 写到
- *       {@code config/player-controller/debug/station_data.json}，任务结束。</li>
+ *   <li>把物品栏里剩下的东西都存进 item_storage，任务结束（station_data 只在内存里，交给后面的阶段）。</li>
  * </ol>
  *
  * <p>两部分不同的地方都从构造器传进来：要取的文件（第一部分 {@code final_final.json} /
@@ -183,13 +182,19 @@ public class StockStage2Action extends Action {
             // 2. all_items.json
             loadAllItems(world);
 
-            // 3. 完整的需求清单
+            // 3. 完整的需求清单（空表就是「这个阶段没东西要取」，直接跳过）
             Path file = needFile != null ? needFile : StockManager.get().currentFinalFinalFile(task);
             if (!Files.exists(file)) {
-                fail("找不到 " + file + "（前面的阶段生成的？）");
+                ChatUtils.info("没有 " + file.getFileName() + "，跳过" + phaseName);
+                finish();
                 return;
             }
-            need = ItemList.parse(Files.readString(file, StandardCharsets.UTF_8));
+            need = ItemList.parseOrEmpty(Files.readString(file, StandardCharsets.UTF_8));
+            if (need.isEmpty()) {
+                ChatUtils.info(file.getFileName() + " 里没有要取的东西，跳过" + phaseName);
+                finish();
+                return;
+            }
             ChatUtils.info("开始取货：" + file.getFileName() + " " + need.describe()
                 + "；候选容器 " + entries.size() + " 个");
         } catch (Exception e) {
@@ -201,6 +206,11 @@ public class StockStage2Action extends Action {
         buildNeedList();
 
         if (needList.isEmpty()) {
+            if (entries.isEmpty()) {
+                ChatUtils.info("没有能提供这些东西的容器，跳过" + phaseName);
+                finish();
+                return;
+            }
             ChatUtils.info("所有东西仓库里都够了，直接收尾");
             startMoveToStand(Stage.HOME_MOVING);
             return;
@@ -219,7 +229,6 @@ public class StockStage2Action extends Action {
         switch (stage) {
             case PICK -> pickNext();
             case DONE -> {
-                if (state != null) state.saveDebug();
                 ChatUtils.info(phaseName + "完成：去了 " + fetched + " 个容器，卸货 " + dumped + " 次");
                 finish();
             }
@@ -233,10 +242,6 @@ public class StockStage2Action extends Action {
     protected void onEnd() {
         if (failureReason() != null) {
             ChatUtils.error(name() + "没做完：" + failureReason());
-            if (state != null) {
-                ChatUtils.info("把当前的 station_data 也写一份，方便看进度");
-                state.saveDebug();
-            }
         }
     }
 

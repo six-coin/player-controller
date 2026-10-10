@@ -112,7 +112,7 @@ public class StockPart2Stage3Action extends Action {
     }
 
     private final String task;
-    /** 第二阶段2 交过来的 station_data；null = 从 debug/station_data.json 读。 */
+    /** 第二阶段2 交过来的 station_data（必须有：它不落盘）。 */
     @Nullable
     private final StationState handedState;
 
@@ -190,11 +190,12 @@ public class StockPart2Stage3Action extends Action {
         }
 
         try {
-            state = handedState != null ? handedState : StationState.loadDebug();
-            if (state == null) {
-                fail("找不到 debug/station_data.json（单独跑要先跑一遍第一部分/第二部分阶段1、2）");
+            if (handedState == null) {
+                fail("station_data 不落盘（只在一次任务的内存里传），第二部分只能从 "
+                    + "/pc stock task <名字> start 一路跑下来");
                 return;
             }
+            state = handedState;
             loadSteps();
             loadUnreachable();
         } catch (Exception e) {
@@ -206,7 +207,9 @@ public class StockPart2Stage3Action extends Action {
             placementIds.add(pos.id());
         }
         placementIds.sort(Integer::compareTo);
-        nextPlacementId = 2;
+        // 接着第一部分阶段3 用到的那个摆放处编号继续（station_data 里带过来的）
+        nextPlacementId = state.nextShulkerBoxPlacementId();
+        ChatUtils.debug("接着用摆放处 #" + nextPlacementId + " 往后排");
 
         if (placementIds.size() < 2) {
             fail("潜影盒摆放处少于 2 个（暂存处用 id 1，中间还要用别的 id）");
@@ -297,7 +300,6 @@ public class StockPart2Stage3Action extends Action {
             ChatUtils.info("第二阶段3（合成）完成：合了 " + craftedSegments + " 段 / " + craftedCount + " 个");
             ChatUtils.info("拿不到的最终产物（unreachable.json）：" + unreachableJson);
             ChatUtils.rawCopyable(unreachableJson);
-            state.saveDebug();
             finish();
         }
     }
@@ -307,10 +309,6 @@ public class StockPart2Stage3Action extends Action {
         endFlightHold();
         if (failureReason() != null) {
             ChatUtils.error(name() + "没做完：" + failureReason());
-            if (state != null) {
-                ChatUtils.info("把当前的 station_data 也写一份，方便看进度");
-                state.saveDebug();
-            }
         }
     }
 
@@ -1154,6 +1152,7 @@ public class StockPart2Stage3Action extends Action {
         int next = nextPlacementId + 1;
         if (next < 2 || next > max) next = 2;
         nextPlacementId = next;
+        state.setNextShulkerBoxPlacementId(nextPlacementId);
     }
 
     /** item_storage 里**散装**的某种物品一共有多少。 */

@@ -171,7 +171,7 @@ public class StockStage3Action extends Action {
     /**
      * 这一轮维护的 station_data（第二部分接着用）。
      *
-     * <p>跑完（或者失败）都会写一份到 {@code debug/station_data.json}，单独跑第二部分时读它。
+     * <p>跑完会把「下一个用哪个摆放处」留给第二部分阶段3（station_data 不落盘，只在内存里传）。
      */
     public StationState state() {
         return state;
@@ -313,8 +313,9 @@ public class StockStage3Action extends Action {
             }
             ChatUtils.info("最终产物暂存处（摆放处 #" + STAGING_ID + "）还留着一个盒子，里面是这次没装满的成品；"
                 + "摆放处 " + placementIds + " 上借来的盒子也留在原地（下次用到那个 id 时会送回 item_storage）");
-            // 第二部分要接着用这份数据（单独跑第二部分时也从这里读），所以跑完也写一份
-            state.saveDebug();
+            // 把「下一个用哪个摆放处」留给第二部分阶段3 接着用（station_data 不落盘，只在内存里传）
+            state.setNextShulkerBoxPlacementId(nextPlacementId);
+            ChatUtils.debug("下一个潜影盒摆放处 id = " + nextPlacementId + "（交给第二部分阶段3）");
             finish();
         }
     }
@@ -324,10 +325,6 @@ public class StockStage3Action extends Action {
         endFlightHold();
         if (failureReason() != null) {
             ChatUtils.error(name() + "没做完：" + failureReason());
-            if (state != null) {
-                ChatUtils.info("把当前的 station_data 也写一份，方便看进度");
-                state.saveDebug();
-            }
         }
     }
 
@@ -344,8 +341,8 @@ public class StockStage3Action extends Action {
         }
 
         String json = Files.readString(file, StandardCharsets.UTF_8);
-        need = ItemList.parse(json);
-        finalWanted = ItemList.parse(json);
+        need = ItemList.parseOrEmpty(json);
+        finalWanted = ItemList.parseOrEmpty(json);
     }
 
     private void collectPositions() {
@@ -367,6 +364,7 @@ public class StockStage3Action extends Action {
         nextPlacementId = 2;
         ChatUtils.debug("阶段3：item_storage " + storageIds + "，item_final " + finalIds
             + "，摆放处 " + placementIds);
+        state.setNextShulkerBoxPlacementId(nextPlacementId);
     }
 
     /** 挖盒子之前先确认工具和快捷栏位置都对。 */
@@ -892,6 +890,7 @@ public class StockStage3Action extends Action {
         int next = nextPlacementId + 1;
         if (next < 2 || next > max) next = 2;
         nextPlacementId = next;
+        state.setNextShulkerBoxPlacementId(nextPlacementId);
         ChatUtils.debug("下一个潜影盒摆放处 id = " + nextPlacementId);
     }
 

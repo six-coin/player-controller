@@ -1,17 +1,11 @@
 package org.six_coin.playerController.client.station;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import org.jetbrains.annotations.Nullable;
-import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.util.ChatUtils;
 
-import java.io.IOException;
-import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,26 +18,21 @@ import java.util.TreeMap;
 /**
  * 备货任务期间**不落盘**维护的工作站状态（station_data）。
  *
- * <p>格式见需求附件 1.2.1：
+ * <p>内容：
  * <pre>
- * {
- *   "item_storage": { "1": { "id": 1, "items": {...}, "shulker_boxes": [ {...} ] }, ... },
- *   "item_final": { "1": true, "2": false },           // 每个 item_final 容器存满了没
- *   "shulker_box_placement": { "1": {...} }            // 摆放处 id -> 那个潜影盒里的东西（没放盒子的不记）
- * }
+ * item_storage            每个存储容器：散装物品 + 每个潜影盒的内容 + 还剩几个空格
+ * item_final              每个最终产物容器存满了没
+ * shulker_box_placement   摆放处 id -> 那个潜影盒里的东西（没放盒子的不记）
+ * next_shulker_box_placement_id  下一个用哪个摆放处（第一部分阶段3 交给第二部分阶段3）
  * </pre>
+ *
+ * <p><b>这份数据永远不落盘</b>：只在这一轮任务的内存里传递、用完就没了
+ * （所以第二部分只能从 {@code /pc stock task <名字> start} 一路跑下来）。
  *
  * <p>更新时机很重要：只要是**我们**改了 item_storage / item_final / 摆放处里的东西，就要在那一刻主动更新，
  * 不能靠关闭箱子时的自动监听（会有竞态：关箱之后我们可能马上就要用这份数据）。
- *
- * <p>任务做完会写到 {@code config/player-controller/debug/station_data.json}。
  */
 public final class StationState {
-
-    private static final Gson GSON = new GsonBuilder()
-        .setPrettyPrinting()
-        .disableHtmlEscaping()
-        .create();
 
     /** 一个 item_storage 容器：散装物品 + 每个潜影盒的内容 + 还剩几个空格。 */
     public static final class Storage {
@@ -84,6 +73,8 @@ public final class StationState {
     private final Map<Integer, Storage> itemStorage = new TreeMap<>();
     private final Map<Integer, Boolean> itemFinalFull = new TreeMap<>();
     private final Map<Integer, Map<String, Integer>> placements = new TreeMap<>();
+    /** 下一个用哪个摆放处（初始 2；第一部分阶段3 结束时把值留给第二部分阶段3）。 */
+    private int nextShulkerBoxPlacementId = 2;
 
     private StationState() {
     }
@@ -189,61 +180,31 @@ public final class StationState {
     }
 
     /**
-     * 从 {@code debug/station_data.json} 读一份（单独跑第二部分的时候用）。
+     * 除了 {@code excludeId} 之外，所有摆放处上的潜影盒里的东西加起来。
      *
-     * @return 文件不存在 / 读不了就返回 null
+     * <p>第二部分阶段1 算「我到底有多少东西」的时候要把这些也算上：
+     * 摆在摆放处上的盒子里的东西就在手边，后面的阶段随手就能掏出来用。
      */
-    @Nullable
-    public static StationState loadDebug() {
-        Path file = debugFile();
-        if (!Files.exists(file)) return null;
-
-        try {
-            JsonElement root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
-            if (!root.isJsonObject()) return null;
-
-            StationState state = new StationState();
-
-            JsonElement storage = root.getAsJsonObject().get("item_storage");
-            if (storage != null && storage.isJsonObject()) {
-                for (Map.Entry<String, JsonElement> entry : storage.getAsJsonObject().entrySet()) {
-                    if (!entry.getValue().isJsonObject()) continue;
-                    JsonObject object = entry.getValue().getAsJsonObject();
-
-                    int id = object.has("id") ? object.get("id").getAsInt() : parseInt(entry.getKey());
-                    if (id <= 0) continue;
-
-                    Storage target = state.itemStorage.computeIfAbsent(id, Storage::new);
-                    int freeSlots = object.has("free_slots") ? object.get("free_slots").getAsInt() : -1;
-                    target.set(readItems(object.get("items")), readBoxes(object.get("shulker_boxes")), freeSlots);
-                }
-            }
-
-            JsonElement finals = root.getAsJsonObject().get("item_final");
-            if (finals != null && finals.isJsonObject()) {
-                for (Map.Entry<String, JsonElement> entry : finals.getAsJsonObject().entrySet()) {
-                    int id = parseInt(entry.getKey());
-                    if (id <= 0) continue;
-                    state.itemFinalFull.put(id, entry.getValue().getAsBoolean());
-                }
-            }
-
-            JsonElement placement = root.getAsJsonObject().get("shulker_box_placement");
-            if (placement != null && placement.isJsonObject()) {
-                for (Map.Entry<String, JsonElement> entry : placement.getAsJsonObject().entrySet()) {
-                    int id = parseInt(entry.getKey());
-                    if (id <= 0) continue;
-                    state.placements.put(id, readItems(entry.getValue()));
-                }
-            }
-
-            ChatUtils.debug("从 " + file + " 读到了 station_data：item_storage "
-                + state.itemStorage.size() + " 个，item_final " + state.itemFinalFull.size() + " 个");
-            return state;
-        } catch (Exception e) {
-            ChatUtils.error("读 " + file + " 失败：" + e.getMessage());
-            return null;
+    public Map<String, Integer> placementItemsExcept(int excludeId) {
+        Map<String, Integer> total = new TreeMap<>();
+        for (Map.Entry<Integer, Map<String, Integer>> entry : placements.entrySet()) {
+            if (entry.getKey() == excludeId) continue;
+            merge(total, entry.getValue());
         }
+        return total;
+    }
+
+    /**
+     * 下一个用哪个潜影盒摆放处（第一部分阶段3 用完之后交给第二部分阶段3 接着用）。
+     *
+     * <p>station_data 不落盘，这个值只在一次任务的内存里传递。
+     */
+    public int nextShulkerBoxPlacementId() {
+        return nextShulkerBoxPlacementId;
+    }
+
+    public void setNextShulkerBoxPlacementId(int id) {
+        this.nextShulkerBoxPlacementId = Math.max(2, id);
     }
 
     /** 用「刚数出来的」结果覆盖某个存储容器的记录（含还剩几个空格）。 */
@@ -279,71 +240,8 @@ public final class StationState {
     }
 
     // ------------------------------------------------------------------
-    // 落盘
-    // ------------------------------------------------------------------
-
-    public static Path debugFile() {
-        return PlayerControllerConfig.configDir().resolve("debug").resolve("station_data.json");
-    }
-
-    public JsonObject toJson() {
-        JsonObject root = new JsonObject();
-
-        JsonObject storage = new JsonObject();
-        for (Storage entry : itemStorage.values()) {
-            JsonObject object = new JsonObject();
-            object.addProperty("id", entry.id());
-            object.add("items", itemsJson(entry.items()));
-
-            com.google.gson.JsonArray boxes = new com.google.gson.JsonArray();
-            for (Map<String, Integer> box : entry.shulkerBoxes()) boxes.add(itemsJson(box));
-            object.add("shulker_boxes", boxes);
-            object.addProperty("free_slots", entry.freeSlots());
-
-            storage.add(String.valueOf(entry.id()), object);
-        }
-        root.add("item_storage", storage);
-
-        JsonObject finals = new JsonObject();
-        for (Map.Entry<Integer, Boolean> entry : itemFinalFull.entrySet()) {
-            finals.addProperty(String.valueOf(entry.getKey()), Boolean.TRUE.equals(entry.getValue()));
-        }
-        root.add("item_final", finals);
-
-        JsonObject placement = new JsonObject();
-        for (Map.Entry<Integer, Map<String, Integer>> entry : placements.entrySet()) {
-            placement.add(String.valueOf(entry.getKey()), itemsJson(entry.getValue()));
-        }
-        root.add("shulker_box_placement", placement);
-
-        return root;
-    }
-
-    /** 写到 config/player-controller/debug/station_data.json。 */
-    public void saveDebug() {
-        Path file = debugFile();
-        try {
-            Files.createDirectories(file.getParent());
-            try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-                GSON.toJson(toJson(), writer);
-            }
-            ChatUtils.info("station_data 已写到 " + file);
-        } catch (IOException e) {
-            ChatUtils.error("写 station_data 失败: " + e.getMessage());
-        }
-    }
-
-    // ------------------------------------------------------------------
     // json 小工具
     // ------------------------------------------------------------------
-
-    public static JsonObject itemsJson(Map<String, Integer> items) {
-        JsonObject object = new JsonObject();
-        for (Map.Entry<String, Integer> entry : items.entrySet()) {
-            object.addProperty(entry.getKey(), entry.getValue());
-        }
-        return object;
-    }
 
     private static Map<String, Integer> readItems(JsonElement element) {
         Map<String, Integer> items = new LinkedHashMap<>();

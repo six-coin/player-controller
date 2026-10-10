@@ -16,13 +16,15 @@ import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
 
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * 备货「第二部分」：收集需要合成的材料。
  *
  * <p>阶段1（预检查）：
  * <ol>
- *   <li>从第一部分阶段3 继承 station_data（单独跑的时候从 {@code debug/station_data.json} 读）；</li>
+ *   <li>从第一部分阶段3 继承 station_data（不落盘，只在内存里传）；</li>
  *   <li>再跑一遍 {@code /pc container cache get_all_items}，重新生成 {@code container/all_items.json}
  *       （第一部分取过货的容器，缓存已经刷新过了）；</li>
  *   <li>读 {@code stock/<名字>/material.json}（跟第一部分同一份），按附件 2.1.3 处理出
@@ -47,7 +49,7 @@ public class StockPart2Action extends Action {
     }
 
     private final String task;
-    /** 第一部分交过来的 station_data；null = 从 debug/station_data.json 读。 */
+    /** 第一部分交过来的 station_data（必须有：它不落盘，传 null 就直接失败）。 */
     @Nullable
     private final StationState inheritedState;
 
@@ -80,20 +82,14 @@ public class StockPart2Action extends Action {
             return;
         }
 
-        // 阶段1 第 1 步：station_data
-        if (inheritedState != null) {
-            state = inheritedState;
-            ChatUtils.debug("第二部分：接着用第一部分阶段3 交过来的 station_data");
-        } else {
-            state = StationState.loadDebug();
-            if (state == null) {
-                fail("找不到 debug/station_data.json（单独跑第二部分要先跑一遍第一部分，"
-                    + "或者把它删了重新完整跑一次）");
-                return;
-            }
-            ChatUtils.info("第二部分：从 debug/station_data.json 读的 station_data"
-                + "（如果这之后手动动过仓库，数据可能对不上）");
+        // 阶段1 第 1 步：station_data（只从第一部分传过来，不落盘）
+        if (inheritedState == null) {
+            fail("station_data 不落盘（只在一次任务的内存里传），第二部分只能从 "
+                + "/pc stock task <名字> start 一路跑下来");
+            return;
         }
+        state = inheritedState;
+        ChatUtils.debug("第二部分：接着用第一部分阶段3 交过来的 station_data");
 
         // 第二部分的容器操作都在站立点上做，人不在就先提醒一句（不然会以「超出触及范围」失败）
         StationPos stand = StationManager.get().single(StationPart.STAND_POINT);
@@ -143,10 +139,6 @@ public class StockPart2Action extends Action {
     protected void onEnd() {
         if (failureReason() != null) {
             ChatUtils.error(name() + "没做完：" + failureReason());
-            if (state != null) {
-                ChatUtils.info("把当前的 station_data 也写一份，方便看进度");
-                state.saveDebug();
-            }
         }
     }
 
@@ -172,9 +164,18 @@ public class StockPart2Action extends Action {
 
         // 第 3 步：material.json -> 2_x 一堆文件 + final_steps + unreachable
         try {
-            StockProcessMaterials.Result result =
-                StockProcessMaterials.process(StockProcessMaterials.filesFor(task), state.storageItems(),
-                    StockProcessMaterials.recipeOutputs());
+            // current_item_storage_and_shulker_boxes：仓库里的（散装 + 盒子里的）**加上**
+            // 摆放处上那些盒子里的（id=1 的暂存盒除外）—— 那些东西也就在手边，随手能掏出来用
+            Map<String, Integer> currentItemStorageAndShulkerBoxes =
+                new TreeMap<>(state.storageItems());
+            for (Map.Entry<String, Integer> entry : state.placementItemsExcept(
+                StockPart2Stage3Action.STAGING_ID).entrySet()) {
+                currentItemStorageAndShulkerBoxes.merge(entry.getKey(), entry.getValue(), Integer::sum);
+            }
+
+            StockProcessMaterials.Result result = StockProcessMaterials.process(
+                StockProcessMaterials.filesFor(task), currentItemStorageAndShulkerBoxes,
+                StockProcessMaterials.recipeOutputs());
 
             ChatUtils.info("2_1 去掉收过的最终产物，剩 " + result.rawProducts() + " 个 → " + result.processRawFile());
             ChatUtils.info("2_2 原材料：" + result.rawMaterialKinds() + " 种 / "

@@ -111,6 +111,31 @@ public final class ItemList {
 
     // ------------------------------------------------------------------
 
+    /**
+     * 跟 {@link #parse(String)} 一样，但**空表**（{@code {}}）返回一个空 item_list，而不是报错。
+     *
+     * <p>备货流程里「这个阶段没东西要处理」是正常情况（比如成品已经够了、不用再合成），
+     * 调用方拿到空表直接跳过就行。
+     */
+    public static ItemList parseOrEmpty(String raw) throws ParseException {
+        if (raw == null || raw.isBlank()) return new ItemList();
+
+        JsonElement root;
+        try {
+            root = JsonParser.parseString(raw);
+        } catch (Exception e) {
+            throw new ParseException("不是合法 JSON：" + e.getMessage());
+        }
+        if (root.isJsonObject() && root.getAsJsonObject().isEmpty()) return new ItemList();
+
+        return parse(raw);
+    }
+
+    /** 一个什么都没有的 item_list。 */
+    public static ItemList empty() {
+        return new ItemList();
+    }
+
     /** 这种物品还需要多少个（同一件物品写了多个键时会加起来）。 */
     public int remaining(Item item) {
         int total = 0;
