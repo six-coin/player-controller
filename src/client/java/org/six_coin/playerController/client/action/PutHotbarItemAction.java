@@ -21,11 +21,15 @@ import org.six_coin.playerController.client.util.InventoryUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
 /**
- * 把**快捷栏指定格**里的整叠东西放进一个容器（{@link TakeItemAction} 的反向操作）。
+ * 把**快捷栏某几格**里的整叠东西放进一个容器（{@link TakeItemAction} 的反向操作）。
  *
- * <p>备货流程用它的地方：挖掉暂存处的潜影盒以后，捡到的盒子在快捷栏（第二格），
- * 要把它塞进 item_final；或者把借来的盒子塞回 item_storage。
- * 这两个格子在 {@link ContainerPutAction}（只管主背包 27 格）的覆盖范围之外，所以单独做一个。
+ * <p>两处用到它：
+ * <ul>
+ *   <li>备货第一部分阶段3：挖掉暂存处的潜影盒以后，捡到的盒子在快捷栏第二格，
+ *       要把它塞进 item_final / item_storage（单格）；</li>
+ *   <li>备货第二部分阶段3：{@code /pc recipe} 的成品会 QuickMove 到快捷栏 4~9 格，
+ *       合成完要把这几格一起放进目标容器（一段）。
+ * </ul>
  *
  * <p>容器收不下就 {@link #allCleared()} = false、{@link #containerFull()} = true，
  * 由调用方决定换下一个容器（跟 {@link ContainerPutAction} 一个套路）。
@@ -53,8 +57,12 @@ public class PutHotbarItemAction extends Action {
     private static final int MAX_STEP_WAIT_TICKS = 60;
     private static final int MAX_TOTAL_TICKS = 20 * 120;
 
+    /** 一次最多搬几叠（防止哪里出错时一直搬）。 */
+    private static final int MAX_STACKS = 64;
+
     private final BlockPos pos;
-    private final int hotbarIndex;
+    private final int hotbarFrom;
+    private final int hotbarTo;
     private final boolean wantDetail;
 
     private ScreenHandler handler;
@@ -65,10 +73,13 @@ public class PutHotbarItemAction extends Action {
     private int stepWaitTicks;
     private int totalTicks;
     private int moved;
+    private int stacks;
 
     private boolean pendingClick;
     private Step pendingStep;
     private int clickCursorCount;
+    /** 正在搬的那一格（背包下标 0~8）。 */
+    private int currentIndex = -1;
 
     private boolean allCleared;
     private boolean containerFull;
@@ -79,12 +90,21 @@ public class PutHotbarItemAction extends Action {
      * @param hotbarIndex 要搬走的快捷栏格（背包下标 0~8）
      */
     public PutHotbarItemAction(BlockPos pos, int hotbarIndex, boolean wantDetail) {
+        this(pos, hotbarIndex, hotbarIndex, wantDetail);
+    }
+
+    /**
+     * @param hotbarFrom 起始格（含，背包下标 0~8）
+     * @param hotbarTo   结束格（含）
+     */
+    public PutHotbarItemAction(BlockPos pos, int hotbarFrom, int hotbarTo, boolean wantDetail) {
         this.pos = pos.toImmutable();
-        this.hotbarIndex = hotbarIndex;
+        this.hotbarFrom = Math.min(hotbarFrom, hotbarTo);
+        this.hotbarTo = Math.max(hotbarFrom, hotbarTo);
         this.wantDetail = wantDetail;
     }
 
-    /** 快捷栏那一格空了（东西都进容器了）。 */
+    /** 快捷栏那几格空了（东西都进容器了）。 */
     public boolean allCleared() {
         return allCleared;
     }
@@ -106,7 +126,9 @@ public class PutHotbarItemAction extends Action {
 
     @Override
     public String name() {
-        return "把快捷栏第 " + (hotbarIndex + 1) + " 格放进 " + pos.toShortString();
+        return hotbarFrom == hotbarTo
+            ? "把快捷栏第 " + (hotbarFrom + 1) + " 格放进 " + pos.toShortString()
+            : "把快捷栏第 " + (hotbarFrom + 1) + "~" + (hotbarTo + 1) + " 格放进 " + pos.toShortString();
     }
 
     // ------------------------------------------------------------------
@@ -136,12 +158,12 @@ public class PutHotbarItemAction extends Action {
             return;
         }
 
-        ItemStack stack = player.getInventory().getStack(hotbarIndex);
-        ChatUtils.debug("把快捷栏第 %d 格（%s）放进 %s",
-            hotbarIndex + 1, describe(stack), pos.toShortString());
-        if (stack.isEmpty()) {
+        ItemStack first = firstStack(player);
+        ChatUtils.debug("把快捷栏第 %d~%d 格（第一叠是 %s）放进 %s",
+            hotbarFrom + 1, hotbarTo + 1, describe(first), pos.toShortString());
+        if (first.isEmpty()) {
             allCleared = true;
-            ChatUtils.debug("快捷栏第 %d 格本来就是空的，不用放", hotbarIndex + 1);
+            ChatUtils.debug("快捷栏第 %d~%d 格本来就是空的，不用放", hotbarFrom + 1, hotbarTo + 1);
             finish();
             return;
         }
@@ -224,11 +246,6 @@ public class PutHotbarItemAction extends Action {
     }
 
     private void tickCarry() {
-        Slot source = hotbarSlot(hotbarIndex);
-        if (source == null) {
-            fail("找不到快捷栏第 " + (hotbarIndex + 1) + " 格");
-            return;
-        }
         ItemStack cursor = handler.getCursorStack();
 
         // 上一次点击还没生效
@@ -247,10 +264,14 @@ public class PutHotbarItemAction extends Action {
                 case PLACE -> {
                     if (cursor.isEmpty()) {
                         pendingClick = false;
-                        allCleared = true;
-                        ChatUtils.debug("快捷栏第 %d 格的东西都进容器了", hotbarIndex + 1);
-                        phase = Phase.DONE;
-                        return;
+                        stepWaitTicks = 0;
+                        stacks++;
+                        if (stacks >= MAX_STACKS) {
+                            allCleared = false;
+                            fail("搬了 " + stacks + " 叠还没搬完，先停下看看");
+                            return;
+                        }
+                        return;   // 下一 tick 接着搬下一格
                     }
                     if (cursor.getCount() < clickCursorCount) {
                         // 放进去一部分，还剩一些：下一 tick 继续找能收的格子
@@ -267,7 +288,7 @@ public class PutHotbarItemAction extends Action {
                         pendingClick = false;
                         containerFull = true;
                         allCleared = false;
-                        ChatUtils.debug("容器装不下，剩下的已经放回快捷栏第 %d 格", hotbarIndex + 1);
+                        ChatUtils.debug("容器装不下，剩下的已经放回快捷栏第 %d 格", currentIndex + 1);
                         phase = Phase.DONE;
                         return;
                     }
@@ -280,13 +301,17 @@ public class PutHotbarItemAction extends Action {
         }
 
         if (cursor.isEmpty()) {
-            ItemStack stack = source.getStack();
-            if (stack.isEmpty()) {
+            // 找还没有搬走的格子（范围内第一个非空的）
+            Slot source = findSource();
+            if (source == null) {
                 allCleared = true;
-                ChatUtils.debug("快捷栏第 %d 格空了，放完了", hotbarIndex + 1);
+                ChatUtils.debug("快捷栏第 %d~%d 格都空了，放完了", hotbarFrom + 1, hotbarTo + 1);
                 phase = Phase.DONE;
                 return;
             }
+            currentIndex = source.getIndex();
+
+            ItemStack stack = source.getStack();
             if (findTarget(stack) == null) {
                 containerFull = true;
                 allCleared = false;
@@ -298,13 +323,38 @@ public class PutHotbarItemAction extends Action {
             return;
         }
 
+        Slot current = hotbarSlot(currentIndex);
+        if (current == null) {
+            fail("找不到快捷栏第 " + (currentIndex + 1) + " 格");
+            return;
+        }
+
         Slot target = findTarget(cursor);
         if (target == null) {
             // 容器装不下了：把光标上剩下的塞回快捷栏那一格
-            click(source, 0, SlotActionType.PICKUP, "把剩下的放回快捷栏", Step.RETURN);
+            click(current, 0, SlotActionType.PICKUP, "把剩下的放回快捷栏", Step.RETURN);
             return;
         }
         click(target, 0, SlotActionType.PICKUP, "放进 " + InventoryUtils.describe(target), Step.PLACE);
+    }
+
+    /** 范围内第一个还有东西的快捷栏格；都空了返回 null。 */
+    @Nullable
+    private Slot findSource() {
+        for (int i = hotbarFrom; i <= hotbarTo; i++) {
+            Slot slot = hotbarSlot(i);
+            if (slot != null && !slot.getStack().isEmpty()) return slot;
+        }
+        return null;
+    }
+
+    /** 快捷栏范围内第一叠东西（只给日志用）。 */
+    private ItemStack firstStack(ClientPlayerEntity player) {
+        for (int i = hotbarFrom; i <= hotbarTo; i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (!stack.isEmpty()) return stack;
+        }
+        return ItemStack.EMPTY;
     }
 
     /** 容器的格子里有没有能收下这一叠的（空格，或者同类还有余量的格子）。 */

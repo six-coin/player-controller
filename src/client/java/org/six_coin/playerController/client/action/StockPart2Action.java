@@ -33,7 +33,7 @@ import java.util.List;
  * <p>阶段2（取货）：读 {@code final_material.json}，跟第一部分阶段2 走同一套
  * （{@link StockStage2Action}），取回来的东西都放 item_storage。
  *
- * <p>阶段3（合成）还没做，这里跑完就先结束。
+ * <p>阶段3（合成）：读 {@code final_steps.json} 一步步合成（{@link StockPart2Stage3Action}）。
  */
 public class StockPart2Action extends Action {
 
@@ -41,7 +41,9 @@ public class StockPart2Action extends Action {
         /** 阶段1 的同步部分：容器汇总 + 处理材料清单。 */
         PREPARE,
         /** 阶段2：取货。 */
-        STAGE2
+        STAGE2,
+        /** 阶段3：合成。 */
+        STAGE3
     }
 
     private final String task;
@@ -51,6 +53,7 @@ public class StockPart2Action extends Action {
 
     private StationState state;
     private StockStage2Action stage2;
+    private StockPart2Stage3Action stage3;
     private Stage stage = Stage.PREPARE;
 
     public StockPart2Action(String task) {
@@ -117,7 +120,20 @@ public class StockPart2Action extends Action {
                     fail("第二阶段2 失败：" + stage2.failureReason());
                     return;
                 }
-                ChatUtils.info("第二部分阶段1、阶段2 完成；阶段3（合成）还没做");
+                ChatUtils.info("第二阶段2 完成，接着进入阶段3（合成）");
+                stage3 = new StockPart2Stage3Action(task, state);
+                stage3.start();
+                stage = Stage.STAGE3;
+            }
+            case STAGE3 -> {
+                stage3.update();
+                if (!stage3.isFinished()) return;
+
+                stage3.cleanup();
+                if (stage3.failureReason() != null) {
+                    fail("第二阶段3 失败：" + stage3.failureReason());
+                    return;
+                }
                 finish();
             }
         }
