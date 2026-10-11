@@ -273,7 +273,7 @@ public class ContainerGetAction extends Action {
         closeScreen();
 
         if (stopReason != null) {
-            ChatUtils.info("容器任务结束：" + stopReason);
+            output().info("容器任务结束：" + stopReason);
         }
 
         // only_one_shulker 没有返回值，前面已经报过了
@@ -291,12 +291,12 @@ public class ContainerGetAction extends Action {
 
         ChatUtils.debug("一共提取了 %d 次；item_list = %s；all_cleared = %s",
             extractions, itemListJson, allCleared);
-        ChatUtils.info("取物结果：all_cleared=" + allCleared + (allCleared
+        output().info("取物结果：all_cleared=" + allCleared + (allCleared
             ? "（容器里能拿的都拿完了）"
             : "（没拿完：多半是物品栏满了，item_list 还差 " + itemList.describe() + "）"));
 
         // 指令跑完之后输出结果：item_list + all_cleared
-        ChatUtils.rawCopyable(result.toString());
+        output().rawCopyable(result.toString());
 
         ScreenSuppressor.release();
     }
@@ -387,7 +387,7 @@ public class ContainerGetAction extends Action {
                     fail("潜影盒没放进快捷栏");
                     return;
                 }
-                ChatUtils.info("已取出一个潜影盒并放进快捷栏第 " + (HOTBAR_BOX_INDEX + 1) + " 格");
+                output().info("已取出一个潜影盒并放进快捷栏第 " + (HOTBAR_BOX_INDEX + 1) + " 格");
                 finish();
             }
         }

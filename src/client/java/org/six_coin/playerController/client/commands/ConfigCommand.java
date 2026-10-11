@@ -22,8 +22,6 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * /pc config actions move_speed [speed]
  * /pc config actions interaction_range [range]
  * </pre>
- *
- * <p>第二层的 {@code actions} 也可以写成 {@code action}。
  */
 public final class ConfigCommand {
 
@@ -35,8 +33,7 @@ public final class ConfigCommand {
             .executes(ConfigCommand::showAll)
             .then(debug())
             .then(world())
-            .then(actions("actions"))
-            .then(actions("action"));
+            .then(actions("actions"));
     }
 
     // ------------------------------------------------------------------
@@ -81,7 +78,7 @@ public final class ConfigCommand {
     // actions
     // ------------------------------------------------------------------
 
-    /** {@code actions}/{@code action} 这一层，两套名字都建一份，互不共享。 */
+    /** {@code actions} 这一层。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> actions(String name) {
         return ClientCommandManager.literal(name)
             .executes(ConfigCommand::showActions)

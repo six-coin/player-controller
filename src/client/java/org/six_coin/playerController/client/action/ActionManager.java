@@ -35,8 +35,15 @@ public final class ActionManager {
         return current;
     }
 
-    /** 提交一个动作，排队执行。 */
+    /**
+     * 提交一个动作，排队执行。
+     *
+     * <p>这里是「命令层」和「实现层」的分界线：只有命令层会调这个方法，所以从这里进来的动作
+     * 都算「命令直接要的」，结果照常打到聊天栏；被别的动作内嵌跑的子动作不走这里（直接
+     * {@code child.start()}），它们的结果会被丢掉（见 {@link ResultOutput}）。
+     */
     public void submit(Action action) {
+        action.setOutput(ResultOutput.COMMAND);
         if (isBusy()) {
             ChatUtils.debug("已排队（前面还有任务）: " + action.name());
         }

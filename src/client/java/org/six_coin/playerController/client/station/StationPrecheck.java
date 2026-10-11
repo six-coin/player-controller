@@ -79,7 +79,7 @@ public final class StationPrecheck {
         Waypoint standNode = graph.at(dimension, stand.pos());
         if (standNode == null) {
             problems.add("站立点 " + stand.coordString()
-                + " 本身还不是路径点（站在这里用 /pc w waypoint_add_here 加一个）");
+                + " 本身还不是路径点（站在这里用 /pc waypoints add_waypoint here 加一个）");
         }
 
         // 所有提及的方块都要和站立点同维度、且在其触及范围内

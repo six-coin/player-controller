@@ -8,6 +8,7 @@ import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerCacheRenderer;
 import org.six_coin.playerController.client.container.ContainerCacheTracker;
+import org.six_coin.playerController.client.feature.AntiKick;
 import org.six_coin.playerController.client.station.StationManager;
 import org.six_coin.playerController.client.station.StationRenderer;
 import org.six_coin.playerController.client.stock.StockManager;
@@ -32,6 +33,12 @@ public class PlayerControllerClient implements ClientModInitializer {
 
         // 在原版 tick 世界之前驱动动作队列，移动类动作写入的速度才能在当 tick 生效
         ClientTickEvents.START_CLIENT_TICK.register(ActionManager.get()::tick);
+
+        // 防踢：飞行（悬停）期间每 20 tick 往服务端补一个「稍微往下」的位置包，
+        // 免得原版服务端按「浮空超过 80 tick」把人踢了。见 AntiKick。
+        // 放在 tick 末尾（和 Meteor 的 post-tick 一致）：这时候 player.getY() 正好是
+        // 客户端这一 tick 报给服务端的高度，往下补的量最准。
+        ClientTickEvents.END_CLIENT_TICK.register(client -> AntiKick.tick());
 
         // 记录下界传送门边：只有 /pc move <轴> / /pc move face 的终点是传送门时才会武装，
         // 所以这里要一直跑着（传送是服务端做的，得等维度变化才能确认落点）

@@ -148,14 +148,14 @@ public class ContainerCacheAddAction extends Action {
         ScreenSuppressor.release();
 
         if (verbose) {
-            ChatUtils.info("容器缓存：新加 " + added + " 个，更新 " + updated + " 个"
+            output().info("容器缓存：新加 " + added + " 个，更新 " + updated + " 个"
                 + (unchanged > 0 ? "，内容没变 " + unchanged + " 个" : "")
                 + (failed > 0 ? "，失败 " + failed + " 个" : ""));
             return;
         }
 
         int total = positions.size() + skippedOutOfReach + skippedUnsupported;
-        ChatUtils.info("容器缓存（批量）：范围内 " + total + " 个位置 —— 成功 " + (added + updated)
+        output().info("容器缓存（批量）：范围内 " + total + " 个位置 —— 成功 " + (added + updated)
             + " 个（新加 " + added + "、更新 " + updated + "，其中内容没变 " + unchanged + "）"
             + "，超出触及范围 " + skippedOutOfReach + " 个"
             + "，不是支持的容器 " + skippedUnsupported + " 个"
@@ -212,7 +212,7 @@ public class ContainerCacheAddAction extends Action {
         if (isNew) {
             added++;
             if (verbose) {
-                ChatUtils.info("已加入容器缓存 #" + container.id() + " " + type + " "
+                output().info("已加入容器缓存 #" + container.id() + " " + type + " "
                     + DimensionUtils.display(dimension) + " " + pos.toShortString() + "：" + detail);
             }
             ChatUtils.debug("新缓存 #" + container.id() + "：" + items);
@@ -222,7 +222,7 @@ public class ContainerCacheAddAction extends Action {
         if (changed) {
             updated++;
             if (verbose) {
-                ChatUtils.info("已更新容器缓存 #" + container.id() + " " + type + " "
+                output().info("已更新容器缓存 #" + container.id() + " " + type + " "
                     + DimensionUtils.display(dimension) + " " + pos.toShortString() + "：" + detail);
             }
             ChatUtils.debug("更新 #" + container.id() + "：" + items);

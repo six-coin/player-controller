@@ -422,8 +422,8 @@ public class StationCheckAction extends Action {
         }
 
         passed = true;
-        ChatUtils.info("工作站检查通过，报告已写到 " + file);
-        ChatUtils.info("物资存储地 " + freeStorage + " 格空位（物品 " + describe(aggregate(StationPart.ITEM_STORAGE))
+        output().info("工作站检查通过，报告已写到 " + file);
+        output().info("物资存储地 " + freeStorage + " 格空位（物品 " + describe(aggregate(StationPart.ITEM_STORAGE))
             + "）；最终产物地 " + freeFinal + " 格空位（物品 " + describe(aggregate(StationPart.ITEM_FINAL)) + "）");
     }
 

@@ -308,7 +308,7 @@ public class TakeItemAction extends Action {
                 }
                 taken = target.getStack().copy();
                 found = true;
-                ChatUtils.info("已取出 " + describe(taken) + " 放进快捷栏第 " + (hotbarIndex + 1) + " 格");
+                output().info("已取出 " + describe(taken) + " 放进快捷栏第 " + (hotbarIndex + 1) + " 格");
                 phase = Phase.DONE;
                 return;
             }

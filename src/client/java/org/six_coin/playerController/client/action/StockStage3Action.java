@@ -210,7 +210,7 @@ public class StockStage3Action extends Action {
         collectPositions();
 
         if (WaypointManager.get().isEditMode()) {
-            ChatUtils.error("路径点编辑模式开着：阶段3 的移动会顺手记路径点，建议先关掉（/pc w edit）");
+            ChatUtils.error("路径点编辑模式开着：阶段3 的移动会顺手记路径点，建议先关掉（/pc waypoints edit）");
         }
 
         if (placementIds.size() < 2) {

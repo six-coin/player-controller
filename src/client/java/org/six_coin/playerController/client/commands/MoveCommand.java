@@ -280,7 +280,7 @@ public final class MoveCommand {
         Waypoint from = WaypointManager.get().playerStartWaypoint();
         if (from == null) {
             source.sendError(Text.literal("你现在所在的 " + here.toShortString()
-                + " 既不是路径点，也不在任何边上，先用 /pc w waypoint_add_here 加一个"));
+                + " 既不是路径点，也不在任何边上，先用 /pc waypoints add_waypoint here 加一个"));
             return 0;
         }
 

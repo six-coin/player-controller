@@ -15,12 +15,30 @@ public abstract class Action {
     private boolean finished;
     private String failureReason;
 
+    /**
+     * 结果输出层，默认是子任务（不输出结果）。
+     *
+     * <p>命令层直接提交的动作会被 {@link ActionManager#submit} 改成 {@link ResultOutput#COMMAND}；
+     * 被别的动作内嵌跑的子动作保持默认值，于是它算出来的结果不会打到聊天栏。
+     */
+    private ResultOutput output = ResultOutput.SUBTASK;
+
     /** 名字，用于聊天栏输出。 */
     public abstract String name();
 
     /** 是不是“移动类”任务（/pc move cancel 只取消这一类）。 */
     public boolean isMovement() {
         return false;
+    }
+
+    /** 这个动作的结果往哪儿输出（见 {@link ResultOutput}）。 */
+    public final ResultOutput output() {
+        return output;
+    }
+
+    /** 由 {@link ActionManager} 在提交时设置（命令层 = {@link ResultOutput#COMMAND}）。 */
+    public final void setOutput(ResultOutput output) {
+        this.output = output;
     }
 
     protected void onStart() {

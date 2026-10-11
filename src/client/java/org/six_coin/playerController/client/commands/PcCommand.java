@@ -43,9 +43,12 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " station ... §8- §7工作站（各部分的 set/set_target/add/del/list、show 高亮、check 检查并导出报告）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " recipe crafting_table|stonecutter <item> <count> §8- §7在工作站上合成 / 切石（成品 QuickMove 进快捷栏）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " stock add_task|del_task <名字>、/" + name + " stock task <名字> start §8- §7备货（第一部分：预检查 → 取货 → 分盒重装；第二部分：预检查 → 取货 → 合成）"));
-                source.sendFeedback(Text.literal("§7  /" + name + " w ... §8- §7路径点 / 边 / 出生点（等价写法：/" + name + " waypoints ...）"));
-                source.sendFeedback(Text.literal("§7    §7子命令：waypoint_add、waypoint_add_here、waypoint_name、waypoint_name_del、spawn_set_by_name、edge_add、del、optimize、list、show、edit"));
-                source.sendFeedback(Text.literal("§7    §7清理：del_unreachable_list（列出从当前位置不可达的点和边）、del_unreachable_execute（先备份再删掉它们）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " waypoints ... §8- §7路径点 / 边 / 出生点"));
+                source.sendFeedback(Text.literal("§7    §7子命令：show、edit、list、optimize default|del_unreachable"));
+                source.sendFeedback(Text.literal("§7    §7  add_waypoint here|target|position <x> <y> <z> <dim> [name]"));
+                source.sendFeedback(Text.literal("§7    §7  name_waypoint here|target|id <id> [name]（不写名字就是删掉名字）"));
+                source.sendFeedback(Text.literal("§7    §7  del_waypoint here|target|id <id>|position <x> <y> <z> <dim>|name <name>"));
+                source.sendFeedback(Text.literal("§7    §7  add_edge <id1> <id2>、del_edge <负数id>、set_spawn <选择器>、del_spawn"));
                 source.sendFeedback(Text.literal("§7  /" + name + " config ... §8- §7配置（debug / world / actions move_speed、interaction_range）"));
                 source.sendFeedback(Text.literal("§7  item_list 例：§f{\"minecraft:cobblestone\": 65, \"minecraft:grass_block\": 13}"));
                 return 1;
@@ -55,9 +58,7 @@ public final class PcCommand {
             .then(StationCommand.build())
             .then(RecipeCommand.build())
             .then(StockCommand.build())
-            // /pc w ... 和 /pc waypoints ... 是同一条命令的两种写法
-            .then(WaypointsCommand.build("w"))
-            .then(WaypointsCommand.build("waypoints"))
+            .then(WaypointsCommand.build())
             .then(ConfigCommand.build());
     }
 }

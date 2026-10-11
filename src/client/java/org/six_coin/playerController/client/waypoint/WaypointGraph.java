@@ -558,7 +558,7 @@ public final class WaypointGraph {
      * 新路径点自动连边：上下左右前后这 6 格里已经有别的路径点（只看路径点，不看边）的话，
      * 就跟它连一条双向走路边。
      *
-     * <p>{@code /pc w waypoint_add*}、{@code move to} 起点/终点落在边上、容器缓存找落点，
+     * <p>{@code /pc waypoints add_waypoint*}、{@code move to} 起点/终点落在边上、容器缓存找落点，
      * 这些新建路径点的地方走的都是 {@link #addWaypoint}，所以统一在这里连。
      */
     private void linkAdjacentWaypoints(Waypoint waypoint) {

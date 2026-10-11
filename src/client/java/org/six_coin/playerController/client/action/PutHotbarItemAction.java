@@ -225,7 +225,7 @@ public class PutHotbarItemAction extends Action {
         JsonObject result = new JsonObject();
         result.addProperty("all_cleared", allCleared);
         ChatUtils.debug("放物结果：all_cleared=%s，搬了 %d 次，free_slots=%d", allCleared, moved, freeSlots);
-        ChatUtils.rawCopyable(result.toString());
+        output().rawCopyable(result.toString());
     }
 
     // ------------------------------------------------------------------

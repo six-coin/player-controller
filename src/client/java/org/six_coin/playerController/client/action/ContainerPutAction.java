@@ -181,7 +181,7 @@ public class ContainerPutAction extends Action {
         // 第 1 步：物品栏里没有这类东西就别开容器了
         if (countInInventory(player) == 0) {
             allCleared = true;
-            ChatUtils.info(rangeName() + "里没有" + modeName() + "，没什么可放的");
+            output().info(rangeName() + "里没有" + modeName() + "，没什么可放的");
             finish();
             return;
         }
@@ -243,10 +243,10 @@ public class ContainerPutAction extends Action {
         result.addProperty("all_cleared", allCleared);
 
         ChatUtils.debug("放物结果：all_cleared=%s，一共搬了 %d 次", allCleared, moved);
-        ChatUtils.info("放物结果：all_cleared=" + allCleared + (allCleared
+        output().info("放物结果：all_cleared=" + allCleared + (allCleared
             ? "（" + rangeName() + "里要放的都放进去了）"
             : "（没放完：容器满了）"));
-        ChatUtils.rawCopyable(result.toString());
+        output().rawCopyable(result.toString());
     }
 
     // ------------------------------------------------------------------

@@ -125,6 +125,9 @@ public class StockStartAction extends Action {
                     fail("工作站检查没通过（容器内容不对，看上面的错误）");
                     return;
                 }
+                // station check 自己的那两行是「命令结果」，备货时会被输出层吞掉（见 ResultOutput），
+                // 这里补一句，免得日志从「开始检查」直接跳到下一步
+                ChatUtils.info("工作站检查通过，报告见 station/check.json");
                 startPutTemp();
             }
             case PUT_TEMP -> {
