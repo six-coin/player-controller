@@ -25,6 +25,7 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * /pc config actions anti_kick_delay [tick]
  * /pc config actions anti_kick_off_time [tick]
  * /pc config actions items_per_tick [1~64]
+ * /pc config actions wait_ticks_after_dimension_teleport [tick]
  * </pre>
  */
 public final class ConfigCommand {
@@ -175,6 +176,23 @@ public final class ConfigCommand {
                         context.getSource().sendFeedback(Text.literal(
                             "一个 tick 里最多往一个格子放 " + PlayerControllerConfig.getItemsPerTick() + " 个"));
                         return 1;
+                    })))
+            .then(ClientCommandManager.literal("wait_ticks_after_dimension_teleport")
+                .executes(context -> {
+                    showWaitAfterTeleport(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("ticks",
+                        IntegerArgumentType.integer(
+                            PlayerControllerConfig.MIN_WAIT_TICKS_AFTER_DIMENSION_TELEPORT,
+                            PlayerControllerConfig.MAX_WAIT_TICKS_AFTER_DIMENSION_TELEPORT))
+                    .executes(context -> {
+                        int ticks = IntegerArgumentType.getInteger(context, "ticks");
+                        PlayerControllerConfig.setWaitTicksAfterDimensionTeleport(ticks);
+                        context.getSource().sendFeedback(Text.literal(
+                            "换维度后的等待已设为 " + PlayerControllerConfig.getWaitTicksAfterDimensionTeleport()
+                                + " tick"));
+                        return 1;
                     })));
     }
 
@@ -195,6 +213,8 @@ public final class ConfigCommand {
             + PlayerControllerConfig.getAntiKickOffTime() + " tick"));
         source.sendFeedback(Text.literal("  actions.items_per_tick = "
             + PlayerControllerConfig.getItemsPerTick()));
+        source.sendFeedback(Text.literal("  actions.wait_ticks_after_dimension_teleport = "
+            + PlayerControllerConfig.getWaitTicksAfterDimensionTeleport() + " tick"));
         source.sendFeedback(Text.literal("  文件: " + PlayerControllerConfig.configFile()));
         return 1;
     }
@@ -208,6 +228,7 @@ public final class ConfigCommand {
         showAntiKickDelay(source);
         showAntiKickOffTime(source);
         showItemsPerTick(source);
+        showWaitAfterTeleport(source);
         return 1;
     }
 
@@ -243,6 +264,12 @@ public final class ConfigCommand {
             + "（一个 tick 里最多往一个格子放几个，" 
             + PlayerControllerConfig.MIN_ITEMS_PER_TICK + "~"
             + PlayerControllerConfig.MAX_ITEMS_PER_TICK + "）"));
+    }
+
+    private static void showWaitAfterTeleport(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  wait_ticks_after_dimension_teleport = "
+            + PlayerControllerConfig.getWaitTicksAfterDimensionTeleport()
+            + " tick（换维度之后先等这么久再移动，免得被服务端拉回去）"));
     }
 
     private static int setDebug(CommandContext<FabricClientCommandSource> context, boolean value) {

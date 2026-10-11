@@ -39,7 +39,7 @@ import java.util.List;
  * /pc waypoints list
  * /pc waypoints optimize                          两条子命令的使用说明
  * /pc waypoints optimize default                  合并中间点，并重新编号
- * /pc waypoints optimize del_unreachable          先备份，再删掉走不到的点和边
+ * /pc waypoints optimize radical                  先备份，再删掉走不到的点和边，然后做一次 default
  * /pc waypoints add_edge &lt;id1&gt; &lt;id2&gt;
  * /pc waypoints add_waypoint here
  * /pc waypoints add_waypoint target
@@ -625,8 +625,8 @@ public final class WaypointsCommand {
             .executes(WaypointsCommand::optimizeUsage)
             .then(literal("default")
                 .executes(WaypointsCommand::optimizeDefault))
-            .then(literal("del_unreachable")
-                .executes(WaypointsCommand::optimizeDelUnreachable));
+            .then(literal("radical")
+                .executes(WaypointsCommand::optimizeRadical));
     }
 
     private static int optimizeUsage(CommandContext<FabricClientCommandSource> context) {
@@ -635,8 +635,9 @@ public final class WaypointsCommand {
         source.sendFeedback(Text.literal("§7  " + ROOT + "optimize §fdefault§7"
             + " §8- §7合并中间点（没有名字、只有两条边、且在一条直线上的点），"
             + "再把路径点按坐标、边按两端重新编号"));
-        source.sendFeedback(Text.literal("§7  " + ROOT + "optimize §fdel_unreachable§7"
-            + " §8- §7先备份 waypoints.json，再删掉从你现在的位置出发走不到的路径点和边"));
+        source.sendFeedback(Text.literal("§7  " + ROOT + "optimize §fradical§7"
+            + " §8- §7先备份 waypoints.json，再删掉从你现在的位置出发走不到的路径点和边，"
+            + "删完接着做一次 optimize default（合并中间点 + 重新编号）"));
         source.sendFeedback(Text.literal("§7    §7走不到 = 沿着已知边（含传送门边）走不过去；"
             + "出生点节点、当前出生点、末地初始平台不会被删"));
         return 1;
@@ -656,8 +657,8 @@ public final class WaypointsCommand {
         return 1;
     }
 
-    /** {@code optimize del_unreachable}：先把 waypoints.json 备份，再把不可达的点和边全删掉。 */
-    private static int optimizeDelUnreachable(CommandContext<FabricClientCommandSource> context) {
+    /** {@code optimize radical}：先把 waypoints.json 备份，再把不可达的点和边全删掉，然后做一次 optimize default。 */
+    private static int optimizeRadical(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
 
         List<Waypoint> starts = startWaypoints(source);
@@ -671,40 +672,42 @@ public final class WaypointsCommand {
             source.sendFeedback(Text.literal("从 " + describeStarts(starts)
                 + " 出发没有不可达的路径点和边，什么都没删（也没备份）"));
             reportSkipped(source, result.skipped());
-            return 1;
+        } else {
+            // 1. 先备份
+            Path backup = manager.backupFile();
+            if (backup == null) {
+                source.sendError(Text.literal("备份路径点文件失败（文件不存在或者写不进去），已中止，什么都没删"));
+                return 0;
+            }
+            source.sendFeedback(Text.literal("已备份到 " + backup));
+
+            // 2. 删点（挂在上面的边会一起删掉），再删剩下的不可达边
+            int beforeNodes = graph.normalCount();
+            int beforeEdges = graph.edgeCount();
+
+            int removedNodes = 0;
+            for (Waypoint waypoint : result.waypoints()) {
+                ChatUtils.debug("删除不可达路径点 #" + waypoint.id() + " "
+                    + DimensionUtils.display(waypoint.dimension()) + " " + waypoint.coordString());
+                if (graph.removeWaypoint(waypoint.id())) removedNodes++;
+            }
+
+            int removedEdges = 0;
+            for (WaypointGraph.EdgeEntry entry : result.edges()) {
+                ChatUtils.debug("删除不可达边 #" + entry.id() + " " + describeEdge(graph, entry.edge()));
+                if (graph.removeEdge(entry.id())) removedEdges++;
+            }
+            manager.save();
+
+            source.sendFeedback(Text.literal("已删除 " + removedNodes + " 个不可达路径点；路径点 "
+                + beforeNodes + " → " + graph.normalCount() + "，边 " + beforeEdges + " → " + graph.edgeCount()
+                + "（删点会连带删掉挂在上面的边，另外单独删了 " + removedEdges + " 条不可达边）"));
+            reportSkipped(source, result.skipped());
         }
 
-        // 1. 先备份
-        Path backup = manager.backupFile();
-        if (backup == null) {
-            source.sendError(Text.literal("备份路径点文件失败（文件不存在或者写不进去），已中止，什么都没删"));
-            return 0;
-        }
-        source.sendFeedback(Text.literal("已备份到 " + backup));
-
-        // 2. 删点（挂在上面的边会一起删掉），再删剩下的不可达边
-        int beforeNodes = graph.normalCount();
-        int beforeEdges = graph.edgeCount();
-
-        int removedNodes = 0;
-        for (Waypoint waypoint : result.waypoints()) {
-            ChatUtils.debug("删除不可达路径点 #" + waypoint.id() + " "
-                + DimensionUtils.display(waypoint.dimension()) + " " + waypoint.coordString());
-            if (graph.removeWaypoint(waypoint.id())) removedNodes++;
-        }
-
-        int removedEdges = 0;
-        for (WaypointGraph.EdgeEntry entry : result.edges()) {
-            ChatUtils.debug("删除不可达边 #" + entry.id() + " " + describeEdge(graph, entry.edge()));
-            if (graph.removeEdge(entry.id())) removedEdges++;
-        }
-        manager.save();
-
-        source.sendFeedback(Text.literal("已删除 " + removedNodes + " 个不可达路径点；路径点 "
-            + beforeNodes + " → " + graph.normalCount() + "，边 " + beforeEdges + " → " + graph.edgeCount()
-            + "（删点会连带删掉挂在上面的边，另外单独删了 " + removedEdges + " 条不可达边）"));
-        reportSkipped(source, result.skipped());
-        return 1;
+        // 原先的实现后面接一次 optimize default：删完顺手把中间点合掉、重新编号
+        source.sendFeedback(Text.literal("radical：接着做一次 optimize default（合并中间点 + 重新编号）"));
+        return optimizeDefault(context);
     }
 
     /** 没删的受保护点提醒一下。 */

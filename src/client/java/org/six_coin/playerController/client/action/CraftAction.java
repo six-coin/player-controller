@@ -65,6 +65,15 @@ public class CraftAction extends Action {
     /** 等不到成品格时最多回头重摆几次。 */
     private static final int MAX_READY_RETRIES = 3;
 
+    /**
+     * 一格摆够之后，还要连着几 tick 数量都不掉才认为它真的满了。
+     *
+     * <p>一 tick 连发一大串点击时，服务端会把它实际接受到的数量同步回来 —— 这一刻的「够了」
+     * 可能只是本地预测，马上换下一格的话，服务端那边这一格其实是少的（后面就会少合成几个，
+     * 多出来的材料还会被退回物品栏）。
+     */
+    private static final int PLACE_SETTLE_TICKS = 2;
+
     private static final int MAX_OPEN_WAIT_TICKS = 60;
 
     private static final int MAX_TOTAL_TICKS = 20 * 600;
@@ -113,6 +122,9 @@ public class CraftAction extends Action {
     /** 上一批点击是往哪一格的、放完那一批之后这格有多少个（用来发现服务端把数量同步回去了）。 */
     private int lastCellIndex = -1;
     private int lastCellHave = -1;
+
+    /** 这一格「够了」之后又稳定了几 tick。 */
+    private int cellSettle;
 
     public CraftAction(CraftPlan plan, BlockPos stationPos) {
         this.plan = plan;
@@ -272,10 +284,15 @@ public class CraftAction extends Action {
         }
 
         if (need <= 0) {
+            // 够是够了，但先别急着下一格：一 tick 连发一大串点击之后，服务端会把它**实际**接受到的数量
+            // 同步回来，这一刻的「够了」有可能只是本地预测。等两 tick 数量都不掉，才算这一格真的满了。
+            if (++cellSettle < PLACE_SETTLE_TICKS) return;
             cellIndex++;
+            cellSettle = 0;
             lastCellIndex = -1;
             return;
         }
+        cellSettle = 0;
 
         // 这一格上一批放完是 N 个，现在只有 M 个了 → 服务端只接受了那一批里的一部分，
         // 把它的状态同步回来覆盖了客户端的预测（一 tick 连发一大串点击时会出现）。
@@ -287,11 +304,87 @@ public class CraftAction extends Action {
 
         int source = findSource(cell.item(), need);
         if (source < 0) {
-            fail("主背包里找不到足够的 " + id(cell.item()) + "（这一轮每格要 " + amount
-                + " 个，还差 " + need + " 个）");
+            fail("找不到足够的 " + id(cell.item()) + "（这一轮每格要 " + amount
+                + " 个，还差 " + need + " 个）；" + describeWhereIs(cell.item()));
             return;
         }
         click(mc, player, source, 0, SlotActionType.PICKUP);
+    }
+
+    /**
+     * 从哪儿拿材料。
+     *
+     * <p>**主背包 27 格和快捷栏 9 格都看**：正常情况材料都摆在主背包里，但有两处会把材料弄到快捷栏去，
+     * 只扫主背包就会误报「找不到足够的材料」：
+     * <ul>
+     *   <li>合成界面关掉的时候，格子里剩下的材料会被退回物品栏，而原版的
+     *       {@code PlayerInventory.addStack} 是**先从快捷栏**找位置的；</li>
+     *   <li>上一步合成出来的中间产物（QuickMove）本来就落在快捷栏里。</li>
+     * </ul>
+     * 只拿这一格要的那种材料，所以不会把别的东西抓进来；成品本身不会成为自己的材料，
+     * 但保险起见还是排除掉 {@link CraftPlan#target()}。
+     */
+    private int findSource(Item item, int need) {
+        if (item == plan.target()) return -1;
+
+        int fallback = -1;
+        int exact = -1;
+        int exactCount = -1;
+        for (Slot slot : inventorySlots()) {
+            ItemStack stack = slot.getStack();
+            if (stack.isEmpty() || !stack.isOf(item)) continue;
+            if (stack.getCount() <= need) {
+                // 正好够（或不够）的一叠优先：一次左键就整叠放进去，不用右键点很多下
+                if (stack.getCount() > exactCount) {
+                    exact = slot.id;
+                    exactCount = stack.getCount();
+                }
+                continue;
+            }
+            if (fallback < 0) fallback = slot.id;
+        }
+        return exact >= 0 ? exact : fallback;
+    }
+
+    /** 找材料时报一句「这东西到底在哪儿」，方便判断是计划本身短了还是被塞在别处了。 */
+    private String describeWhereIs(Item item) {
+        int main = 0;
+        int hotbar = 0;
+        for (Slot slot : inventorySlots()) {
+            ItemStack stack = slot.getStack();
+            if (stack.isEmpty() || !stack.isOf(item)) continue;
+            if (slot.getIndex() < 9) hotbar += stack.getCount();
+            else main += stack.getCount();
+        }
+
+        int grid = 0;
+        if (plan.station() == CraftPlan.Station.CRAFTING_TABLE) {
+            for (Slot slot : ((CraftingScreenHandler) handler).getInputSlots()) {
+                ItemStack stack = slot.getStack();
+                if (!stack.isEmpty() && stack.isOf(item)) grid += stack.getCount();
+            }
+        } else {
+            ItemStack stack = slotStack(StonecutterScreenHandler.INPUT_ID);
+            if (!stack.isEmpty() && stack.isOf(item)) grid += stack.getCount();
+        }
+
+        ItemStack cursor = handler.getCursorStack();
+        int onCursor = !cursor.isEmpty() && cursor.isOf(item) ? cursor.getCount() : 0;
+
+        return "现在物品栏里这种材料：主背包 " + main + " 个、快捷栏 " + hotbar + " 个、"
+            + "合成格 " + grid + " 个、光标 " + onCursor + " 个（一共 "
+            + (main + hotbar + grid + onCursor) + " 个）";
+    }
+
+    /** 界面里属于玩家物品栏的格子：快捷栏 0~8 + 主背包 9~35。 */
+    private List<Slot> inventorySlots() {
+        List<Slot> slots = new ArrayList<>();
+        for (Slot slot : handler.slots) {
+            if (slot.inventory instanceof PlayerInventory && slot.getIndex() < 36) {
+                slots.add(slot);
+            }
+        }
+        return slots;
     }
 
     /**
@@ -487,18 +580,6 @@ public class CraftAction extends Action {
     private void clickQuiet(MinecraftClient mc, ClientPlayerEntity player, int slotId, int button,
                             SlotActionType type) {
         mc.interactionManager.clickSlot(handler.syncId, slotId, button, type, player);
-    }
-
-    /** 主背包（27 格，不含快捷栏）里装着这个物品、而且优先正好不超过 need 个的格子。 */
-    private int findSource(Item item, int need) {
-        int fallback = -1;
-        for (Slot slot : mainSlots()) {
-            ItemStack stack = slot.getStack();
-            if (stack.isEmpty() || !stack.isOf(item)) continue;
-            if (stack.getCount() <= need) return slot.id;
-            if (fallback < 0) fallback = slot.id;
-        }
-        return fallback;
     }
 
     /** 把手上的东西放回主背包（优先找放得下的格子）。 */

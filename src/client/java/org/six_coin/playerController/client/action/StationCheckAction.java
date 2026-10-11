@@ -22,6 +22,7 @@ import org.six_coin.playerController.client.station.StationPos;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.InventoryUtils;
+import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 
 import java.io.IOException;
@@ -118,6 +119,20 @@ public class StationCheckAction extends Action {
         if (mc.world == null) {
             fail("没有世界");
             return;
+        }
+
+        // 第 0 步：先站到站立点的中心 —— 工作站里所有容器都在站立点的触及范围内，
+        // 站偏了就可能够不着（而且开界面用的是玩家当前位置，位置不对服务端也可能不认）。
+        StationPos stand = StationManager.get().single(StationPart.STAND_POINT);
+        if (stand == null) {
+            ChatUtils.debug("没有设置站立点，跳过「对齐到站立点中心」这一步");
+        } else if (PlayerUtils.isAtBlockCenter()
+            && stand.pos().equals(BlockPos.ofFloored(mc.player.getEntityPos()))) {
+            ChatUtils.debug("已经站在站立点 " + stand.coordString() + " 的中心了");
+        } else {
+            ChatUtils.debug("先把玩家对齐到站立点 " + stand.coordString() + " 的中心（原来在 "
+                + String.format("%.3f, %.3f, %.3f", mc.player.getX(), mc.player.getY(), mc.player.getZ()) + "）");
+            PlayerUtils.snapToBlockCenter(stand.pos());
         }
 
         collectTargets(mc.world, StationPart.ITEM_TEMP);

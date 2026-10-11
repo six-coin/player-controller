@@ -4,6 +4,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import org.jetbrains.annotations.Nullable;
@@ -46,11 +47,19 @@ import java.util.function.Supplier;
  *       退出界面 → 用快捷栏第一格的钻石镐挖掉 id=1 的潜影盒 → {@code move to_position}(盒子上面那一格)
  *       → 自然下落 → 捡起掉落物（落在快捷栏第二格）→ {@code move y 1} → {@code move to_position}(站立点)
  *       → 把捡到的盒子放进 item_final → 再从提供处取一个空盒放到 id=1；</li>
- *   <li><b>第 2 步</b>：遍历 item_storage，用 {@code only_item} 把 {@code final_pack} 里的东西按<b>物品形态</b>取出来
- *       （潜影盒整个无视）。物品栏满了就倒进最终产物暂存处，然后回到同一个容器接着取；</li>
- *   <li><b>第 3 步</b>：再处理<b>装在潜影盒里</b>的那些。维护 next_shulker_box_placement_id（初始 2，
- *       越界就回 2）：用 {@code only_one_shulker} 从 item_storage 取出一个装着所需物品的盒子放到摆放处，
- *       对着这个盒子 {@code get} 需要的东西；没拿完就先倒进暂存处再拿一遍，直到 all_cleared。</li>
+ *   <li><b>第 2 步（按物品逐个处理）</b>：按 {@code final_pack} 里的顺序逐个成品处理，每种成品都是
+ *       <b>先取物品形态的、再取还在潜影盒里的</b>：
+ *       <ul>
+ *         <li>物品形态 = {@code item_storage} 里散装的 <b>加上摆放处那些盒子里散装的</b>
+ *             （用 {@code only_item}）；</li>
+ *         <li>潜影盒形态 = {@code item_storage} 里还装着这种东西的盒子：用 {@code only_one_shulker}
+ *             整个取出来放好，再对着它取。</li>
+ *       </ul>
+ *       这样同一种成品的两部分会连着取出来，不会出现「1 个散装的先进了 A 盒、99 个盒装的只能进 B 盒」。
+ *       物品栏满了就倒进最终产物暂存处，然后回到同一个来源接着取。</li>
+ *   <li><b>整盒直挪（在第 2 步之前）</b>：某种成品要的量够一整盒（64 上限的物品就是 1728 个）时，
+ *       仓库里要是有「只装它、而且装满一盒」的盒子，就直接把整盒搬去 item_final —— 不用拆开重装。
+ *       例：要 1728*5+288 个，仓库里有 4 个满盒就挪 4 个；有 6 个也只挪 5 个（第 6 个留着走正常流程）。</li>
  * </ol>
  *
  * <p>注意装盒用的是 {@code final_pack}（{@code 1_3_material_can_access_all.json} 的副本）：
@@ -146,9 +155,21 @@ public class StockStage3Action extends Action {
     private final List<Step> pending = new ArrayList<>();
     private boolean executing;
 
-    /** 第 2 / 第 3 步走到 item_storage 的第几个了。 */
-    private int step2Index;
-    private int step3Index;
+    /** 第 2 步走到哪儿了：处理第几个成品、它的散装在扫第几个来源、盒装在扫第几个 item_storage。 */
+    private int itemIndex;
+    private int looseStorageIndex;
+    private int loosePlacementIndex;
+    private int boxStorageIndex;
+
+    /** final_pack 里物品的顺序（按文件里的顺序；逐物品处理用）。 */
+    private final List<String> finalOrder = new ArrayList<>();
+
+    /** 整盒直挪：计划（哪种成品、一盒多少个、挪几盒）+ 现在挪到第几个。 */
+    private record FullBoxMove(String itemId, Item item, int boxSize) {
+    }
+
+    private final List<FullBoxMove> fullBoxPlan = new ArrayList<>();
+    private int fullBoxIndex;
 
     /** 从 container 里拿潜影盒之前，那个容器里都有哪些盒子（拿来算被拿走的是哪个）。 */
     private List<Map<String, Integer>> boxesBeforeTake = List.of();
@@ -248,6 +269,7 @@ public class StockStage3Action extends Action {
         }
 
         pushPrepareStaging();
+        pushFullBoxes();
         pushStep2();
 
         ChatUtils.info("阶段3 开始：要装进暂存处的成品 " + need.describe()
@@ -343,6 +365,19 @@ public class StockStage3Action extends Action {
         String json = Files.readString(file, StandardCharsets.UTF_8);
         need = ItemList.parseOrEmpty(json);
         finalWanted = ItemList.parseOrEmpty(json);
+
+        // 逐物品处理要用 final_pack 里的物品顺序（去重，保持文件里的先后）
+        finalOrder.clear();
+        try {
+            com.google.gson.JsonElement root = com.google.gson.JsonParser.parseString(json);
+            if (root.isJsonObject()) {
+                for (String key : root.getAsJsonObject().keySet()) {
+                    if (!finalOrder.contains(key)) finalOrder.add(key);
+                }
+            }
+        } catch (Exception e) {
+            ChatUtils.debug("final_pack 读物品顺序失败（不影响取货，只是遍历顺序会变）：" + e.getMessage());
+        }
     }
 
     private void collectPositions() {
@@ -623,107 +658,322 @@ public class StockStage3Action extends Action {
     }
 
     // ------------------------------------------------------------------
-    // 第 2 步：物品形态的成品
+    // 整盒直挪：要的量够一整盒时，直接把这些满盒搬去 item_final
     // ------------------------------------------------------------------
 
-    private void pushStep2() {
-        pushSync("阶段3 第 2 步：从 item_storage 取物品形态的成品", () -> {
-            step2Index = 0;
-            ChatUtils.info("第 2 步：遍历 item_storage，把物品形态的成品取出来（潜影盒整个无视）");
-            pushStep2Next();
+    /**
+     * 分盒重装之前先看一遍：有没有「要得够一整盒、而且仓库里就有满盒」的成品。
+     *
+     * <p>满盒 = 只装这一种成品、而且装满一整盒（潜影盒 27 格，64 上限的物品就是 1728 个）。
+     * 这种情况不用拆开重装，直接把整盒挪到 item_final 最省事。
+     *
+     * <p>挪多少：{@code min(需求量 / 一盒的量, 仓库里满盒的个数)}。
+     * 要 1728*5+288、仓库里有 4 个满盒 → 挪 4 个；有 6 个 → 只挪 5 个（剩下的 288 个走正常流程）。
+     */
+    private void pushFullBoxes() {
+        pushSync("看看有没有能整盒直接挪去 item_final 的成品", () -> {
+            fullBoxPlan.clear();
+            fullBoxIndex = 0;
+
+            for (String key : finalOrder) {
+                Item item = StockMaterials.parseItem(key);
+                if (item == null) continue;
+
+                int want = need.remaining(item);
+                int boxSize = fullBoxSize(item);
+                if (boxSize <= 0 || want < boxSize) continue;
+
+                int maxMove = want / boxSize;
+                int have = 0;
+                for (int id : storageIds) have += countFullBoxes(state.storage(id), key, boxSize);
+                int move = Math.min(maxMove, have);
+                if (move <= 0) continue;
+
+                fullBoxPlan.add(new FullBoxMove(key, item, boxSize));
+                ChatUtils.info("整盒直挪：" + key + " 要 " + want + " 个（够 " + maxMove
+                    + " 个满盒），仓库里有 " + have + " 个满盒（一盒 " + boxSize + " 个）→ 先挪 "
+                    + move + " 盒去 item_final");
+            }
+
+            if (fullBoxPlan.isEmpty()) {
+                ChatUtils.debug("没有「要够一整盒、而且仓库里有满盒」的成品，跳过整盒直挪");
+            }
+            pushFullBoxNext();
         });
     }
 
-    private void pushStep2Next() {
-        pushSync("找下一个有物品形态成品的 item_storage", () -> {
-            if (need.isEmpty()) {
-                ChatUtils.debug("要的东西都拿齐了，第 2 步提前结束");
-                pushStep3();
+    private void pushFullBoxNext() {
+        pushSync("挑下一盒要直挪的成品", () -> {
+            if (fullBoxIndex >= fullBoxPlan.size()) {
+                pushStep2();
                 return;
             }
 
-            while (step2Index < storageIds.size() && !storageHasLooseWanted(storageIds.get(step2Index))) {
-                ChatUtils.debug("item_storage #" + storageIds.get(step2Index) + " 里没有需要的物品形态成品，跳过");
-                step2Index++;
-            }
-            if (step2Index >= storageIds.size()) {
-                ChatUtils.info("item_storage 里没有更多物品形态的成品了，第 2 步结束");
-                pushStep3();
+            FullBoxMove move = fullBoxPlan.get(fullBoxIndex);
+            int left = need.remaining(move.item());
+            if (left < move.boxSize()) {
+                ChatUtils.debug(move.itemId() + " 剩下的需求 " + left + " 个不够一整盒了，这种挪完");
+                fullBoxIndex++;
+                pushFullBoxNext();
                 return;
             }
 
-            int id = storageIds.get(step2Index);
-            StationPos pos = stationPos(StationPart.ITEM_STORAGE, id);
-            if (pos == null) {
-                step2Index++;
-                pushStep2Next();
+            int storageId = findStorageWithFullBox(move);
+            if (storageId < 0) {
+                ChatUtils.debug("仓库里没有更多装满 " + move.itemId() + " 的盒子了");
+                fullBoxIndex++;
+                pushFullBoxNext();
                 return;
             }
 
-            pushChild("从 item_storage #" + id + " 取物品形态的成品（only_item）",
-                () -> new ContainerGetAction(pos.pos(), need, true, ContainerGetAction.Mode.ONLY_ITEM),
+            StationPos pos = stationPos(StationPart.ITEM_STORAGE, storageId);
+            ItemList want = pos == null ? null : wantOne(move.item(), move.boxSize());
+            if (pos == null || want == null) {
+                fullBoxIndex++;
+                pushFullBoxNext();
+                return;
+            }
+
+            pushChild("从 item_storage #" + storageId + " 取一个装满 " + move.itemId()
+                    + " 的潜影盒（only_full_shulker，一盒 " + move.boxSize() + " 个）",
+                () -> new ContainerGetAction(pos.pos(), want, true,
+                    ContainerGetAction.Mode.ONLY_FULL_SHULKER),
                 action -> {
                     ContainerGetAction get = (ContainerGetAction) action;
-                    if (get.detail() != null) state.setStorage(id, get.detail(), get.freeSlots());
+                    if (get.detail() != null) state.setStorage(storageId, get.detail(), get.freeSlots());
 
-                    if (get.allCleared()) {
-                        ChatUtils.info("item_storage #" + id + " 的物品形态成品取完了，还差 " + need.describe());
-                        step2Index++;
-                        pushStep2Next();
-                    } else {
-                        ChatUtils.info("物品栏满了，先把东西倒进暂存处，再回到 item_storage #" + id + " 接着取");
-                        pushStore();
-                        pushStep2Next();
-                    }
+                    int taken = need.take(move.item(), move.boxSize());
+                    takenBoxes++;
+                    ChatUtils.info("整盒直挪：拿出一个装满 " + move.itemId() + " 的盒子（"
+                        + taken + " 个），放进 item_final");
+
+                    // 盒子已经在快捷栏第三格了（only_*_shulker 模式）
+                    pickupHotbar = ContainerGetAction.HOTBAR_BOX_INDEX;
+                    pushPutHotbarBox(PutTarget.FINAL);
+                    pushFullBoxNext();
                 });
         });
     }
 
+    /** 找第一个还有「装满这种成品的盒子」的 item_storage。 */
+    private int findStorageWithFullBox(FullBoxMove move) {
+        for (int id : storageIds) {
+            if (countFullBoxes(state.storage(id), move.itemId(), move.boxSize()) > 0) return id;
+        }
+        return -1;
+    }
+
+    /** 这个存储容器里有几个「只装这种成品、而且装满一整盒」的盒子。 */
+    private static int countFullBoxes(@Nullable StationState.Storage storage, String itemId, int boxSize) {
+        if (storage == null) return 0;
+        int count = 0;
+        for (Map<String, Integer> box : storage.shulkerBoxes()) {
+            if (box.size() != 1) continue;
+            if (box.getOrDefault(itemId, 0) >= boxSize) count++;
+        }
+        return count;
+    }
+
+    /** 一整盒能装多少个：潜影盒 27 格 × 这种物品的堆叠上限。 */
+    private static int fullBoxSize(Item item) {
+        return 27 * Math.max(1, item.getMaxCount());
+    }
+
     // ------------------------------------------------------------------
-    // 第 3 步：装在潜影盒里的成品
+    // 第 2 步：按 final_pack 的顺序逐个成品处理（先物品形态，再潜影盒里的）
     // ------------------------------------------------------------------
 
-    private void pushStep3() {
-        pushSync("阶段3 第 3 步：把装在潜影盒里的成品也拿出来", () -> {
-            step3Index = 0;
-            nextPlacementId = 2;
-            ChatUtils.info("第 3 步：遍历 item_storage，把装着所需物品的潜影盒整个取出来、摆好、再取里面的东西");
-            pushStep3Next();
+    private void pushStep2() {
+        pushSync("阶段3 第 2 步：按物品逐个取（先物品形态，再潜影盒里的）", () -> {
+            itemIndex = 0;
+            ChatUtils.info("第 2 步：按 final_pack 的顺序逐个成品处理：先取物品形态的"
+                + "（item_storage 里散装的 + 摆放处盒子里散装的），再取还在潜影盒里的");
+            pushItemNext();
         });
     }
 
-    private void pushStep3Next() {
-        pushSync("找下一个装着所需物品的潜影盒", () -> {
-            if (need.isEmpty()) {
-                ChatUtils.debug("要的东西都拿齐了，第 3 步提前结束");
+    /** 下一个还有需求的成品。 */
+    @Nullable
+    private Item currentItem() {
+        while (itemIndex < finalOrder.size()) {
+            Item item = StockMaterials.parseItem(finalOrder.get(itemIndex));
+            if (item != null && need.remaining(item) > 0) return item;
+            itemIndex++;
+        }
+        return null;
+    }
+
+    private void pushItemNext() {
+        pushSync("看下一个要处理的成品", () -> {
+            Item item = currentItem();
+            if (item == null) {
+                ChatUtils.info("final_pack 里的成品都处理过了");
                 pushFinish();
                 return;
             }
 
-            while (step3Index < storageIds.size() && !storageHasBoxWithWanted(storageIds.get(step3Index))) {
-                ChatUtils.debug("item_storage #" + storageIds.get(step3Index) + " 里没有装着所需物品的潜影盒，跳过");
-                step3Index++;
-            }
-            if (step3Index >= storageIds.size()) {
-                ChatUtils.info("item_storage 里没有更多装着所需物品的潜影盒了，第 3 步结束");
+            ChatUtils.info("第 2 步：处理 " + finalOrder.get(itemIndex) + "（还差 "
+                + need.remaining(item) + " 个）—— 先取物品形态的");
+            looseStorageIndex = 0;
+            loosePlacementIndex = 0;
+            boxStorageIndex = 0;
+            pushLooseNext();
+        });
+    }
+
+    /**
+     * 取当前这种成品的**物品形态**：先扫 item_storage 里散装的，再扫摆放处那些盒子里散装的。
+     *
+     * <p>摆在摆放处上的盒子里的东西也算「物品形态」（需求里就是这么定的），所以之前放下的盒子
+     * 会在这里被反复利用，而不是只用一遍。
+     */
+    private void pushLooseNext() {
+        pushSync("找下一个「这种成品的散装形态」来源", () -> {
+            Item item = currentItem();
+            if (item == null) {
                 pushFinish();
                 return;
             }
 
-            int id = storageIds.get(step3Index);
+            int remaining = need.remaining(item);
+            if (remaining <= 0) {
+                // 散装的够了 → 去看还在潜影盒里的
+                itemIndex++;
+                pushItemNext();
+                return;
+            }
+
+            ItemList want = wantOne(item, remaining);
+            if (want == null) {
+                itemIndex++;
+                pushItemNext();
+                return;
+            }
+
+            // ① item_storage 里散装的
+            while (looseStorageIndex < storageIds.size()
+                && !storageHasLoose(storageIds.get(looseStorageIndex), item)) {
+                looseStorageIndex++;
+            }
+            if (looseStorageIndex < storageIds.size()) {
+                int id = storageIds.get(looseStorageIndex);
+                StationPos pos = stationPos(StationPart.ITEM_STORAGE, id);
+                if (pos == null) {
+                    looseStorageIndex++;
+                    pushLooseNext();
+                    return;
+                }
+                pushChild("从 item_storage #" + id + " 取散装的 " + finalOrder.get(itemIndex)
+                        + "（only_item）",
+                    () -> new ContainerGetAction(pos.pos(), want, true, ContainerGetAction.Mode.ONLY_ITEM),
+                    action -> {
+                        ContainerGetAction get = (ContainerGetAction) action;
+                        if (get.detail() != null) state.setStorage(id, get.detail(), get.freeSlots());
+                        // 只带了这一种东西的 item_list，所以「want 里少了多少」就是实际拿到多少；
+                        // 拿到了要从总需求 need 里扣掉（want 是个副本，不会自己反映到 need 上）
+                        int taken = remaining - want.remaining(item);
+                        if (taken > 0) need.take(item, taken);
+                        if (get.allCleared()) {
+                            looseStorageIndex++;
+                            pushLooseNext();
+                        } else {
+                            ChatUtils.info("物品栏满了，先倒进暂存处，再回 item_storage #" + id + " 接着取");
+                            pushStore();
+                            pushLooseNext();
+                        }
+                    });
+                return;
+            }
+
+            // ② 摆放处那些盒子里散装的
+            while (loosePlacementIndex < placementIds.size()
+                && (placementIds.get(loosePlacementIndex) == STAGING_ID
+                    || !placementHas(placementIds.get(loosePlacementIndex), item))) {
+                loosePlacementIndex++;
+            }
+            if (loosePlacementIndex < placementIds.size()) {
+                int placementId = placementIds.get(loosePlacementIndex);
+                StationPos spot = placement(placementId);
+                if (spot == null) {
+                    loosePlacementIndex++;
+                    pushLooseNext();
+                    return;
+                }
+                pushChild("从摆放处 #" + placementId + " 的盒子里取散装的 " + finalOrder.get(itemIndex)
+                        + "（only_item）",
+                    () -> new ContainerGetAction(spot.pos(), want, true, ContainerGetAction.Mode.ONLY_ITEM),
+                    action -> {
+                        ContainerGetAction get = (ContainerGetAction) action;
+                        if (get.detail() != null) state.setPlacement(placementId, get.detail().all());
+                        int taken = remaining - want.remaining(item);
+                        if (taken > 0) need.take(item, taken);
+                        if (get.allCleared()) {
+                            loosePlacementIndex++;
+                            pushLooseNext();
+                        } else {
+                            ChatUtils.info("物品栏满了，先倒进暂存处，再回摆放处 #" + placementId + " 接着取");
+                            pushStore();
+                            pushLooseNext();
+                        }
+                    });
+                return;
+            }
+
+            // 物品形态的都取完了 → 去看还在潜影盒里的
+            pushBoxNext();
+        });
+    }
+
+    /** 取当前这种成品**还在潜影盒里的**那部分：从 item_storage 把整盒取出来放好，再对着它取。 */
+    private void pushBoxNext() {
+        pushSync("找下一个装着这种成品的潜影盒", () -> {
+            Item item = currentItem();
+            if (item == null) {
+                pushFinish();
+                return;
+            }
+
+            int remaining = need.remaining(item);
+            if (remaining <= 0) {
+                itemIndex++;
+                pushItemNext();
+                return;
+            }
+
+            ItemList want = wantOne(item, remaining);
+            if (want == null) {
+                itemIndex++;
+                pushItemNext();
+                return;
+            }
+
+            while (boxStorageIndex < storageIds.size()
+                && !storageHasBoxWith(storageIds.get(boxStorageIndex), item)) {
+                boxStorageIndex++;
+            }
+            if (boxStorageIndex >= storageIds.size()) {
+                ChatUtils.debug("仓库里没有更多装着 " + finalOrder.get(itemIndex) + " 的潜影盒了");
+                itemIndex++;
+                pushItemNext();
+                return;
+            }
+
+            int id = storageIds.get(boxStorageIndex);
             StationPos pos = stationPos(StationPart.ITEM_STORAGE, id);
             if (pos == null) {
-                step3Index++;
-                pushStep3Next();
+                boxStorageIndex++;
+                pushBoxNext();
                 return;
             }
 
             int placementId = nextPlacementId;
-            pushChild("从 item_storage #" + id + " 取一个装着所需物品的潜影盒（only_one_shulker）",
+            pushChild("从 item_storage #" + id + " 取一个装着 " + finalOrder.get(itemIndex)
+                    + " 的潜影盒（only_one_shulker）",
                 () -> {
                     StationState.Storage storage = state.storage(id);
                     boxesBeforeTake = storage == null ? List.of() : new ArrayList<>(storage.shulkerBoxes());
-                    return new ContainerGetAction(pos.pos(), need, true, ContainerGetAction.Mode.ONLY_ONE_SHULKER);
+                    return new ContainerGetAction(pos.pos(), want, true,
+                        ContainerGetAction.Mode.ONLY_ONE_SHULKER);
                 },
                 action -> {
                     Map<String, Integer> contents = Map.of();
@@ -738,10 +988,23 @@ public class StockStage3Action extends Action {
 
                     pushPlaceHeldBox(placementId, true, contents, "装东西的盒子");
                     pushGetFromPlaced(placementId);
-                    // 这个容器可能还有别的装着所需物品的盒子，回到同一个 id 再看一遍
-                    pushStep3Next();
+                    // 这个容器可能还有别的装着这种成品的盒子，回到同一个 id 再看一遍
+                    pushBoxNext();
                 });
         });
+    }
+
+    /** 只含一种成品、数量为 count 的 item_list（逐物品取货时用）。 */
+    @Nullable
+    private static ItemList wantOne(Item item, int count) {
+        if (count <= 0) return null;
+        String id = Registries.ITEM.getId(item).toString();
+        try {
+            return ItemList.parse("{\"" + id + "\": " + count + "}");
+        } catch (ItemList.ParseException e) {
+            ChatUtils.error("拼 item_list 失败（" + id + " x" + count + "）：" + e.getMessage());
+            return null;
+        }
     }
 
     /** 对着摆放处的盒子取需要的东西；没拿完就先倒进暂存处，再拿一遍，直到 all_cleared。 */
@@ -925,26 +1188,35 @@ public class StockStage3Action extends Action {
         return target == PutTarget.FINAL ? "最终产物地（item_final）" : "物资存储地（item_storage）";
     }
 
-    /** 这个 item_storage 里有没有「item_list 还要的」散装物品。 */
-    private boolean storageHasLooseWanted(int id) {
+    /** 这个 item_storage 里有没有这种成品的**散装**形态。 */
+    private boolean storageHasLoose(int id, Item item) {
         StationState.Storage storage = state.storage(id);
         if (storage == null) return false;
-        for (String key : storage.items().keySet()) {
-            Item item = StockMaterials.parseItem(key);
-            if (item != null && need.wants(item)) return true;
+        for (Map.Entry<String, Integer> entry : storage.items().entrySet()) {
+            if (entry.getValue() == null || entry.getValue() <= 0) continue;
+            if (StockMaterials.parseItem(entry.getKey()) == item) return true;
         }
         return false;
     }
 
-    /** 这个 item_storage 里有没有「装着 item_list 还要的东西」的潜影盒。 */
-    private boolean storageHasBoxWithWanted(int id) {
+    /** 这个 item_storage 里有没有装着这种成品的潜影盒。 */
+    private boolean storageHasBoxWith(int id, Item item) {
         StationState.Storage storage = state.storage(id);
         if (storage == null) return false;
         for (Map<String, Integer> box : storage.shulkerBoxes()) {
-            for (String key : box.keySet()) {
-                Item item = StockMaterials.parseItem(key);
-                if (item != null && need.wants(item)) return true;
+            for (Map.Entry<String, Integer> entry : box.entrySet()) {
+                if (entry.getValue() == null || entry.getValue() <= 0) continue;
+                if (StockMaterials.parseItem(entry.getKey()) == item) return true;
             }
+        }
+        return false;
+    }
+
+    /** 摆放处那个盒子里还有没有这种成品（station_data 里记着的）。 */
+    private boolean placementHas(int id, Item item) {
+        for (Map.Entry<String, Integer> entry : state.placement(id).entrySet()) {
+            if (entry.getValue() == null || entry.getValue() <= 0) continue;
+            if (StockMaterials.parseItem(entry.getKey()) == item) return true;
         }
         return false;
     }

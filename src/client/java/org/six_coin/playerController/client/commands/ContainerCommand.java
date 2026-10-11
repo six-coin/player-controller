@@ -387,6 +387,7 @@ public final class ContainerCommand {
             case NORMAL -> "normal";
             case ONLY_ITEM -> "only_item";
             case ONLY_ONE_SHULKER -> "only_one_shulker";
+            case ONLY_FULL_SHULKER -> "only_full_shulker";
         };
     }
 }

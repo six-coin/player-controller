@@ -90,7 +90,14 @@ public class ContainerGetAction extends Action {
         /** only_item：只拿物品，无视潜影盒（盒子里的东西也不算）。 */
         ONLY_ITEM,
         /** only_one_shulker：只找一个「里面有 item_list 需要的东西」的潜影盒，拿走并放进快捷栏第三格；不返回 item_list。 */
-        ONLY_ONE_SHULKER
+        ONLY_ONE_SHULKER,
+        /**
+         * only_full_shulker：只找一个「只装一种 item_list 需要的东西、而且装满一整盒」的潜影盒，
+         * 拿走并放进快捷栏第三格；不返回 item_list。
+         *
+         * <p>备货第一阶段阶段3 的「整盒直挪」用它：要的量够一整盒时，直接把整盒搬去 item_final。
+         */
+        ONLY_FULL_SHULKER
     }
 
     private final BlockPos pos;
@@ -268,9 +275,11 @@ public class ContainerGetAction extends Action {
             output().info("容器任务结束：" + stopReason);
         }
 
-        // only_one_shulker 没有返回值，前面已经报过了
-        if (mode == Mode.ONLY_ONE_SHULKER) {
-            ChatUtils.debug("only_one_shulker 模式：不输出 item_list / all_cleared");
+        // only_one_shulker / only_full_shulker 没有返回值，前面已经报过了
+        if (mode == Mode.ONLY_ONE_SHULKER || mode == Mode.ONLY_FULL_SHULKER) {
+            ChatUtils.debug(mode == Mode.ONLY_FULL_SHULKER
+                ? "only_full_shulker 模式：不输出 item_list / all_cleared"
+                : "only_one_shulker 模式：不输出 item_list / all_cleared");
             ScreenSuppressor.release();
             return;
         }
@@ -322,7 +331,7 @@ public class ContainerGetAction extends Action {
             slotCursor = 0;
             pendingClick = false;
             stepWaitTicks = 0;
-            phase = mode == Mode.ONLY_ONE_SHULKER ? Phase.ONE_BOX : Phase.SCAN;
+            phase = mode == Mode.NORMAL || mode == Mode.ONLY_ITEM ? Phase.SCAN : Phase.ONE_BOX;
             ChatUtils.debug("容器已打开：syncId=%d，界面共 %d 格，其中容器格 %d 格",
                 handler.syncId, handler.slots.size(), containerSlots.size());
             dumpContainerSlots();
@@ -342,7 +351,9 @@ public class ContainerGetAction extends Action {
             case 0 -> {
                 boxSlotId = findShulkerWithNeeded();
                 if (boxSlotId < 0) {
-                    fail("容器里没有「装着 item_list 需要的东西」的潜影盒");
+                    fail(mode == Mode.ONLY_FULL_SHULKER
+                        ? "容器里没有「只装着 item_list 需要的东西、而且装满一整盒」的潜影盒"
+                        : "容器里没有「装着 item_list 需要的东西」的潜影盒");
                     return;
                 }
                 ItemStack box = handler.slots.get(boxSlotId).getStack();
@@ -391,6 +402,11 @@ public class ContainerGetAction extends Action {
             ItemStack stack = slot.getStack();
             if (stack.isEmpty() || !ShulkerUtils.isShulkerBox(stack)) continue;
             if (ItemRules.customNameOf(stack) != null) continue;
+            if (mode == Mode.ONLY_FULL_SHULKER) {
+                // 只认「只装一种、而且装满一整盒」的（整盒直挪用）
+                if (!ShulkerUtils.isFullOfWanted(stack, itemList)) continue;
+                return slot.id;
+            }
             if (!ShulkerUtils.containsWanted(stack, itemList)) continue;
             return slot.id;
         }

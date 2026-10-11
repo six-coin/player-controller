@@ -4,6 +4,7 @@ import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
 import net.minecraft.item.BlockItem;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 
@@ -61,6 +62,28 @@ public final class ShulkerUtils {
             if (itemList.wants(inner.getItem())) return true;
         }
         return false;
+    }
+
+    /**
+     * 这个盒子是不是「只装一种 item_list 还要的东西、而且**装满一整盒**」。
+     *
+     * <p>潜影盒固定 27 格，所以「满」= 27 × 那种物品的堆叠上限（64 上限的物品就是 1728 个）。
+     * 备货第一阶段阶段3 的「整盒直挪」用它挑盒子：要的量够一整盒、仓库里又正好有整盒的话，
+     * 就不用拆开重装了。
+     */
+    public static boolean isFullOfWanted(ItemStack shulker, ItemList itemList) {
+        List<ItemStack> contents = consideredContents(shulker);
+        if (contents.isEmpty()) return false;
+
+        Item first = contents.get(0).getItem();
+        if (!itemList.wants(first)) return false;
+
+        int total = 0;
+        for (ItemStack inner : contents) {
+            if (!inner.isOf(first)) return false;
+            total += inner.getCount();
+        }
+        return total >= 27 * Math.max(1, contents.get(0).getMaxCount());
     }
 
     /** 盒子内容的一行描述，给日志用（被无视的会标出来）。 */

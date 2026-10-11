@@ -29,7 +29,8 @@ import java.nio.file.Path;
  *     "interaction_range": 4.5,
  *     "anti_kick_delay": 40,
  *     "anti_kick_off_time": 1,
- *     "items_per_tick": 64
+ *     "items_per_tick": 64,
+ *     "wait_ticks_after_dimension_teleport": 40
  *   }
  * }
  * </pre>
@@ -77,6 +78,15 @@ public final class PlayerControllerConfig {
     public static final int DEFAULT_ITEMS_PER_TICK = 64;
     public static final int MIN_ITEMS_PER_TICK = 1;
     public static final int MAX_ITEMS_PER_TICK = 64;
+
+    /**
+     * 换维度（走传送门）之后先等多少 tick 再继续移动。
+     *
+     * <p>刚被传送过去时服务端那边的落点 / 区块还没同步好，这时候马上走很容易被拉回去（卡顿、回弹）。
+     */
+    public static final int DEFAULT_WAIT_TICKS_AFTER_DIMENSION_TELEPORT = 40;
+    public static final int MIN_WAIT_TICKS_AFTER_DIMENSION_TELEPORT = 0;
+    public static final int MAX_WAIT_TICKS_AFTER_DIMENSION_TELEPORT = 400;
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -151,6 +161,15 @@ public final class PlayerControllerConfig {
         @SerializedName("items_per_tick")
         private int itemsPerTick = DEFAULT_ITEMS_PER_TICK;
 
+        /**
+         * 换维度（走传送门）之后先等多少 tick 再继续移动。
+         *
+         * <p>见 {@code feature/DimensionWait}：刚传送过去时服务端还没把落点 / 区块同步好，
+         * 这时候马上走容易被拉回去。
+         */
+        @SerializedName("wait_ticks_after_dimension_teleport")
+        private int waitTicksAfterDimensionTeleport = DEFAULT_WAIT_TICKS_AFTER_DIMENSION_TELEPORT;
+
         public double moveSpeed() {
             return moveSpeed;
         }
@@ -200,6 +219,15 @@ public final class PlayerControllerConfig {
 
         public void itemsPerTick(int value) {
             itemsPerTick = Math.min(MAX_ITEMS_PER_TICK, Math.max(MIN_ITEMS_PER_TICK, value));
+        }
+
+        public int waitTicksAfterDimensionTeleport() {
+            return waitTicksAfterDimensionTeleport;
+        }
+
+        public void waitTicksAfterDimensionTeleport(int value) {
+            waitTicksAfterDimensionTeleport = Math.min(MAX_WAIT_TICKS_AFTER_DIMENSION_TELEPORT,
+                Math.max(MIN_WAIT_TICKS_AFTER_DIMENSION_TELEPORT, value));
         }
     }
 
@@ -287,6 +315,16 @@ public final class PlayerControllerConfig {
         instance.save();
     }
 
+    /** 换维度之后先等多少 tick 再继续移动。 */
+    public static int getWaitTicksAfterDimensionTeleport() {
+        return instance.actions.waitTicksAfterDimensionTeleport();
+    }
+
+    public static void setWaitTicksAfterDimensionTeleport(int value) {
+        instance.actions.waitTicksAfterDimensionTeleport(value);
+        instance.save();
+    }
+
     /** 配置目录：config/player-controller/ */
     public static Path configDir() {
         return FabricLoader.getInstance()
@@ -328,7 +366,9 @@ public final class PlayerControllerConfig {
                 + ", interaction_range=" + instance.actions.interactionRange()
                 + ", anti_kick_delay=" + instance.actions.antiKickDelay()
                 + ", anti_kick_off_time=" + instance.actions.antiKickOffTime()
-                + ", items_per_tick=" + instance.actions.itemsPerTick() + ")");
+                + ", items_per_tick=" + instance.actions.itemsPerTick()
+                + ", wait_ticks_after_dimension_teleport="
+                + instance.actions.waitTicksAfterDimensionTeleport() + ")");
         } catch (Exception e) {
             instance = new PlayerControllerConfig();
             ChatUtils.error("读取配置文件失败，已使用默认值: " + e.getMessage());

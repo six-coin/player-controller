@@ -3,6 +3,7 @@ package org.six_coin.playerController.client.action;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
+import org.six_coin.playerController.client.feature.DimensionWait;
 import org.six_coin.playerController.client.feature.FlightVelocity;
 
 /**
@@ -44,6 +45,12 @@ final class MoveDriver {
     }
 
     Status tick(double coord) {
+        // 刚被传送过（换维度）就先原地悬停：服务端那边的落点 / 区块还没同步好，这时候走容易被拉回去
+        if (DimensionWait.waiting()) {
+            FlightVelocity.apply(Vec3d.ZERO);
+            return Status.MOVING;
+        }
+
         double remaining = target - coord;
 
         if (Math.abs(remaining) <= ARRIVE_EPSILON) {

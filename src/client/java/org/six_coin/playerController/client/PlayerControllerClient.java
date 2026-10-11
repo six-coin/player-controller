@@ -10,6 +10,7 @@ import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerCacheRenderer;
 import org.six_coin.playerController.client.container.ContainerCacheTracker;
 import org.six_coin.playerController.client.feature.AntiKick;
+import org.six_coin.playerController.client.feature.DimensionWait;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.station.StationManager;
 import org.six_coin.playerController.client.station.StationRenderer;
@@ -41,6 +42,9 @@ public class PlayerControllerClient implements ClientModInitializer {
         // 放在 tick 末尾（和 Meteor 的 post-tick 一致）：这时候 player.getY() 正好是
         // 客户端这一 tick 报给服务端的高度，往下补的量最准。
         ClientTickEvents.END_CLIENT_TICK.register(client -> AntiKick.tick());
+
+        // 换维度（传送门）之后先等一会儿再动：服务端还没把落点同步好，马上走容易被拉回去
+        ClientTickEvents.END_CLIENT_TICK.register(client -> DimensionWait.tick());
 
         // 记录下界传送门边：只有 /pc move <轴> / /pc move face 的终点是传送门时才会武装，
         // 所以这里要一直跑着（传送是服务端做的，得等维度变化才能确认落点）
