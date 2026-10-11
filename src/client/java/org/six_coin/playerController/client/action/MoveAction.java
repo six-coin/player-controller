@@ -102,8 +102,10 @@ public class MoveAction extends Action {
         FlightVelocity.begin();
         engaged = true;
 
-        ChatUtils.debug("起点 %s=%.3f，目标 %.3f，速度 %.2f 格/tick",
-            axisName(axis), start, target, PlayerControllerConfig.getMoveSpeed());
+        ChatUtils.debug("起点 %s=%.3f，目标 %.3f，速度 %.2f 格/tick%s",
+            axisName(axis), start, target, FlightVelocity.speedFor(axis, blocks),
+            axis == Direction.Axis.Y && blocks < 0 ? "（下降上限 "
+                + PlayerControllerConfig.getMaxDescentSpeed() + "）" : "");
     }
 
     @Override

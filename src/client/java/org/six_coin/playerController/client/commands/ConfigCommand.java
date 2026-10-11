@@ -20,6 +20,7 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * /pc config debug [true|false]
  * /pc config world [num]
  * /pc config actions move_speed [speed]
+ * /pc config actions max_descent_speed [speed]
  * /pc config actions interaction_range [range]
  * /pc config actions anti_kick_delay [tick]
  * /pc config actions anti_kick_off_time [tick]
@@ -100,6 +101,21 @@ public final class ConfigCommand {
                             "移动速度已设为 " + PlayerControllerConfig.getMoveSpeed() + " 格/tick"));
                         return 1;
                     })))
+            .then(ClientCommandManager.literal("max_descent_speed")
+                .executes(context -> {
+                    showMaxDescentSpeed(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("speed",
+                        DoubleArgumentType.doubleArg(PlayerControllerConfig.MIN_MAX_DESCENT_SPEED,
+                            PlayerControllerConfig.MAX_MAX_DESCENT_SPEED))
+                    .executes(context -> {
+                        double speed = DoubleArgumentType.getDouble(context, "speed");
+                        PlayerControllerConfig.setMaxDescentSpeed(speed);
+                        context.getSource().sendFeedback(Text.literal(
+                            "下降速度上限已设为 " + PlayerControllerConfig.getMaxDescentSpeed() + " 格/tick"));
+                        return 1;
+                    })))
             .then(ClientCommandManager.literal("interaction_range")
                 .executes(context -> {
                     showInteractionRange(context.getSource());
@@ -169,6 +185,8 @@ public final class ConfigCommand {
         source.sendFeedback(Text.literal("  world = " + PlayerControllerConfig.getWorld()));
         source.sendFeedback(Text.literal("  actions.move_speed = "
             + PlayerControllerConfig.getMoveSpeed() + " 格/tick"));
+        source.sendFeedback(Text.literal("  actions.max_descent_speed = "
+            + PlayerControllerConfig.getMaxDescentSpeed() + " 格/tick（下降时取 min(move_speed, 这个)）"));
         source.sendFeedback(Text.literal("  actions.interaction_range = "
             + PlayerControllerConfig.getInteractionRange() + " 格"));
         source.sendFeedback(Text.literal("  actions.anti_kick_delay = "
@@ -185,6 +203,7 @@ public final class ConfigCommand {
         FabricClientCommandSource source = context.getSource();
         source.sendFeedback(Text.literal("actions:"));
         showMoveSpeed(source);
+        showMaxDescentSpeed(source);
         showInteractionRange(source);
         showAntiKickDelay(source);
         showAntiKickOffTime(source);
@@ -195,6 +214,12 @@ public final class ConfigCommand {
     private static void showMoveSpeed(FabricClientCommandSource source) {
         source.sendFeedback(Text.literal("  move_speed = "
             + PlayerControllerConfig.getMoveSpeed() + " 格/tick"));
+    }
+
+    private static void showMaxDescentSpeed(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  max_descent_speed = "
+            + PlayerControllerConfig.getMaxDescentSpeed()
+            + " 格/tick（下降时取 min(move_speed, 这个)；下降太快会被原版算伤害）"));
     }
 
     private static void showInteractionRange(FabricClientCommandSource source) {

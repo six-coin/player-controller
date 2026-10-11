@@ -16,6 +16,7 @@ import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.action.MoveAction;
 import org.six_coin.playerController.client.action.PathMoveAction;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
+import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
@@ -87,7 +88,7 @@ public final class MoveCommand {
         ActionManager.get().submit(new MoveAction(direction.getAxis(), blocks * sign));
 
         ChatUtils.info("已提交任务：朝 " + directionName(direction) + " 移动 " + blocks + " 格"
-            + "（速度 " + PlayerControllerConfig.getMoveSpeed() + " 格/tick）");
+            + "（速度 " + FlightVelocity.speedFor(direction.getAxis(), blocks * sign) + " 格/tick）");
         return 1;
     }
 
@@ -120,7 +121,7 @@ public final class MoveCommand {
 
                     ActionManager.get().submit(new MoveAction(axis, blocks));
                     ChatUtils.info("已提交任务：沿 " + name + " 轴移动 " + blocks + " 格"
-                        + "（速度 " + PlayerControllerConfig.getMoveSpeed() + " 格/tick）");
+                        + "（速度 " + FlightVelocity.speedFor(axis, blocks) + " 格/tick）");
                     return 1;
                 }));
     }

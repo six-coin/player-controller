@@ -21,14 +21,15 @@ import java.nio.file.Path;
  *
  * <pre>
  * {
- *   "debug": true,
+ *   "debug": false,
  *   "world": 1,
  *   "actions": {
- *     "move_speed": 3.0,
+ *     "move_speed": 5.0,
+ *     "max_descent_speed": 3.0,
  *     "interaction_range": 4.5,
  *     "anti_kick_delay": 40,
  *     "anti_kick_off_time": 1,
- *     "items_per_tick": 8
+ *     "items_per_tick": 64
  *   }
  * }
  * </pre>
@@ -48,6 +49,13 @@ public final class PlayerControllerConfig {
     public static final double MIN_MOVE_SPEED = 0.01;
     public static final double MAX_MOVE_SPEED = 64.0;
 
+    /** 下降速度的默认值（单位：方块 / tick）。 */
+    public static final double DEFAULT_MAX_DESCENT_SPEED = 3.0;
+
+    /** 下降速度的合法范围（单位：方块 / tick）。 */
+    public static final double MIN_MAX_DESCENT_SPEED = 0.01;
+    public static final double MAX_MAX_DESCENT_SPEED = 64.0;
+
     /** 触及距离的默认值（和原版方块交互距离一样是 4.5 格）。 */
     public static final double DEFAULT_INTERACTION_RANGE = 4.5;
 
@@ -66,7 +74,7 @@ public final class PlayerControllerConfig {
     public static final int MAX_ANTI_KICK_OFF_TIME = 20;
 
     /** 一个 tick 里最多往一个格子里放几个（「一个一个放」的批量上限）。 */
-    public static final int DEFAULT_ITEMS_PER_TICK = 8;
+    public static final int DEFAULT_ITEMS_PER_TICK = 64;
     public static final int MIN_ITEMS_PER_TICK = 1;
     public static final int MAX_ITEMS_PER_TICK = 64;
 
@@ -77,8 +85,8 @@ public final class PlayerControllerConfig {
 
     private static PlayerControllerConfig instance = new PlayerControllerConfig();
 
-    /** 调试开关。早期开发阶段默认打开，所有步骤都会输出到聊天栏。 */
-    private boolean debug = true;
+    /** 调试开关。 */
+    private boolean debug = false;
 
     /** 当前使用的世界配置编号，对应 world_{@code <num>} 目录。 */
     private int world = 1;
@@ -91,9 +99,19 @@ public final class PlayerControllerConfig {
     /** 动作相关的参数。 */
     public static final class Actions {
 
-        /** 移动速度，单位：方块 / tick（20 tick = 1 秒，所以 3 就是约 60 格/秒）。 */
+        /** 移动速度，单位：方块 / tick（20 tick = 1 秒，所以 5 就是约 100 格/秒）。 */
         @SerializedName("move_speed")
-        private double moveSpeed = 3.0;
+        private double moveSpeed = 5.0;
+
+        /**
+         * 下降速度上限，单位：方块 / tick。
+         *
+         * <p>往下走的时候实际速度取 {@code min(move_speed, max_descent_speed)}。
+         * 原版对「下降速度超过理论最大值」是会算伤害的（跟有没有 NoFall 无关），
+         * 所以下降不能跟平移一样快。
+         */
+        @SerializedName("max_descent_speed")
+        private double maxDescentSpeed = DEFAULT_MAX_DESCENT_SPEED;
 
         /**
          * 触及距离，单位：方块。
@@ -139,6 +157,15 @@ public final class PlayerControllerConfig {
 
         public void moveSpeed(double value) {
             moveSpeed = Math.min(MAX_MOVE_SPEED, Math.max(MIN_MOVE_SPEED, value));
+        }
+
+        public double maxDescentSpeed() {
+            return maxDescentSpeed;
+        }
+
+        public void maxDescentSpeed(double value) {
+            maxDescentSpeed = Math.min(MAX_MAX_DESCENT_SPEED,
+                Math.max(MIN_MAX_DESCENT_SPEED, value));
         }
 
         public double interactionRange() {
@@ -208,6 +235,16 @@ public final class PlayerControllerConfig {
 
     public static void setMoveSpeed(double value) {
         instance.actions.moveSpeed(value);
+        instance.save();
+    }
+
+    /** 下降速度上限（方块 / tick）。 */
+    public static double getMaxDescentSpeed() {
+        return instance.actions.maxDescentSpeed();
+    }
+
+    public static void setMaxDescentSpeed(double value) {
+        instance.actions.maxDescentSpeed(value);
         instance.save();
     }
 
@@ -287,6 +324,7 @@ public final class PlayerControllerConfig {
             ChatUtils.debug("已读取配置文件: " + path + " (debug=" + instance.debug
                 + ", world=" + instance.world
                 + ", move_speed=" + instance.actions.moveSpeed()
+                + ", max_descent_speed=" + instance.actions.maxDescentSpeed()
                 + ", interaction_range=" + instance.actions.interactionRange()
                 + ", anti_kick_delay=" + instance.actions.antiKickDelay()
                 + ", anti_kick_off_time=" + instance.actions.antiKickOffTime()

@@ -28,35 +28,59 @@ import java.util.List;
 
 /**
  * {@code /pc recipe ...} 的执行体：打开工作站的工作台 / 切石机，按计划摆好材料，
- * 然后反复 QuickMove 成品（原版 QuickMove 是从最后一格往前填，所以成品会进快捷栏靠后的格子）。
+ * 然后 QuickMove 成品（原版 QuickMove 是从最后一格往前填，所以成品会进快捷栏靠后的格子）。
  *
  * <p>材料只从主背包 27 格（不含快捷栏）里拿；点完看本地状态决定下一步
  * （「一个一个往格子里放 1 个」那种会在一 tick 里连点几下，数量见配置 {@code actions.items_per_tick}）。
  *
  * <p>要合的次数超过一格能叠的上限时，{@link CraftPlan#rounds()} 会是好几轮：
  * 摆一轮 → 合完（原版一次 QuickMove 会把这一轮能合的都合掉）→ 再摆下一轮。
+ *
+ * <p><b>成品格每轮只点一次</b>（见 {@link #craft}），点完之后不去看成品格，
+ * 而是每 tick 看物品栏里成品多了没有（最多 {@link #RESULT_WAIT_TICKS} tick）：
+ * 成品格是服务端算的，点下去到客户端看到结果中间有延迟，而且客户端这一刻的格子数据
+ * 有可能还是旧的（一 tick 连点很多下的时候服务端会把它的状态同步回来）——
+ * 只看成品格会冤枉地报「成品格是空的」（其实已经合好了）。
+ * 等成品格的那一段（{@link #tickReady}）也一样：等不到就回去重新摆一遍材料，而不是直接失败。
  */
 public class CraftAction extends Action {
 
     /** 界面打开之后等几 tick 再动，保证槽位数据同步完了。 */
     private static final int SETTLE_TICKS = 2;
 
-    /** 每次 QuickMove 之后等几 tick，等服务器把新的成品 / 输入格子同步回来。 */
-    private static final int RESULT_WAIT_TICKS = 4;
+    /**
+     * 材料摆好之后，等服务器把成品格算出来最多等几 tick（20 tick = 1 秒）。
+     *
+     * <p>等不到就回去重新摆一遍材料（见 {@link #retryPlace}）。
+     */
+    private static final int READY_WAIT_TICKS = 20;
+
+    /**
+     * 点了一次成品格之后，等物品栏里多出成品最多等几 tick（20 tick = 1 秒）。
+     *
+     * <p>合成是服务端做的，结果要过一会儿才同步回来，所以不能点完就立刻判断。
+     */
+    private static final int RESULT_WAIT_TICKS = 20;
+
+    /** 等不到成品格时最多回头重摆几次。 */
+    private static final int MAX_READY_RETRIES = 3;
 
     private static final int MAX_OPEN_WAIT_TICKS = 60;
 
     private static final int MAX_TOTAL_TICKS = 20 * 600;
 
-    /** 一轮里最多点几次成品格（正常一次就够，材料没被清空时才补点）。 */
-    private static final int MAX_ROUND_CLICKS = 3;
-
     private enum Phase {
+        /** 等界面打开。 */
         OPENING,
+        /** 等槽位同步。 */
         SETTLE,
+        /** 摆这一轮的材料。 */
         PLACE,
-        WAIT_RESULT,
-        CRAFT,
+        /** 等服务器把成品格算出来（切石机还要先选配方）。 */
+        READY,
+        /** 点了一次成品格，等物品栏里真的多出成品。 */
+        WAIT_CRAFTED,
+        /** 全部弄完。 */
         DONE
     }
 
@@ -69,15 +93,26 @@ public class CraftAction extends Action {
     private int settleTicks;
     private int totalTicks;
     private int cellIndex;
-    /** 点了几次成品格（原版一次 shift 点击会把能合成的都合掉，所以通常只有 1 次）。 */
+    /** 点了几次成品格（每轮一次，所以正常情况下就是轮数）。 */
     private int clicks;
-    /** 这一轮点了几次成品格。 */
-    private int roundClicks;
     /** 第几轮（0 开始）。 */
     private int round;
-    /** 已经摆出去合的次数。 */
-    private int placedCrafts;
     private int recipeIndex = -1;
+
+    /** 等成品格的计时 / 重试次数。 */
+    private int readyTicks;
+    private int readyRetries;
+    /** 切石机等配方列表的计时。 */
+    private int recipeWaitTicks;
+
+    /** 点了成品格之后等结果的计时。 */
+    private int waitTicks;
+    /** 点成品格之前物品栏里有多少个成品（用来判断这一轮到底合出来没有）。 */
+    private int craftedBefore;
+
+    /** 上一批点击是往哪一格的、放完那一批之后这格有多少个（用来发现服务端把数量同步回去了）。 */
+    private int lastCellIndex = -1;
+    private int lastCellHave = -1;
 
     public CraftAction(CraftPlan plan, BlockPos stationPos) {
         this.plan = plan;
@@ -130,8 +165,8 @@ public class CraftAction extends Action {
             case OPENING -> tickOpening(mc, player);
             case SETTLE -> tickSettle();
             case PLACE -> tickPlace(mc, player);
-            case WAIT_RESULT -> tickWaitResult();
-            case CRAFT -> tickCraft(mc, player);
+            case READY -> tickReady(mc, player);
+            case WAIT_CRAFTED -> tickWaitCrafted();
             case DONE -> finish();
         }
     }
@@ -187,19 +222,22 @@ public class CraftAction extends Action {
         phase = Phase.PLACE;
     }
 
-    /** 摆这一轮的材料：每 tick 一下点击。 */
+    /** 摆这一轮的材料：每 tick 把能放的一批放进去。 */
     private void tickPlace(MinecraftClient mc, ClientPlayerEntity player) {
         int amount = plan.amountForRound(round);
 
+        if (amount <= 0) {
+            // 理论上不会有（rounds() 是按 crafts 算的），保底避免死循环
+            fail("第 " + (round + 1) + " 轮每格要放 0 个（计划有误）");
+            return;
+        }
+
         if (cellIndex >= plan.cells().size()) {
-            placedCrafts += amount;
-            clicks = 0;
-            roundClicks = 0;
-            recipeIndex = -1;   // 切石机换了输入之后要重新选一次配方
-            settleTicks = 0;
-            phase = Phase.WAIT_RESULT;
+            readyTicks = 0;
+            lastCellIndex = -1;
             ChatUtils.debug("第 " + (round + 1) + "/" + plan.rounds() + " 轮材料摆好了（每格 "
-                + amount + " 个）");
+                + amount + " 个），等服务器算出成品格");
+            phase = Phase.READY;
             return;
         }
 
@@ -227,13 +265,24 @@ public class CraftAction extends Action {
                 clickQuiet(mc, player, slotId, 1, SlotActionType.PICKUP);
             }
             ChatUtils.debug("一次 tick 里往格子 " + cell.gridSlot() + " 放了 " + batch
-                + " 个（这一格还要 " + (need - batch) + " 个）");
+                + " 个（这一格 " + (have + batch) + "/" + amount + "）");
+            lastCellIndex = cellIndex;
+            lastCellHave = have + batch;
             return;
         }
 
         if (need <= 0) {
             cellIndex++;
+            lastCellIndex = -1;
             return;
+        }
+
+        // 这一格上一批放完是 N 个，现在只有 M 个了 → 服务端只接受了那一批里的一部分，
+        // 把它的状态同步回来覆盖了客户端的预测（一 tick 连发一大串点击时会出现）。
+        // 没有丢东西：按实际差值接着补就行。
+        if (cellIndex == lastCellIndex && lastCellHave >= 0 && have < lastCellHave) {
+            ChatUtils.debug("格子 " + cell.gridSlot() + " 的数量被服务端同步回 " + have + " 个（上一批放到 "
+                + lastCellHave + " 个，一部分点击没被接受），按差值接着补 " + need + " 个");
         }
 
         int source = findSource(cell.item(), need);
@@ -245,79 +294,127 @@ public class CraftAction extends Action {
         click(mc, player, source, 0, SlotActionType.PICKUP);
     }
 
-    private void tickWaitResult() {
-        // 摆完之后成品格要等服务器算一遍；切石机还没选配方的话下一步会去选
-        settleTicks++;
-        if (settleTicks < RESULT_WAIT_TICKS) return;
-        phase = Phase.CRAFT;
-    }
-
     /**
-     * QuickMove 成品。
+     * 等服务器把成品格算出来。
      *
-     * <p>注意：原版 shift+点击成品格是「一次把这一轮能合成的都合成掉」（工作台就是这样），
-     * 所以绝大多数情况点一次就够了。这里用「材料还在不在格子里」来判断还需不需要再点。
+     * <p>工作台的成品格是服务端算的，材料摆完那一刻客户端不一定看得到；切石机还要先选配方。
+     * 最多等 {@link #READY_WAIT_TICKS} tick。
+     *
+     * <p>等不到（常见原因：一 tick 连发一大串点击，服务端其实只接受了一部分，材料并没摆全）
+     * 就回去重新摆一遍（{@link #retryPlace}），而不是直接失败。
      */
-    private void tickCraft(MinecraftClient mc, ClientPlayerEntity player) {
-        // 切石机：先把要切的配方选上
+    private void tickReady(MinecraftClient mc, ClientPlayerEntity player) {
         if (plan.station() == CraftPlan.Station.STONECUTTER && recipeIndex < 0) {
             selectStonecutterRecipe(mc, player);
             return;
         }
 
-        // 格子里没材料了 → 这一轮完事
-        if (!hasMaterials()) {
-            endRound();
+        ItemStack result = slotStack(resultSlotId());
+        if (!result.isEmpty()) {
+            if (!result.isOf(plan.target())) {
+                fail("成品格是 " + id(result.getItem()) + "，不是 " + id(plan.target()));
+                return;
+            }
+            craft(mc, player);
             return;
         }
 
-        if (roundClicks >= MAX_ROUND_CLICKS) {
-            ChatUtils.debug("这一轮点了 " + roundClicks + " 次成品，格子里还剩材料，先收工（理论上应该正好取完）");
-            endRound();
+        if (++readyTicks <= READY_WAIT_TICKS) return;
+
+        // 等不到成品格：最常见的原因是「一 tick 连发一大串点击，服务端其实只接受了一部分，材料没摆全」，
+        // 先回去重新摆一遍（重摆会按格子里实际有多少个补齐）。
+        if (readyRetries < MAX_READY_RETRIES) {
+            retryPlace("材料摆好了，但等了 " + READY_WAIT_TICKS + " tick 服务器还没算出成品格");
             return;
         }
 
-        int resultSlot = resultSlotId();
-        ItemStack result = slotStack(resultSlot);
-        if (result.isEmpty()) {
-            fail("成品格是空的（第 " + (round + 1) + "/" + plan.rounds() + " 轮，已点 "
-                + roundClicks + " 次），材料可能没摆对");
-            return;
-        }
-        if (!result.isOf(plan.target())) {
-            fail("成品格是 " + id(result.getItem()) + "，不是 " + id(plan.target()));
-            return;
-        }
+        // 重摆过好几轮还是看不到成品格：直接点一次试试（服务端那边可能其实是好的，
+        // 只是客户端这一刻的格子数据旧了）。合没合成，交给「物品栏里多没多出成品」去判。
+        ChatUtils.debug("一直看不到成品格，但材料确实摆好了 → 直接点一次成品格试试");
+        craft(mc, player);
+    }
 
-        click(mc, player, resultSlot, 0, SlotActionType.QUICK_MOVE);
+    /**
+     * 点一次成品格。
+     *
+     * <p><b>每轮只需要点一次</b>：原版 shift 点击成品格是「把这一轮能合的都合掉」
+     * （189 个橡木栅栏就是点一次出来的）。
+     */
+    private void craft(MinecraftClient mc, ClientPlayerEntity player) {
+        craftedBefore = countCrafted();
+        click(mc, player, resultSlotId(), 0, SlotActionType.QUICK_MOVE);
         clicks++;
-        roundClicks++;
-        settleTicks = 0;
-        phase = Phase.WAIT_RESULT;
+        waitTicks = 0;
+        phase = Phase.WAIT_CRAFTED;
+        ChatUtils.debug("第 " + (round + 1) + "/" + plan.rounds() + " 轮：点了一次成品格，"
+            + "等物品栏里多出成品（最多 " + RESULT_WAIT_TICKS + " tick）");
+    }
+
+    /**
+     * 点完成品格之后，每 tick 看物品栏里成品多了没有。
+     *
+     * <p>刻意不看成品格：合成是服务端做的，而且客户端这一刻的格子数据可能还是旧的
+     * （服务端会把它的状态同步回来），看成品格会冤枉地报「成品格是空的」。
+     * 成品 QuickMove 进的是快捷栏（快捷栏满了会往主背包塞），所以两处一起数。
+     */
+    private void tickWaitCrafted() {
+        int now = countCrafted();
+        if (now > craftedBefore) {
+            ChatUtils.debug("第 " + (round + 1) + "/" + plan.rounds() + " 轮合成完成：物品栏里多了 "
+                + (now - craftedBefore) + " 个 " + id(plan.target()));
+            endRound();
+            return;
+        }
+
+        if (++waitTicks > RESULT_WAIT_TICKS) {
+            fail("点完成品格之后物品栏里没多出成品（第 " + (round + 1) + "/" + plan.rounds()
+                + " 轮，等了 " + RESULT_WAIT_TICKS + " tick）；材料可能没摆对，或者物品栏满了");
+        }
     }
 
     /** 这一轮结束：还有轮次就接着摆，没有就收工。 */
     private void endRound() {
         round++;
         cellIndex = 0;
+        lastCellIndex = -1;
+        recipeIndex = -1;   // 切石机换了输入之后要重新选一次配方
+        readyTicks = 0;
+        readyRetries = 0;
+        recipeWaitTicks = 0;
+
         if (round >= plan.rounds()) {
             phase = Phase.DONE;
             return;
         }
-        settleTicks = 0;
-        phase = Phase.PLACE;
         ChatUtils.debug("接着摆第 " + (round + 1) + "/" + plan.rounds() + " 轮材料");
+        phase = Phase.PLACE;
     }
 
-    /** 格子里还有没有材料：工作台看 9 个输入格，切石机看那唯一一格。 */
-    private boolean hasMaterials() {
-        if (plan.station() == CraftPlan.Station.STONECUTTER) {
-            return !slotStack(StonecutterScreenHandler.INPUT_ID).isEmpty();
+    /** 回去重新摆这一轮的材料；重试次数用完就失败。 */
+    private void retryPlace(String why) {
+        if (++readyRetries > MAX_READY_RETRIES) {
+            fail(why + "（重摆了 " + MAX_READY_RETRIES + " 次还是一样，材料可能没摆对）");
+            return;
         }
-        for (Slot slot : ((CraftingScreenHandler) handler).getInputSlots()) {
-            if (!slot.getStack().isEmpty()) return true;
+        ChatUtils.debug(why + "，回去重新摆一遍材料（第 " + readyRetries + "/"
+            + MAX_READY_RETRIES + " 次）");
+        cellIndex = 0;
+        lastCellIndex = -1;
+        readyTicks = 0;
+        recipeIndex = -1;
+        recipeWaitTicks = 0;
+        phase = Phase.PLACE;
+    }
+
+    /** 物品栏（快捷栏 + 主背包）里现在有多少个成品。 */
+    private int countCrafted() {
+        int total = 0;
+        for (Slot slot : handler.slots) {
+            if (!(slot.inventory instanceof PlayerInventory)) continue;
+            ItemStack stack = slot.getStack();
+            if (!stack.isEmpty() && stack.isOf(plan.target())) total += stack.getCount();
         }
-        return false;
+        return total;
     }
 
     // ------------------------------------------------------------------
@@ -333,7 +430,10 @@ public class CraftAction extends Action {
         CuttingRecipeDisplay.Grouping<StonecuttingRecipe> grouping =
             ((StonecutterScreenHandler) handler).getAvailableRecipes();
         if (grouping == null || grouping.isEmpty()) {
-            if (++settleTicks > 40) fail("切石机没列出可选配方（输入格里的东西对吗？）");
+            if (++recipeWaitTicks > READY_WAIT_TICKS * 2) {
+                recipeWaitTicks = 0;
+                retryPlace("切石机一直没列出可选配方（输入格的石头可能没摆进去）");
+            }
             return;
         }
 
@@ -346,9 +446,8 @@ public class CraftAction extends Action {
                     mc.interactionManager.clickButton(handler.syncId, index);
                     ChatUtils.debug("切石机：选中第 " + index + " 个配方（共 "
                         + grouping.size() + " 个选项），等成品格");
-                    settleTicks = 0;
-                    phase = Phase.WAIT_RESULT;   // 等服务器把成品格算出来
-                    return;
+                    recipeWaitTicks = 0;
+                    return;   // 还留在 READY，接着等成品格
                 }
             }
             index++;

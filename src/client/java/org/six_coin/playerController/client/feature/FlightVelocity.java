@@ -2,7 +2,9 @@ package org.six_coin.playerController.client.feature;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import org.six_coin.playerController.client.config.PlayerControllerConfig;
 
 /**
  * 参考 Meteor 的 Flight（velocity 模式）实现的移动方式。
@@ -73,6 +75,21 @@ public final class FlightVelocity {
         // 与 Meteor 的 velocity 模式保持一致
         player.getAbilities().flying = false;
         player.setVelocity(velocity);
+    }
+
+    /**
+     * 这一次移动实际该用的速度。
+     *
+     * <p>往下走的时候不能超过配置里的 {@code actions.max_descent_speed}：
+     * 原版对「下降速度超过理论最大值」是会算伤害的（跟有没有 NoFall 无关），
+     * 所以下降取 {@code min(move_speed, max_descent_speed)}，平移 / 上升还是 move_speed。
+     */
+    public static double speedFor(Direction.Axis axis, double step) {
+        double speed = PlayerControllerConfig.getMoveSpeed();
+        if (axis == Direction.Axis.Y && step < 0) {
+            speed = Math.min(speed, PlayerControllerConfig.getMaxDescentSpeed());
+        }
+        return speed;
     }
 
     public static Vec3d velocityFor(net.minecraft.util.math.Direction.Axis axis, double step) {

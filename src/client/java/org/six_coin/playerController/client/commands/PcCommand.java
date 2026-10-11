@@ -49,7 +49,7 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7    §7  name_waypoint here|target|id <id> [name]（不写名字就是删掉名字）"));
                 source.sendFeedback(Text.literal("§7    §7  del_waypoint here|target|id <id>|position <x> <y> <z> <dim>|name <name>"));
                 source.sendFeedback(Text.literal("§7    §7  add_edge <id1> <id2>、del_edge <负数id>、set_spawn <选择器>、del_spawn"));
-                source.sendFeedback(Text.literal("§7  /" + name + " config ... §8- §7配置（debug / world / actions move_speed、interaction_range）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " config ... §8- §7配置（debug / world / actions move_speed、max_descent_speed、interaction_range、anti_kick_delay、anti_kick_off_time、items_per_tick）"));
                 source.sendFeedback(Text.literal("§7  item_list 例：§f{\"minecraft:cobblestone\": 65, \"minecraft:grass_block\": 13}"));
                 return 1;
             })
