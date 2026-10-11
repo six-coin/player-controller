@@ -1,6 +1,7 @@
 package org.six_coin.playerController.client.action;
 
 import net.minecraft.client.MinecraftClient;
+import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.util.ChatUtils;
 
 import java.util.ArrayDeque;
@@ -84,12 +85,16 @@ public final class ActionManager {
                 finishCurrent();
             }
             queue.clear();
+            releaseScreenSuppressor();
             return;
         }
 
         if (current == null) {
             current = queue.pollFirst();
-            if (current == null) return;
+            if (current == null) {
+                releaseScreenSuppressor();
+                return;
+            }
             current.start();
             if (current.isFinished()) {
                 finishCurrent();
@@ -100,6 +105,19 @@ public final class ActionManager {
         current.update();
         if (current.isFinished()) {
             finishCurrent();
+        }
+    }
+
+    /**
+     * 兜底：一个任务都没在跑的时候，不该还压着「不显示容器界面」的计数。
+     *
+     * <p>正常流程每个动作的 {@code onEnd()} 都会 release，但动作要是异常退出（外围 catch 住的那种），
+     * 计数就会一直挂着 —— 那之后容器界面全被挡掉，箱子永远打不开。空闲时清一次，
+     * 最坏情况也只是「这一 tick 界面本来就不该显示」。
+     */
+    private void releaseScreenSuppressor() {
+        if (ScreenSuppressor.reset()) {
+            ChatUtils.debug("没有任务在跑了，兜底解除容器界面抑制");
         }
     }
 

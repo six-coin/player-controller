@@ -16,6 +16,7 @@ import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.context.ContextParameterMap;
 import net.minecraft.util.math.BlockPos;
+import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheTracker;
 import org.six_coin.playerController.client.container.ContainerOpener;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
@@ -29,7 +30,8 @@ import java.util.List;
  * {@code /pc recipe ...} 的执行体：打开工作站的工作台 / 切石机，按计划摆好材料，
  * 然后反复 QuickMove 成品（原版 QuickMove 是从最后一格往前填，所以成品会进快捷栏靠后的格子）。
  *
- * <p>材料只从主背包 27 格（不含快捷栏）里拿；每 tick 只点一下，点完看本地状态决定下一步。
+ * <p>材料只从主背包 27 格（不含快捷栏）里拿；点完看本地状态决定下一步
+ * （「一个一个往格子里放 1 个」那种会在一 tick 里连点几下，数量见配置 {@code actions.items_per_tick}）。
  *
  * <p>要合的次数超过一格能叠的上限时，{@link CraftPlan#rounds()} 会是好几轮：
  * 摆一轮 → 合完（原版一次 QuickMove 会把这一轮能合的都合掉）→ 再摆下一轮。
@@ -48,14 +50,6 @@ public class CraftAction extends Action {
 
     /** 一轮里最多点几次成品格（正常一次就够，材料没被清空时才补点）。 */
     private static final int MAX_ROUND_CLICKS = 3;
-
-    /**
-     * 「一格要放 N 个」但手上那叠比 N 多时，一个 tick 里最多右键连点几下（一次放 1 个）。
-     *
-     * <p>客户端点击是本地预测、同步生效的，所以不用点一下等一个 tick。
-     * 连点完下一 tick 会按格子里实际有多少个接着算，不会多放。
-     */
-    private static final int PLACE_CLICKS_PER_TICK = 8;
 
     private enum Phase {
         OPENING,
@@ -225,8 +219,10 @@ public class CraftAction extends Action {
                 click(mc, player, slotId, 0, SlotActionType.PICKUP);   // 整叠放进去
                 return;
             }
-            // 手上比要的多：右键一次放 1 个，一个 tick 里连点几下（不然 41 个要 41 tick）
-            int batch = Math.min(Math.min(need, PLACE_CLICKS_PER_TICK), cursor.getCount());
+            // 手上比要的多：右键一次放 1 个，一个 tick 里连点几下（不然 41 个要 41 tick）。
+            // 连点几下由配置 actions.items_per_tick 决定（客户端点击是本地预测、同步生效的；
+            // 连点完下一 tick 会按格子里实际有多少个接着算，不会多放）。
+            int batch = Math.min(Math.min(need, PlayerControllerConfig.getItemsPerTick()), cursor.getCount());
             for (int i = 0; i < batch; i++) {
                 clickQuiet(mc, player, slotId, 1, SlotActionType.PICKUP);
             }

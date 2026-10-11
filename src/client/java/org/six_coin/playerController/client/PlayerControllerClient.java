@@ -2,6 +2,7 @@ package org.six_coin.playerController.client;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.commands.PcCommand;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
@@ -9,6 +10,7 @@ import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerCacheRenderer;
 import org.six_coin.playerController.client.container.ContainerCacheTracker;
 import org.six_coin.playerController.client.feature.AntiKick;
+import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.station.StationManager;
 import org.six_coin.playerController.client.station.StationRenderer;
 import org.six_coin.playerController.client.stock.StockManager;
@@ -46,6 +48,14 @@ public class PlayerControllerClient implements ClientModInitializer {
 
         // 容器缓存：监听玩家每次开关容器，打开的容器在缓存里就把内容刷新一遍
         ClientTickEvents.END_CLIENT_TICK.register(ContainerCacheTracker::tick);
+
+        // 每次进世界都把「不显示容器界面」的计数清零：上次要是非正常退出（崩了 / 被强杀），
+        // 计数会一直挂着，那之后所有容器界面都被挡住，箱子永远打不开。
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            if (ScreenSuppressor.reset()) {
+                ChatUtils.debug("进世界：已解除容器界面抑制（上次没正常收尾留下的计数）");
+            }
+        });
 
         ChatUtils.debug("Player Controller 已加载，使用 /pc 查看命令；当前 debug="
             + PlayerControllerConfig.isDebug());

@@ -21,6 +21,9 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * /pc config world [num]
  * /pc config actions move_speed [speed]
  * /pc config actions interaction_range [range]
+ * /pc config actions anti_kick_delay [tick]
+ * /pc config actions anti_kick_off_time [tick]
+ * /pc config actions items_per_tick [1~64]
  * </pre>
  */
 public final class ConfigCommand {
@@ -111,6 +114,51 @@ public final class ConfigCommand {
                         context.getSource().sendFeedback(Text.literal(
                             "触及距离已设为 " + PlayerControllerConfig.getInteractionRange() + " 格"));
                         return 1;
+                    })))
+            .then(ClientCommandManager.literal("anti_kick_delay")
+                .executes(context -> {
+                    showAntiKickDelay(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("ticks",
+                        IntegerArgumentType.integer(PlayerControllerConfig.MIN_ANTI_KICK_DELAY,
+                            PlayerControllerConfig.MAX_ANTI_KICK_DELAY))
+                    .executes(context -> {
+                        int ticks = IntegerArgumentType.getInteger(context, "ticks");
+                        PlayerControllerConfig.setAntiKickDelay(ticks);
+                        context.getSource().sendFeedback(Text.literal(
+                            "防踢间隔已设为 " + PlayerControllerConfig.getAntiKickDelay() + " tick"));
+                        return 1;
+                    })))
+            .then(ClientCommandManager.literal("anti_kick_off_time")
+                .executes(context -> {
+                    showAntiKickOffTime(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("ticks",
+                        IntegerArgumentType.integer(PlayerControllerConfig.MIN_ANTI_KICK_OFF_TIME,
+                            PlayerControllerConfig.MAX_ANTI_KICK_OFF_TIME))
+                    .executes(context -> {
+                        int ticks = IntegerArgumentType.getInteger(context, "ticks");
+                        PlayerControllerConfig.setAntiKickOffTime(ticks);
+                        context.getSource().sendFeedback(Text.literal(
+                            "防踢补包时间已设为 " + PlayerControllerConfig.getAntiKickOffTime() + " tick"));
+                        return 1;
+                    })))
+            .then(ClientCommandManager.literal("items_per_tick")
+                .executes(context -> {
+                    showItemsPerTick(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("count",
+                        IntegerArgumentType.integer(PlayerControllerConfig.MIN_ITEMS_PER_TICK,
+                            PlayerControllerConfig.MAX_ITEMS_PER_TICK))
+                    .executes(context -> {
+                        int count = IntegerArgumentType.getInteger(context, "count");
+                        PlayerControllerConfig.setItemsPerTick(count);
+                        context.getSource().sendFeedback(Text.literal(
+                            "一个 tick 里最多往一个格子放 " + PlayerControllerConfig.getItemsPerTick() + " 个"));
+                        return 1;
                     })));
     }
 
@@ -123,6 +171,12 @@ public final class ConfigCommand {
             + PlayerControllerConfig.getMoveSpeed() + " 格/tick"));
         source.sendFeedback(Text.literal("  actions.interaction_range = "
             + PlayerControllerConfig.getInteractionRange() + " 格"));
+        source.sendFeedback(Text.literal("  actions.anti_kick_delay = "
+            + PlayerControllerConfig.getAntiKickDelay() + " tick"));
+        source.sendFeedback(Text.literal("  actions.anti_kick_off_time = "
+            + PlayerControllerConfig.getAntiKickOffTime() + " tick"));
+        source.sendFeedback(Text.literal("  actions.items_per_tick = "
+            + PlayerControllerConfig.getItemsPerTick()));
         source.sendFeedback(Text.literal("  文件: " + PlayerControllerConfig.configFile()));
         return 1;
     }
@@ -132,6 +186,9 @@ public final class ConfigCommand {
         source.sendFeedback(Text.literal("actions:"));
         showMoveSpeed(source);
         showInteractionRange(source);
+        showAntiKickDelay(source);
+        showAntiKickOffTime(source);
+        showItemsPerTick(source);
         return 1;
     }
 
@@ -143,6 +200,24 @@ public final class ConfigCommand {
     private static void showInteractionRange(FabricClientCommandSource source) {
         source.sendFeedback(Text.literal("  interaction_range = "
             + PlayerControllerConfig.getInteractionRange() + " 格"));
+    }
+
+    private static void showAntiKickDelay(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  anti_kick_delay = "
+            + PlayerControllerConfig.getAntiKickDelay() + " tick（防踢：多久补一次「往下掉」）"));
+    }
+
+    private static void showAntiKickOffTime(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  anti_kick_off_time = "
+            + PlayerControllerConfig.getAntiKickOffTime() + " tick（防踢：补包持续几 tick）"));
+    }
+
+    private static void showItemsPerTick(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  items_per_tick = "
+            + PlayerControllerConfig.getItemsPerTick()
+            + "（一个 tick 里最多往一个格子放几个，" 
+            + PlayerControllerConfig.MIN_ITEMS_PER_TICK + "~"
+            + PlayerControllerConfig.MAX_ITEMS_PER_TICK + "）"));
     }
 
     private static int setDebug(CommandContext<FabricClientCommandSource> context, boolean value) {

@@ -3,10 +3,10 @@ package org.six_coin.playerController.client.feature;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import org.six_coin.playerController.client.util.ChatUtils;
+import org.six_coin.playerController.client.config.PlayerControllerConfig;
 
 /**
- * 防踢：跟 meteor-client 的 Flight（anti-kick，mode = packet，delay = 20 tick，off-time = 1 tick）行为一致。
+ * 防踢：跟 meteor-client 的 Flight（anti-kick，mode = packet，off-time 默认 1 tick）行为一致。
  *
  * <p><b>为什么会被踢</b>：本模组的飞行是「客户端自己在空中悬停」，服务端并不允许飞。
  * 原版 {@code ServerPlayNetworkHandler} 会对每个移动包检查「有没有往下掉」：
@@ -14,9 +14,10 @@ import org.six_coin.playerController.client.util.ChatUtils;
  * {@code floatingTicks} 加一，累计超过 80 tick（4 秒）就断开连接（Flying is not enabled）。
  * 悬停飞行一直不往下掉，所以时间一到必被踢；本地存档（集成服务器）不做这个检查，所以只有原版服务器会踢。
  *
- * <p><b>怎么防</b>：Meteor 的 packet 模式是【每 {@link #DELAY_TICKS} tick，在 {@link #OFF_TICKS} tick 的窗口里
- * 往服务端发一个「比上一次低一点点（{@link #DIP} 格）」的位置包】，让服务端那一 tick 认为玩家在往下掉，
- * 于是把 {@code floatingTicks} 清零，永远攒不到 80。
+ * <p><b>怎么防</b>：Meteor 的 packet 模式是【每 {@code anti_kick_delay} tick（默认 40），在
+ * {@code anti_kick_off_time} tick（默认 1）的窗口里往服务端发一个「比上一次低一点点（{@link #DIP} 格）」
+ * 的位置包】，让服务端那一 tick 认为玩家在往下掉，于是把 {@code floatingTicks} 清零，永远攒不到 80。
+ * 两个参数都在 {@code /pc config actions} 里改。
  *
  * <p>和 Meteor 的差别只有一处：Meteor 是把客户端本来就要发的移动包改低（还会把
  * {@code ticksSinceLastPositionPacketSent} 设成 20 强制客户端发包），我们这里直接自己发一个位置包，
@@ -29,15 +30,9 @@ import org.six_coin.playerController.client.util.ChatUtils;
  * </ul>
  *
  * <p>只在飞行持有期间生效（见 {@link FlightVelocity}），所以「所有移动过程」都覆盖到了，
- * 不移动的时候不会往服务端多发任何包。
+ * 不移动的时候不会往服务端多发任何包。这里**不打任何日志**（以前每补一次刷一行，太吵）。
  */
 public final class AntiKick {
-
-    /** 两次「往下补一点」之间隔多少 tick（Meteor 的 delay，默认 20）。 */
-    private static final int DELAY_TICKS = 20;
-
-    /** 「往下补」持续多少 tick（Meteor 的 off-time，默认 1）。 */
-    private static final int OFF_TICKS = 1;
 
     /**
      * 往下补多少格。
@@ -47,16 +42,13 @@ public final class AntiKick {
     private static final double DIP = 0.03130D;
 
     /** 距离下一次「往下补」还剩多少 tick。 */
-    private static int delayLeft = DELAY_TICKS;
+    private static int delayLeft = PlayerControllerConfig.DEFAULT_ANTI_KICK_DELAY;
 
     /** 这次「往下补」窗口还剩多少 tick。 */
     private static int offLeft;
 
     /** 上一个移动包的高度（Meteor 的 lastPacketY），没发过就是 MAX。 */
     private static double lastPacketY = Double.MAX_VALUE;
-
-    /** 补过多少次（只用来打日志）。 */
-    private static int dips;
 
     private AntiKick() {
     }
@@ -76,6 +68,8 @@ public final class AntiKick {
             return;
         }
 
+        int delay = PlayerControllerConfig.getAntiKickDelay();
+
         if (delayLeft > 0) {
             delayLeft--;
             if (delayLeft > 0) {
@@ -83,7 +77,7 @@ public final class AntiKick {
                 lastPacketY = player.getY();
                 return;
             }
-            offLeft = OFF_TICKS;
+            offLeft = PlayerControllerConfig.getAntiKickOffTime();
         }
 
         if (offLeft > 0) {
@@ -92,7 +86,7 @@ public final class AntiKick {
             return;
         }
 
-        delayLeft = DELAY_TICKS;
+        delayLeft = delay;
     }
 
     private static void dip(ClientPlayerEntity player) {
@@ -119,10 +113,6 @@ public final class AntiKick {
         double y = lastPacketY - DIP;
         player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
             player.getX(), y, player.getZ(), player.isOnGround(), player.horizontalCollision));
-
-        dips++;
-        ChatUtils.debug("防踢：把服务端看到的高度往下补了 %.5f 格（%s → %s，第 %d 次）",
-            DIP, String.format("%.3f", lastPacketY), String.format("%.3f", y), dips);
     }
 
     /**
@@ -135,7 +125,7 @@ public final class AntiKick {
     }
 
     private static void reset() {
-        delayLeft = DELAY_TICKS;
+        delayLeft = PlayerControllerConfig.getAntiKickDelay();
         offLeft = 0;
         lastPacketY = Double.MAX_VALUE;
     }

@@ -13,6 +13,7 @@ import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerCacheUpdater;
 import org.six_coin.playerController.client.container.ContainerOpener;
@@ -75,15 +76,6 @@ public class ContainerGetAction extends Action {
 
     /** 一次点击最多等这么多 tick 生效。 */
     private static final int MAX_STEP_WAIT_TICKS = 60;
-
-    /**
-     * 「一个一个放」（右键往目标格放 1 个）时，一个 tick 里最多连点几下。
-     *
-     * <p>客户端点击是**本地预测、同步生效**的（{@code clickSlot} 内部就会改本地状态），
-     * 所以没必要点一下等一个 tick —— 一个 tick 连点几下能快好几倍。
-     * 每一批点完下一 tick 会按「光标少了多少」核对一次，服务端少接受几下也能自己纠正。
-     */
-    private static final int PLACE_CLICKS_PER_TICK = 8;
 
     /** 等容器界面打开最久。 */
     private static final int MAX_OPEN_WAIT_TICKS = 60;
@@ -617,11 +609,15 @@ public class ContainerGetAction extends Action {
             return;
         }
 
-        // 一个 tick 里连点几下（右键一次放 1 个），别一个一个等 tick
+        // 一个 tick 里连点几下（右键一次放 1 个），别一个一个等 tick。
+        // 点几下由配置 actions.items_per_tick 决定（客户端点击是本地预测、同步生效的，
+        // 一 tick 连点几下能快好几倍；每一批点完下一 tick 会按「光标少了多少」核对一次，
+        // 服务端少接受几下也能自己纠正）。
         int room = target.getStack().isEmpty() ? 0
             : Math.min(target.getMaxItemCount(sourceStack), sourceStack.getMaxCount())
                 - target.getStack().getCount();
-        int batch = Math.min(take - placed, Math.min(PLACE_CLICKS_PER_TICK, cursor.getCount()));
+        int perTick = PlayerControllerConfig.getItemsPerTick();
+        int batch = Math.min(take - placed, Math.min(perTick, cursor.getCount()));
         if (!target.getStack().isEmpty()) {
             batch = Math.min(batch, Math.max(0, room));
         }

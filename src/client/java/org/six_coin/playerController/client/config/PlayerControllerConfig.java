@@ -25,13 +25,18 @@ import java.nio.file.Path;
  *   "world": 1,
  *   "actions": {
  *     "move_speed": 3.0,
- *     "interaction_range": 4.5
+ *     "interaction_range": 4.5,
+ *     "anti_kick_delay": 40,
+ *     "anti_kick_off_time": 1,
+ *     "items_per_tick": 8
  *   }
  * }
  * </pre>
  *
  * <p>{@code world} 是全局的世界配置编号，和游戏内的存档 / 服务器无关，
  * 路径点数据放在 {@code config/player-controller/world_<num>/waypoints.json}。
+ *
+ * <p>老版本（没有后三个键）的配置文件读进来时那三个键会取默认值，然后立刻回写一份补全的。
  */
 public final class PlayerControllerConfig {
 
@@ -49,6 +54,21 @@ public final class PlayerControllerConfig {
     /** 触及距离的合法范围（单位：方块）。 */
     public static final double MIN_INTERACTION_RANGE = 0.5;
     public static final double MAX_INTERACTION_RANGE = 64.0;
+
+    /** 防踢：两次「往下补一点」之间的间隔（tick）。 */
+    public static final int DEFAULT_ANTI_KICK_DELAY = 40;
+    public static final int MIN_ANTI_KICK_DELAY = 1;
+    public static final int MAX_ANTI_KICK_DELAY = 200;
+
+    /** 防踢：「往下补」持续多少 tick。 */
+    public static final int DEFAULT_ANTI_KICK_OFF_TIME = 1;
+    public static final int MIN_ANTI_KICK_OFF_TIME = 1;
+    public static final int MAX_ANTI_KICK_OFF_TIME = 20;
+
+    /** 一个 tick 里最多往一个格子里放几个（「一个一个放」的批量上限）。 */
+    public static final int DEFAULT_ITEMS_PER_TICK = 8;
+    public static final int MIN_ITEMS_PER_TICK = 1;
+    public static final int MAX_ITEMS_PER_TICK = 64;
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -87,6 +107,32 @@ public final class PlayerControllerConfig {
         @SerializedName("interaction_range")
         private double interactionRange = DEFAULT_INTERACTION_RANGE;
 
+        /**
+         * 防踢：两次「往下补一点」之间隔多少 tick。
+         *
+         * <p>见 {@code feature/AntiKick}：飞行（悬停）期间每隔这么多 tick 往服务端补一个
+         * 「比上一包低 0.0313 格」的位置包，免得服务端按「浮空超过 80 tick」把人踢了。
+         */
+        @SerializedName("anti_kick_delay")
+        private int antiKickDelay = DEFAULT_ANTI_KICK_DELAY;
+
+        /** 防踢：「往下补」持续多少 tick（1 就是补一 tick）。 */
+        @SerializedName("anti_kick_off_time")
+        private int antiKickOffTime = DEFAULT_ANTI_KICK_OFF_TIME;
+
+        /**
+         * 一个 tick 里最多往一个格子里放几个。
+         *
+         * <p>「一个一个放」的那些步骤（往合成格子里摆材料、右键往背包格放物品）一 tick 可以连点好几下，
+         * 因为客户端点击是**本地预测、同步生效**的，没必要点一下等一个 tick。
+         * 服务端要是少接受了几下，下一 tick 会按「光标少了多少」自己纠正。
+         *
+         * <p>合法范围 {@value #MIN_ITEMS_PER_TICK}~{@value #MAX_ITEMS_PER_TICK}，默认
+         * {@value #DEFAULT_ITEMS_PER_TICK}。
+         */
+        @SerializedName("items_per_tick")
+        private int itemsPerTick = DEFAULT_ITEMS_PER_TICK;
+
         public double moveSpeed() {
             return moveSpeed;
         }
@@ -102,6 +148,31 @@ public final class PlayerControllerConfig {
         public void interactionRange(double value) {
             interactionRange = Math.min(MAX_INTERACTION_RANGE,
                 Math.max(MIN_INTERACTION_RANGE, value));
+        }
+
+        public int antiKickDelay() {
+            return antiKickDelay;
+        }
+
+        public void antiKickDelay(int value) {
+            antiKickDelay = Math.min(MAX_ANTI_KICK_DELAY, Math.max(MIN_ANTI_KICK_DELAY, value));
+        }
+
+        public int antiKickOffTime() {
+            return antiKickOffTime;
+        }
+
+        public void antiKickOffTime(int value) {
+            antiKickOffTime = Math.min(MAX_ANTI_KICK_OFF_TIME,
+                Math.max(MIN_ANTI_KICK_OFF_TIME, value));
+        }
+
+        public int itemsPerTick() {
+            return itemsPerTick;
+        }
+
+        public void itemsPerTick(int value) {
+            itemsPerTick = Math.min(MAX_ITEMS_PER_TICK, Math.max(MIN_ITEMS_PER_TICK, value));
         }
     }
 
@@ -149,6 +220,36 @@ public final class PlayerControllerConfig {
         instance.save();
     }
 
+    /** 防踢：两次「往下补一点」之间隔多少 tick。 */
+    public static int getAntiKickDelay() {
+        return instance.actions.antiKickDelay();
+    }
+
+    public static void setAntiKickDelay(int value) {
+        instance.actions.antiKickDelay(value);
+        instance.save();
+    }
+
+    /** 防踢：「往下补」持续多少 tick。 */
+    public static int getAntiKickOffTime() {
+        return instance.actions.antiKickOffTime();
+    }
+
+    public static void setAntiKickOffTime(int value) {
+        instance.actions.antiKickOffTime(value);
+        instance.save();
+    }
+
+    /** 一个 tick 里最多往一个格子里放几个。 */
+    public static int getItemsPerTick() {
+        return instance.actions.itemsPerTick();
+    }
+
+    public static void setItemsPerTick(int value) {
+        instance.actions.itemsPerTick(value);
+        instance.save();
+    }
+
     /** 配置目录：config/player-controller/ */
     public static Path configDir() {
         return FabricLoader.getInstance()
@@ -164,7 +265,7 @@ public final class PlayerControllerConfig {
     // 读 / 写
     // ------------------------------------------------------------------
 
-    /** 启动时调用：文件不存在就创建一份默认配置，存在就读取。 */
+    /** 启动时调用：文件不存在就创建一份默认配置，存在就读取（读完回写一份，补上新增的键）。 */
     public static void load() {
         Path path = configFile();
         if (!Files.exists(path)) {
@@ -186,11 +287,17 @@ public final class PlayerControllerConfig {
             ChatUtils.debug("已读取配置文件: " + path + " (debug=" + instance.debug
                 + ", world=" + instance.world
                 + ", move_speed=" + instance.actions.moveSpeed()
-                + ", interaction_range=" + instance.actions.interactionRange() + ")");
+                + ", interaction_range=" + instance.actions.interactionRange()
+                + ", anti_kick_delay=" + instance.actions.antiKickDelay()
+                + ", anti_kick_off_time=" + instance.actions.antiKickOffTime()
+                + ", items_per_tick=" + instance.actions.itemsPerTick() + ")");
         } catch (Exception e) {
             instance = new PlayerControllerConfig();
             ChatUtils.error("读取配置文件失败，已使用默认值: " + e.getMessage());
         }
+
+        // 回写一份：老配置文件里没有的键（比如后加的防踢参数）就能在文件里看到默认值了
+        instance.save();
     }
 
     /** 写回配置文件（目录不存在会自动创建）。 */
