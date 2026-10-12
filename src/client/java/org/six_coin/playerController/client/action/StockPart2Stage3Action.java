@@ -126,6 +126,15 @@ public class StockPart2Stage3Action extends Action {
     private int craftedSegments;
     private int craftedCount;
 
+    /**
+     * 当前这一步做出来的东西，后面的步骤一共还要用多少个（sub_materials 求和）。
+     *
+     * <p>大于 0 就走「留着不存」的特判，见 {@link #pushPutResult}。
+     */
+    private int currentLaterNeed;
+    /** 这一步为了「后面马上要用」已经留在物品栏里的数量（分段合成时累计）。 */
+    private int keptForLater;
+
     // ------------------------------------------------------------------
     // 小的「步骤队列」（跟第一部分阶段3 一个套路）
     // ------------------------------------------------------------------
@@ -414,16 +423,33 @@ public class StockPart2Stage3Action extends Action {
                 return;
             }
             StepData step = steps.get(stepIndex++);
+            currentLaterNeed = laterNeedOf(step, stepIndex);
+            keptForLater = 0;
             ChatUtils.info("第 " + stepIndex + "/" + steps.size() + " 步：" + step.itemId()
                 + " x" + step.count() + (step.isFinal() ? "（最终产物）" : "")
-                + "，材料 " + step.materials());
+                + "，材料 " + step.materials()
+                + (currentLaterNeed > 0 ? "；后面的步骤还要用 " + currentLaterNeed + " 个 " + step.itemId() : ""));
             pushMaterialLoop(step, new ArrayList<>(step.materials().entrySet()), 0);
         });
     }
 
+    /**
+     * 从第 {@code fromIndex} 步开始，后面的步骤一共要用多少个 {@code step.itemId()}。
+     *
+     * <p>就是把这些步骤的 {@code sub_materials} 里这种物品的数量加起来 —— 大于 0 说明
+     * 这一步的产物是「下一步马上要用」的材料，可以留着不存（见 {@link #pushPutResult}）。
+     */
+    private int laterNeedOf(StepData step, int fromIndex) {
+        int total = 0;
+        for (int i = fromIndex; i < steps.size(); i++) {
+            Integer need = steps.get(i).materials().get(step.itemId());
+            if (need != null && need > 0) total += need;
+        }
+        return total;
+    }
+
     /** 逐个材料把「潜影盒里的」掏到 item_storage 的散装里。 */
-    private void pushMaterialLoop(StepData step, List<Map.Entry<String, Integer>> materials, int index) {
-        pushSync("处理材料 " + (index + 1) + "/" + materials.size(), () -> {
+    private void pushMaterialLoop(StepData step, List<Map.Entry<String, Integer>> materials, int index) {        pushSync("处理材料 " + (index + 1) + "/" + materials.size(), () -> {
             if (index >= materials.size()) {
                 pushPlanSegments(step);
                 return;
@@ -437,19 +463,24 @@ public class StockPart2Stage3Action extends Action {
     /**
      * 【从 item_storage 的潜影盒中取出物品】：保证 item_storage 里**散装**的
      * {@code itemId} 至少有 {@code need} 个。
+     *
+     * <p>物品栏（27 格）里已经有的那部分也算数：上一步的中间产物被特意留在物品栏里时就靠这一条 ——
+     * 手上的够了就不用再去盒子里掏，后面的取货也会相应少取。
      */
     private void pushTakeFromBoxes(String itemId, int need, Runnable next) {
         pushSync("看看 " + itemId + " 够不够 " + need + " 个", () -> {
             int loose = looseCount(itemId);
-            if (loose >= need) {
-                ChatUtils.debug("item_storage 散装的 " + itemId + " 有 " + loose + " 个，够了");
+            int inHand = inventoryCount(itemId);
+            if (loose + inHand >= need) {
+                ChatUtils.debug("item_storage 散装的 " + itemId + " 有 " + loose + " 个，物品栏里还有 "
+                    + inHand + " 个，加起来够 " + need + " 个，不用去盒子里掏");
                 next.run();
                 return;
             }
 
-            int left = need - loose;
-            ChatUtils.debug("item_storage 散装的 " + itemId + " 只有 " + loose + " 个，还差 "
-                + left + "，去盒子里掏");
+            int left = need - loose - inHand;
+            ChatUtils.debug("item_storage 散装的 " + itemId + " 只有 " + loose + " 个，物品栏里 "
+                + inHand + " 个，还差 " + left + "，去盒子里掏");
             pushScanPlacedBoxes(itemId, left, 0, next);
         });
     }
@@ -673,8 +704,17 @@ public class StockPart2Stage3Action extends Action {
                 actualNeed.put(entry.getKey(), entry.getValue() * crafts);
             }
 
-            ItemList fetch = itemList(actualNeed);
-            pushFetchFromStorage(fetch, actualNeed, () -> {
+            // 27 格物品栏里已经有的就不用再去 item_storage 取了 ——
+            // 上一步特意留下的中间产物走的就是这条，省掉一次「去仓库收集」。
+            Map<String, Integer> toFetch = new LinkedHashMap<>();
+            for (Map.Entry<String, Integer> entry : actualNeed.entrySet()) {
+                int have = inventoryCount(entry.getKey());
+                int left = entry.getValue() - Math.min(have, entry.getValue());
+                if (left > 0) toFetch.put(entry.getKey(), left);
+            }
+
+            ItemList fetch = toFetch.isEmpty() ? ItemList.empty() : itemList(toFetch);
+            pushFetchFromStorage(fetch, toFetch, () -> {
                 pushCraft(step, segmentWant, () -> pushPutResult(step, segmentWant, lastCraftActual, () -> {
                     craftedSegments++;
                     craftedCount += segmentWant;
@@ -768,10 +808,22 @@ public class StockPart2Stage3Action extends Action {
      * <p>{@code final=true} 的步骤：先把整叠都放进最终产物暂存盒，再把**多出来的**
      * （{@code crafted - requested}，因为数量不是单次产量整数倍时会多合一点）拿回来放 item_storage。
      * 这样暂存盒里最终就正好是要求的数量。
+     *
+     * <p>{@code final=false} 的步骤有个特判：这一步做出来的东西要是<b>后面的步骤马上要用</b>
+     * （在它们的 {@code sub_materials} 里），就<b>不</b>整批塞进 item_storage，而是把多出来的那部分
+     * 存进 item_storage、把要留的那些 QuickMove 进自己的 27 格物品栏 —— 下一步合成直接用手边的材料，
+     * 省掉一次「去仓库收集」。见 {@link #pushKeepForLater}。
      */
     private void pushPutResult(StepData step, int requested, int crafted, Runnable next) {
         if (!step.isFinal()) {
-            // 中间产物：成品在快捷栏 4~9 格，放进 item_storage（后面的步骤再拿出来用）
+            int keep = Math.max(0, Math.min(crafted, currentLaterNeed - keptForLater));
+            if (keep > 0) {
+                keptForLater += keep;
+                pushKeepForLater(step.itemId(), crafted, keep, crafted - keep, next);
+                return;
+            }
+
+            // 后面的步骤用不到（或者已经留够了）：成品在快捷栏 4~9 格，放进 item_storage
             pushSync("把中间产物放进 item_storage", () -> {
                 List<Integer> ids = new ArrayList<>(state.storageTargets());
                 if (ids.isEmpty()) {
@@ -791,6 +843,108 @@ public class StockPart2Stage3Action extends Action {
             }
             pushTakeBackSurplus(step.itemId(), surplus, next);
         });
+    }
+
+    /**
+     * 特判：这一步做出来的中间产物正好是后面步骤要用的。
+     *
+     * <p>{@code keep} 个留在物品栏（下一步直接用），多出来的 {@code excess} 个照常存进 item_storage。
+     * 没有多余的（{@code excess <= 0}）就是最省事的情况：不碰任何容器，直接把快捷栏 4~9 格
+     * QuickMove 进 27 格物品栏。
+     */
+    private void pushKeepForLater(String itemId, int crafted, int keep, int excess, Runnable next) {
+        pushSync("中间产物 " + itemId + " 后面还要 " + keep + " 个（这次做了 " + crafted
+            + " 个）：留 " + keep + " 个在物品栏，"
+            + (excess > 0 ? "多出来的 " + excess + " 个存进 item_storage" : "没有多余的"), () -> {
+            if (excess <= 0) {
+                pushMoveResultsToInventory(next);
+                return;
+            }
+
+            List<Integer> ids = new ArrayList<>(state.storageTargets());
+            if (ids.isEmpty()) {
+                fail("物资存储地都满了，放不下中间产物");
+                return;
+            }
+            // 先把整批存进 item_storage，再把要留的那部分取回来（容器放物只能整叠搬，分开不好控制）
+            putHotbarToStorage(ids, 0, () -> pushFetchBack(itemId, keep, next));
+        });
+    }
+
+    /**
+     * 把快捷栏 4~9 格的成品 QuickMove 进自己的 27 格物品栏（不打开任何界面，见
+     * {@link HotbarQuickMoveAction}）。
+     *
+     * <p>27 格实在放不下（很少见）就把剩下的照旧存进 item_storage，下一步会照旧去收集。
+     */
+    private void pushMoveResultsToInventory(Runnable next) {
+        pushChild("把快捷栏第 " + (RESULT_FROM + 1) + "~" + (RESULT_TO + 1)
+                + " 格的成品挪进 27 格物品栏",
+            () -> new HotbarQuickMoveAction(RESULT_FROM, RESULT_TO),
+            action -> {
+                HotbarQuickMoveAction move = (HotbarQuickMoveAction) action;
+                if (move.allMoved()) {
+                    next.run();
+                    return;
+                }
+
+                ChatUtils.info("27 格物品栏放不下" + move.leftovers() + "，这部分照旧存进 item_storage");
+                List<Integer> ids = new ArrayList<>(state.storageTargets());
+                if (ids.isEmpty()) {
+                    fail("物资存储地都满了，放不下这些成品");
+                    return;
+                }
+                putHotbarToStorage(ids, 0, next);
+            });
+    }
+
+    /** 把刚存进 item_storage 的中间产物取回 {@code keep} 个到物品栏（取不齐就记一句，下一步照旧会去取）。 */
+    private void pushFetchBack(String itemId, int keep, Runnable next) {
+        if (keep <= 0) {
+            next.run();
+            return;
+        }
+
+        ItemList fetch = itemListOf(itemId, keep);
+        pushSync("把要留的 " + keep + " 个 " + itemId + " 从 item_storage 取回物品栏", () ->
+            fetchBack(fetch, state.storageIds(), 0, next));
+    }
+
+    private void fetchBack(ItemList fetch, List<Integer> ids, int index, Runnable next) {
+        if (fetch.isEmpty()) {
+            next.run();
+            return;
+        }
+        if (index >= ids.size()) {
+            ChatUtils.error("item_storage 里没找到刚存进去的 " + fetch.describe() + "（下一步会照旧去收集）");
+            next.run();
+            return;
+        }
+
+        int id = ids.get(index);
+        if (!storageHasLoose(id, fetch)) {
+            fetchBack(fetch, ids, index + 1, next);
+            return;
+        }
+
+        StationPos pos = stationPos(StationPart.ITEM_STORAGE, id);
+        if (pos == null) {
+            fetchBack(fetch, ids, index + 1, next);
+            return;
+        }
+
+        pushChild("从 item_storage #" + id + " 把 " + fetch.describe() + " 取回来（only_item）",
+            () -> new ContainerGetAction(pos.pos(), fetch, true, ContainerGetAction.Mode.ONLY_ITEM),
+            action -> {
+                ContainerGetAction get = (ContainerGetAction) action;
+                if (get.detail() != null) state.setStorage(id, get.detail(), get.freeSlots());
+                if (!get.allCleared()) {
+                    ChatUtils.error("物品栏放不下要留的 " + fetch.describe() + " 了，剩下的留在 item_storage");
+                    next.run();
+                    return;
+                }
+                fetchBack(fetch, ids, index + 1, next);
+            });
     }
 
     /** 把暂存盒里多出来的那点成品拿回来，然后存进 item_storage。 */
