@@ -66,11 +66,10 @@ public class CraftAction extends Action {
     private static final int MAX_READY_RETRIES = 3;
 
     /**
-     * 一格摆够之后，还要连着几 tick 数量都不掉才认为它真的满了。
+     * 一格「够了」或者刚放完一批之后，还要连着几 tick 数量都不变才继续。
      *
-     * <p>一 tick 连发一大串点击时，服务端会把它实际接受到的数量同步回来 —— 这一刻的「够了」
-     * 可能只是本地预测，马上换下一格的话，服务端那边这一格其实是少的（后面就会少合成几个，
-     * 多出来的材料还会被退回物品栏）。
+     * <p>一 tick 连发一大串点击时，服务端会把它实际接受到的数量同步回来 —— 客户端那一刻的数字
+     * 可能偏高（多放材料）也可能偏低（少放）。等它稳下来再算下一批，两头都不会错。
      */
     private static final int PLACE_SETTLE_TICKS = 2;
 
@@ -123,8 +122,8 @@ public class CraftAction extends Action {
     private int lastCellIndex = -1;
     private int lastCellHave = -1;
 
-    /** 这一格「够了」之后又稳定了几 tick。 */
-    private int cellSettle;
+    /** 这一格的数量连着几 tick 没变了（摆材料时用来等服务器同步回来）。 */
+    private int placeSettleTicks;
 
     public CraftAction(CraftPlan plan, BlockPos stationPos) {
         this.plan = plan;
@@ -234,7 +233,14 @@ public class CraftAction extends Action {
         phase = Phase.PLACE;
     }
 
-    /** 摆这一轮的材料：每 tick 把能放的一批放进去。 */
+    /**
+     * 摆这一轮的材料：每 tick 把能放的一批放进去。
+     *
+     * <p><b>每批之前先等这一格的数量稳定下来</b>（连着 {@link #PLACE_SETTLE_TICKS} tick 没变才继续）：
+     * 一 tick 连发一大串点击时，服务端会把它**实际**接受到的数量同步回来、覆盖掉客户端的本地预测，
+     * 客户端这一刻看到的数字可能偏高。不等它稳下来就接着放，会把材料白白多塞进格子里
+     * （格子能叠到 64，多塞的它收得下），这一轮又用不掉 —— 后面的轮次就会「找不到足够的材料」。
+     */
     private void tickPlace(MinecraftClient mc, ClientPlayerEntity player) {
         int amount = plan.amountForRound(round);
 
@@ -259,7 +265,25 @@ public class CraftAction extends Action {
         int need = amount - have;
         ItemStack cursor = handler.getCursorStack();
 
-        // 手上有东西
+        // 1) 先等这一格稳定（上一批点击的收尾 / 服务端同步回来的数字）
+        if (cellIndex == lastCellIndex) {
+            if (have != lastCellHave) {
+                // 数字还在变：这一 tick 什么都不做，下一 tick 再看。
+                // 上一批放完是 N 个、现在只剩 M 个 → 服务端只接受了那一批里的一部分，
+                // 把它的状态同步回来覆盖了客户端的预测（一 tick 连发一大串点击时会出现）。
+                // 没有丢东西：按实际差值接着补就行。
+                if (lastCellHave >= 0 && have < lastCellHave) {
+                    ChatUtils.debug("格子 " + cell.gridSlot() + " 的数量被服务端同步回 " + have
+                        + " 个（上一批放到 " + lastCellHave + " 个，一部分点击没被接受），按差值接着补");
+                }
+                lastCellHave = have;
+                placeSettleTicks = 0;
+                return;
+            }
+            if (++placeSettleTicks < PLACE_SETTLE_TICKS) return;
+        }
+
+        // 2) 手上有东西
         if (!cursor.isEmpty()) {
             if (need <= 0 || !cursor.isOf(cell.item())) {
                 returnCursor(player);
@@ -267,12 +291,16 @@ public class CraftAction extends Action {
             }
             if (cursor.getCount() <= need) {
                 click(mc, player, slotId, 0, SlotActionType.PICKUP);   // 整叠放进去
+                lastCellIndex = cellIndex;
+                lastCellHave = have + cursor.getCount();
+                placeSettleTicks = 0;
                 return;
             }
             // 手上比要的多：右键一次放 1 个，一个 tick 里连点几下（不然 41 个要 41 tick）。
             // 连点几下由配置 actions.items_per_tick 决定（客户端点击是本地预测、同步生效的；
-            // 连点完下一 tick 会按格子里实际有多少个接着算，不会多放）。
+            // 连点完下一 tick 会按「稳定下来的」格子里有多少个接着算，不会多放）。
             int batch = Math.min(Math.min(need, PlayerControllerConfig.getItemsPerTick()), cursor.getCount());
+            if (batch <= 0) return;
             for (int i = 0; i < batch; i++) {
                 clickQuiet(mc, player, slotId, 1, SlotActionType.PICKUP);
             }
@@ -280,26 +308,16 @@ public class CraftAction extends Action {
                 + " 个（这一格 " + (have + batch) + "/" + amount + "）");
             lastCellIndex = cellIndex;
             lastCellHave = have + batch;
+            placeSettleTicks = 0;
             return;
         }
 
+        // 3) 这一格够了 → 下一格
         if (need <= 0) {
-            // 够是够了，但先别急着下一格：一 tick 连发一大串点击之后，服务端会把它**实际**接受到的数量
-            // 同步回来，这一刻的「够了」有可能只是本地预测。等两 tick 数量都不掉，才算这一格真的满了。
-            if (++cellSettle < PLACE_SETTLE_TICKS) return;
             cellIndex++;
-            cellSettle = 0;
             lastCellIndex = -1;
+            placeSettleTicks = 0;
             return;
-        }
-        cellSettle = 0;
-
-        // 这一格上一批放完是 N 个，现在只有 M 个了 → 服务端只接受了那一批里的一部分，
-        // 把它的状态同步回来覆盖了客户端的预测（一 tick 连发一大串点击时会出现）。
-        // 没有丢东西：按实际差值接着补就行。
-        if (cellIndex == lastCellIndex && lastCellHave >= 0 && have < lastCellHave) {
-            ChatUtils.debug("格子 " + cell.gridSlot() + " 的数量被服务端同步回 " + have + " 个（上一批放到 "
-                + lastCellHave + " 个，一部分点击没被接受），按差值接着补 " + need + " 个");
         }
 
         int source = findSource(cell.item(), need);

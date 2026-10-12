@@ -522,7 +522,7 @@ public class StockPart2Stage3Action extends Action {
                     }
                     int remaining = remainingOf(want, itemId);
                     ChatUtils.debug("取完还剩 " + remaining + " 个要掏");
-                    pushStoreInventoryToStorage(() -> {
+                    pushStoreItemToStorage(itemId, () -> {
                         if (remaining <= 0) {
                             next.run();
                         } else {
@@ -592,7 +592,7 @@ public class StockPart2Stage3Action extends Action {
                         ContainerGetAction get = (ContainerGetAction) action;
                         if (get.detail() != null) state.setPlacement(placementId, get.detail().all());
                         int remaining = remainingOf(want, itemId);
-                        pushStoreInventoryToStorage(() -> {
+                        pushStoreItemToStorage(itemId, () -> {
                             if (remaining <= 0) {
                                 next.run();
                             } else {
@@ -1022,6 +1022,54 @@ public class StockPart2Stage3Action extends Action {
                     pushPutResultToStaging(next);
                 });
         });
+    }
+
+    /**
+     * 从盒子/摆放处掏完材料之后，把**这种材料**（散装的）存回 item_storage。
+     *
+     * <p>以前这里是 {@code EVERYTHING}（把 27 格整扫一遍）。改成只存这一种：
+     * 掏盒子只往物品栏里拿了这一种材料，存它一个就等价；而 {@code EVERYTHING} 会把物品栏里
+     * **别的东西**也一起扫走 —— 比如上一步特意留下来给下一步用的中间产物，
+     * 那就白留了（下一步还得跑去 item_storage 收集一趟）。
+     */
+    private void pushStoreItemToStorage(String itemId, Runnable next) {
+        pushSync("把掏出来的 " + itemId + " 存进 item_storage", () -> {
+            List<Integer> ids = new ArrayList<>(state.storageTargets());
+            if (ids.isEmpty()) {
+                fail("物资存储地都满了，放不下了");
+                return;
+            }
+            storeItemToStorage(ids, 0, itemId, next);
+        });
+    }
+
+    private void storeItemToStorage(List<Integer> ids, int index, String itemId, Runnable next) {
+        if (index >= ids.size()) {
+            fail("物资存储地的几个容器都放不下了");
+            return;
+        }
+
+        int id = ids.get(index);
+        StationPos pos = stationPos(StationPart.ITEM_STORAGE, id);
+        if (pos == null) {
+            storeItemToStorage(ids, index + 1, itemId, next);
+            return;
+        }
+
+        pushChild("把掏出来的 " + itemId + " 放进 item_storage #" + id,
+            () -> new ContainerPutAction(pos.pos(), ContainerPutAction.Mode.WANTED, true,
+                itemListOf(itemId, 1)),
+            action -> {
+                ContainerPutAction put = (ContainerPutAction) action;
+                if (put.detail() != null) state.setStorage(id, put.detail(), put.freeSlots());
+
+                if (put.allCleared()) {
+                    next.run();
+                } else {
+                    ChatUtils.info("item_storage #" + id + " 满了，换下一个");
+                    storeItemToStorage(ids, index + 1, itemId, next);
+                }
+            });
     }
 
     /** 把物品栏 27 格里剩下的东西都存进 item_storage（一个满了换下一个）。 */
