@@ -20,6 +20,8 @@ import org.six_coin.playerController.client.util.ChatUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
@@ -76,6 +78,8 @@ public final class AccountSwitcher {
     private static int waitTicks;
     /** 已经换成的离线账户名；进世界之后补一条提示（切世界时聊天栏会被清空）。 */
     private static String announceName;
+    /** 存档加载失败的取消回调只报一次。 */
+    private static boolean cancelReported;
 
     private AccountSwitcher() {
     }
@@ -206,12 +210,22 @@ public final class AccountSwitcher {
         } else {
             ChatUtils.info("正在重新加入存档 " + where.levelName() + " ……");
             LOG.info("重新加入存档 {}", where.levelName());
+            cancelReported = false;
             client.createIntegratedServerLoader().start(where.levelName(),
-                () -> {
-                    ChatUtils.error("重新加入存档失败：" + where.levelName());
-                    LOG.error("重新加入存档失败：{}", where.levelName());
-                });
+                () -> reportCancel(where.levelName()));
         }
+    }
+
+    /**
+     * 存档加载失败的取消回调。
+     *
+     * <p>MC 在「加载失败」那个界面上会反复回调它（日志里一次失败能看到好几条），这里只报一次。
+     */
+    private static void reportCancel(String levelName) {
+        if (cancelReported) return;
+        cancelReported = true;
+        ChatUtils.error("重新加入存档失败（存档目录名 " + levelName + "），需要你自己从世界列表进去");
+        LOG.error("重新加入存档失败：{}", levelName);
     }
 
     /** 进世界之后补一条「用的是哪个账户」。 */
@@ -254,14 +268,8 @@ public final class AccountSwitcher {
     private static Target captureTarget(MinecraftClient client) {
         IntegratedServer server = client.getServer();
         if (server != null) {
-            try {
-                // 存档目录名（level.dat 里的显示名字可以被改名，目录名不会）
-                String dir = server.getSavePath(WorldSavePath.ROOT).getFileName().toString();
-                return new Target(dir, null);
-            } catch (Throwable t) {
-                ChatUtils.error("拿不到单人存档的目录名，没法自动重连：" + t);
-                return null;
-            }
+            String dir = worldDirectoryName(server);
+            return dir == null ? null : new Target(dir, null);
         }
 
         ServerInfo info = client.getCurrentServerEntry();
@@ -271,6 +279,34 @@ public final class AccountSwitcher {
             return null;
         }
         return new Target(null, info);
+    }
+
+    /**
+     * 单人存档的目录名（就是存档文件夹的名字，中文名也没问题）。
+     *
+     * <p>坑：{@code WorldSavePath.ROOT} 的相对路径是 {@code "."}，所以
+     * {@code getSavePath(ROOT)} 拿到的是 {@code saves/<存档>/.}，直接 {@code getFileName()}
+     * 得到的是 {@code "."} —— 拿它当存档名去开，MC 会去读 {@code saves/level.dat}，
+     * 然后弹「Failed to load world」。这里改成从 {@code level.dat} 反推，并先把路径里的点去掉。
+     */
+    private static String worldDirectoryName(IntegratedServer server) {
+        Path levelDat = server.getSavePath(WorldSavePath.LEVEL_DAT).toAbsolutePath().normalize();
+        Path dir = levelDat.getParent();
+        if (dir == null || dir.getFileName() == null) {
+            ChatUtils.error("拿不到单人存档的目录名，没法自动重连");
+            return null;
+        }
+        String name = dir.getFileName().toString();
+        if (name.isEmpty() || ".".equals(name)) {
+            ChatUtils.error("单人存档目录名看起来不对（" + name + "），没法自动重连");
+            return null;
+        }
+        // 兜底：确认这个目录里真的有 level.dat，免得点错路径之后弹一堆报错界面
+        if (!Files.isRegularFile(levelDat)) {
+            ChatUtils.error("找不到 " + levelDat + "，没法自动重连");
+            return null;
+        }
+        return name;
     }
 
     private static void reset() {
