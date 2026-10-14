@@ -9,6 +9,7 @@ import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerCacheRenderer;
 import org.six_coin.playerController.client.container.ContainerCacheTracker;
+import org.six_coin.playerController.client.feature.AccountSwitcher;
 import org.six_coin.playerController.client.feature.AntiKick;
 import org.six_coin.playerController.client.feature.DimensionWait;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
@@ -60,6 +61,12 @@ public class PlayerControllerClient implements ClientModInitializer {
                 ChatUtils.debug("进世界：已解除容器界面抑制（上次没正常收尾留下的计数）");
             }
         });
+
+        // /pc account：换账户是分 tick 做的（先换身份下线，再自动重连），这里驱动它
+        ClientTickEvents.END_CLIENT_TICK.register(AccountSwitcher::tick);
+
+        // 换完账户重新进世界时补一条提示：切世界的过程中聊天栏会被清空
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> AccountSwitcher.onJoin(client));
 
         ChatUtils.debug("Player Controller 已加载，使用 /pc 查看命令；当前 debug="
             + PlayerControllerConfig.isDebug());
