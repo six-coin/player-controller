@@ -23,6 +23,11 @@
 @rem
 @rem ##########################################################################
 
+@rem 把 Gradle 的家目录放在工程里（.gradle-home）：构建就只写工作区里的文件，不需要额外写权限。
+@rem 必须在下面 setlocal 之前设置：setlocal 作用域里的变量在执行 endlocal 时会被清掉，
+@rem 那样 java 子进程就看不到 GRADLE_USER_HOME 了。
+if not defined GRADLE_USER_HOME set "GRADLE_USER_HOME=%~dp0.gradle-home"
+
 @rem Set local scope for the variables, and ensure extensions are enabled
 setlocal EnableExtensions
 

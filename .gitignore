@@ -25,3 +25,5 @@ logs
 
 # private folder
 ref
+
+.gradle-home

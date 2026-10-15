@@ -88,6 +88,12 @@ APP_BASE_NAME=${0##*/}
 # Discard cd standard output in case $CDPATH is set (https://github.com/gradle/gradle/issues/25036)
 APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s\n' "$PWD" ) || exit
 
+# 把 Gradle 的家目录放在工程里（.gradle-home）：构建就只写工作区里的文件，不需要额外写权限。
+if [ -z "$GRADLE_USER_HOME" ]; then
+    GRADLE_USER_HOME="$APP_HOME/.gradle-home"
+    export GRADLE_USER_HOME
+fi
+
 # Use the maximum available, or set MAX_FD != -1 to use that value.
 MAX_FD=maximum
 
