@@ -1,4 +1,4 @@
-package org.six_coin.playerController.client.station;
+package org.six_coin.playerController.client.stock.station;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;

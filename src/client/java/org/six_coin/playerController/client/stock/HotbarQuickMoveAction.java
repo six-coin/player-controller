@@ -1,14 +1,13 @@
-package org.six_coin.playerController.client.action;
+package org.six_coin.playerController.client.stock;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
-import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.action.Action;
+import org.six_coin.playerController.client.container.ContainerClicks;
+import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -89,7 +88,7 @@ public class HotbarQuickMoveAction extends Action {
         StringBuilder sb = new StringBuilder();
         for (int index : leftoverIndexes) {
             if (sb.length() > 0) sb.append("、");
-            sb.append("第 ").append(index + 1).append(" 格的 ").append(describe(hotbarStack(index)));
+            sb.append("第 ").append(index + 1).append(" 格的 ").append(InventoryUtils.describe(hotbarStack(index)));
         }
         return sb.toString();
     }
@@ -193,7 +192,7 @@ public class HotbarQuickMoveAction extends Action {
             }
             if (++moveWaitTicks > MAX_MOVE_WAIT_TICKS) {
                 ChatUtils.debug("快捷栏第 %d 格的 %s 塞不进 27 格物品栏，先放着",
-                    pendingIndex + 1, describe(hotbarStack(pendingIndex)));
+                    pendingIndex + 1, InventoryUtils.describe(hotbarStack(pendingIndex)));
                 leftoverIndexes.add(pendingIndex);
                 pendingIndex = -1;
                 moveWaitTicks = 0;
@@ -209,18 +208,21 @@ public class HotbarQuickMoveAction extends Action {
         }
 
         if (!handler.getCursorStack().isEmpty()) {
-            fail("光标上还有 " + describe(handler.getCursorStack()) + "，先放下再执行");
+            fail("光标上还有 " + InventoryUtils.describe(handler.getCursorStack()) + "，先放下再执行");
             return;
         }
 
-        Slot slot = hotbarSlot(handler, index);
+        Slot slot = InventoryUtils.hotbarSlot(handler, index);
         if (slot == null) {
             leftoverIndexes.add(index);
             return;
         }
 
-        ChatUtils.debug("QuickMove：快捷栏第 %d 格的 %s → 27 格物品栏", index + 1, describe(slot.getStack()));
-        mc.interactionManager.clickSlot(handler.syncId, slot.id, 0, SlotActionType.QUICK_MOVE, player);
+        if (!ContainerClicks.quickMove(handler, slot, "快捷栏第 " + (index + 1) + " 格的 "
+            + InventoryUtils.describe(slot.getStack()) + " → 27 格物品栏")) {
+            fail("点不出去（快捷栏第 " + (index + 1) + " 格）");
+            return;
+        }
         moved++;
         pendingIndex = index;
         moveWaitTicks = 0;
@@ -235,21 +237,8 @@ public class HotbarQuickMoveAction extends Action {
         return -1;
     }
 
-    @Nullable
-    private static Slot hotbarSlot(ScreenHandler handler, int index) {
-        for (Slot slot : handler.slots) {
-            if (slot.inventory instanceof PlayerInventory && slot.getIndex() == index) return slot;
-        }
-        return null;
-    }
-
     private static ItemStack hotbarStack(int index) {
         ClientPlayerEntity player = MinecraftClient.getInstance().player;
         return player == null ? ItemStack.EMPTY : player.getInventory().getStack(index);
-    }
-
-    private static String describe(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return "空";
-        return Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount();
     }
 }

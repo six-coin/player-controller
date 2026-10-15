@@ -8,18 +8,15 @@ import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
-import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
-import org.six_coin.playerController.client.container.ContainerCacheUpdater;
-import org.six_coin.playerController.client.container.ContainerOpener;
-import org.six_coin.playerController.client.feature.ScreenSuppressor;
+import org.six_coin.playerController.client.container.ContainerSession;
+import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
-import org.six_coin.playerController.client.util.InventoryUtils;
 import org.six_coin.playerController.client.util.ItemList;
 import org.six_coin.playerController.client.util.ItemRules;
 import org.six_coin.playerController.client.util.PlayerUtils;
@@ -32,7 +29,7 @@ import java.util.List;
  *
  * <p>流程：
  * <ol>
- *   <li>看向玩家准星指着的方块、右键打开（客户端界面用 {@link ScreenSuppressor} 挡住不显示）；</li>
+ *   <li>看向玩家准星指着的方块、右键打开（客户端界面挡住不显示，见 {@link ContainerSession}）；</li>
  *   <li>逐个遍历容器的格子：
  *     <ul>
  *       <li><b>潜影盒</b>：盒子里有 item_list 还要的东西 → 整个盒子搬走；</li>
@@ -78,7 +75,6 @@ public class ContainerGetAction extends Action {
     private static final int MAX_STEP_WAIT_TICKS = 60;
 
     /** 等容器界面打开最久。 */
-    private static final int MAX_OPEN_WAIT_TICKS = 60;
 
     /** 整个任务最久（20 tick = 1 秒）。 */
     private static final int MAX_TOTAL_TICKS = 20 * 300;
@@ -109,12 +105,11 @@ public class ContainerGetAction extends Action {
 
     private Phase phase = Phase.OPENING;
 
-    private ScreenHandler handler;
+    private final ContainerSession session;
     private PlayerInventory playerInventory;
     private List<Slot> containerSlots = List.of();
 
     private int slotCursor;
-    private int openWaitTicks;
     private int totalTicks;
     private int stepWaitTicks;
     private int extractions;
@@ -164,6 +159,7 @@ public class ContainerGetAction extends Action {
         this.requestText = itemList.describe();
         this.wantDetail = wantDetail;
         this.mode = mode;
+        this.session = new ContainerSession(this.pos);
     }
 
     /** 取完之后容器里剩什么（wantDetail 时才有意义；散装物品 + 每个潜影盒的内容）。 */
@@ -187,8 +183,6 @@ public class ContainerGetAction extends Action {
 
     @Override
     protected void onStart() {
-        ScreenSuppressor.acquire();
-
         MinecraftClient mc = MinecraftClient.getInstance();
         ClientPlayerEntity player = mc.player;
         if (player == null || mc.world == null) {
@@ -207,7 +201,7 @@ public class ContainerGetAction extends Action {
         }
         ItemStack cursor = player.currentScreenHandler.getCursorStack();
         if (!cursor.isEmpty()) {
-            fail("光标上还有物品（" + describeStack(cursor) + "），先放下再执行");
+            fail("光标上还有物品（" + InventoryUtils.describe(cursor) + "），先放下再执行");
             return;
         }
         if (itemList.isEmpty()) {
@@ -220,7 +214,7 @@ public class ContainerGetAction extends Action {
             Registries.BLOCK.getId(mc.world.getBlockState(pos).getBlock()),
             itemList.toJson());
 
-        openContainer(mc, player);
+        session.open(mc, player);
     }
 
     @Override
@@ -238,13 +232,13 @@ public class ContainerGetAction extends Action {
             return;
         }
 
-        if (phase != Phase.OPENING && handler != null && player.currentScreenHandler != handler) {
+        if (phase != Phase.OPENING && session.isOpen() && !session.stillOpen(mc)) {
             fail("容器界面被关掉了");
             return;
         }
 
         switch (phase) {
-            case OPENING -> tickOpening(player);
+            case OPENING -> tickOpening(mc);
             case SCAN -> tickScan();
             case PICKUP -> tickPickup();
             case PLACE -> tickPlace();
@@ -257,19 +251,16 @@ public class ContainerGetAction extends Action {
     @Override
     protected void onEnd() {
         // 先趁界面还开着，把「取完之后容器里剩什么 / 还剩几格」记下来（备货流程要用）
-        if (wantDetail && handler != null) {
-            detail = ContainerCacheManager.breakdown(handler);
+        if (wantDetail && session.isOpen()) {
+            detail = session.breakdown();
             freeSlots = 0;
             for (Slot slot : containerSlots) {
                 if (slot.getStack().isEmpty()) freeSlots++;
             }
         }
 
-        // 拿完东西以后，这个容器要是已经在缓存里，就把缓存里的物品列表刷新一遍
-        if (handler != null) {
-            ContainerCacheUpdater.refresh(MinecraftClient.getInstance(), pos, handler);
-        }
-        closeScreen();
+        // 关掉界面，顺手把这个容器的缓存刷新一遍
+        session.close(MinecraftClient.getInstance());
 
         if (stopReason != null) {
             output().info("容器任务结束：" + stopReason);
@@ -280,7 +271,6 @@ public class ContainerGetAction extends Action {
             ChatUtils.debug(mode == Mode.ONLY_FULL_SHULKER
                 ? "only_full_shulker 模式：不输出 item_list / all_cleared"
                 : "only_one_shulker 模式：不输出 item_list / all_cleared");
-            ScreenSuppressor.release();
             return;
         }
 
@@ -298,8 +288,6 @@ public class ContainerGetAction extends Action {
 
         // 指令跑完之后输出结果：item_list + all_cleared
         output().rawCopyable(result.toString());
-
-        ScreenSuppressor.release();
     }
 
     /**
@@ -315,30 +303,22 @@ public class ContainerGetAction extends Action {
     // 打开容器
     // ------------------------------------------------------------------
 
-    private void openContainer(MinecraftClient mc, ClientPlayerEntity player) {
-        ContainerOpener.open(mc, player, pos);
-        openWaitTicks = 0;
-        phase = Phase.OPENING;
-    }
-
-    private void tickOpening(ClientPlayerEntity player) {
-        openWaitTicks++;
-        ScreenHandler current = player.currentScreenHandler;
-        if (current != null && current != player.playerScreenHandler) {
-            handler = current;
-            playerInventory = player.getInventory();
-            containerSlots = InventoryUtils.containerSlots(handler);
-            slotCursor = 0;
-            pendingClick = false;
-            stepWaitTicks = 0;
-            phase = mode == Mode.NORMAL || mode == Mode.ONLY_ITEM ? Phase.SCAN : Phase.ONE_BOX;
-            ChatUtils.debug("容器已打开：syncId=%d，界面共 %d 格，其中容器格 %d 格",
-                handler.syncId, handler.slots.size(), containerSlots.size());
-            dumpContainerSlots();
-            return;
-        }
-        if (openWaitTicks > MAX_OPEN_WAIT_TICKS) {
-            fail("等待容器界面超时（" + openWaitTicks + " tick）");
+    private void tickOpening(MinecraftClient mc) {
+        switch (session.awaitOpen(mc)) {
+            case READY -> {
+                playerInventory = mc.player.getInventory();
+                containerSlots = InventoryUtils.containerSlots(session.handler());
+                slotCursor = 0;
+                pendingClick = false;
+                stepWaitTicks = 0;
+                phase = mode == Mode.NORMAL || mode == Mode.ONLY_ITEM ? Phase.SCAN : Phase.ONE_BOX;
+                ChatUtils.debug("容器已打开：syncId=%d，界面共 %d 格，其中容器格 %d 格",
+                    session.handler().syncId, session.handler().slots.size(), containerSlots.size());
+                dumpContainerSlots();
+            }
+            case TIMEOUT -> fail("等待容器界面超时");
+            case WAITING -> {
+            }
         }
     }
 
@@ -356,17 +336,17 @@ public class ContainerGetAction extends Action {
                         : "容器里没有「装着 item_list 需要的东西」的潜影盒");
                     return;
                 }
-                ItemStack box = handler.slots.get(boxSlotId).getStack();
+                ItemStack box = session.handler().slots.get(boxSlotId).getStack();
                 ChatUtils.debug("选中第 %d 格的潜影盒（内容：%s）", boxSlotId,
                     ShulkerUtils.describeContents(box));
                 oneBoxStep = 1;
             }
             case 1 -> {
-                click(handler.slots.get(boxSlotId), 0, SlotActionType.PICKUP, "拿起潜影盒");
+                click(session.handler().slots.get(boxSlotId), 0, SlotActionType.PICKUP, "拿起潜影盒");
                 oneBoxStep = 2;
             }
             case 2 -> {
-                if (handler.getCursorStack().isEmpty()) {
+                if (session.handler().getCursorStack().isEmpty()) {
                     fail("潜影盒没拿起来");
                     return;
                 }
@@ -386,7 +366,7 @@ public class ContainerGetAction extends Action {
                 oneBoxStep = 4;
             }
             default -> {
-                if (!handler.getCursorStack().isEmpty()) {
+                if (!session.handler().getCursorStack().isEmpty()) {
                     fail("潜影盒没放进快捷栏");
                     return;
                 }
@@ -416,7 +396,7 @@ public class ContainerGetAction extends Action {
     /** 玩家快捷栏某一格（0~8，也就是背包下标）在界面里的 Slot。 */
     @Nullable
     private Slot hotbarSlot(int index) {
-        for (Slot slot : handler.slots) {
+        for (Slot slot : session.handler().slots) {
             if (slot.inventory instanceof PlayerInventory && slot.getIndex() == index) return slot;
         }
         return null;
@@ -525,7 +505,7 @@ public class ContainerGetAction extends Action {
         }
 
         // 每次提取之前都检查一次主背包有没有空位
-        Slot empty = InventoryUtils.firstEmptyMainSlot(handler, playerInventory);
+        Slot empty = InventoryUtils.firstEmptyMainSlot(session.handler(), playerInventory);
         if (empty == null) {
             stoppedForInventory = true;
             stop("主背包（27 格，不含快捷栏）没有空位了，停止；item_list 还差：" + itemList.describe());
@@ -542,11 +522,11 @@ public class ContainerGetAction extends Action {
         }
 
         // 只取一部分：优先塞进同类半叠，塞不下就放空格
-        Slot merge = InventoryUtils.mergeTarget(handler, playerInventory, sourceStack, take);
+        Slot merge = InventoryUtils.mergeTarget(session.handler(), playerInventory, sourceStack, take);
         target = merge != null ? merge : empty;
         if (!target.canInsert(sourceStack)) {
             stoppedForInventory = true;
-            stop("主背包里找不到能放下 " + describeStack(sourceStack)
+            stop("主背包里找不到能放下 " + InventoryUtils.describe(sourceStack)
                 + " 的格子，停止；item_list 还差：" + itemList.describe());
             return;
         }
@@ -561,7 +541,7 @@ public class ContainerGetAction extends Action {
     // ------------------------------------------------------------------
 
     private void tickPickup() {
-        ItemStack cursor = handler.getCursorStack();
+        ItemStack cursor = session.handler().getCursorStack();
 
         if (pendingClick) {
             if (!cursor.isEmpty() && ItemStack.areItemsAndComponentsEqual(cursor, sourceStack)) {
@@ -585,8 +565,8 @@ public class ContainerGetAction extends Action {
                 return;
             }
             if (++stepWaitTicks > MAX_STEP_WAIT_TICKS) {
-                fail("拿起源格物品失败：光标上是 " + describeStack(cursor)
-                    + "，期望 " + describeStack(sourceStack) + " x" + sourceCount);
+                fail("拿起源格物品失败：光标上是 " + InventoryUtils.describe(cursor)
+                    + "，期望 " + InventoryUtils.describe(sourceStack) + " x" + sourceCount);
                 return;
             }
             return;
@@ -601,7 +581,7 @@ public class ContainerGetAction extends Action {
             return;
         }
 
-        ItemStack cursor = handler.getCursorStack();
+        ItemStack cursor = session.handler().getCursorStack();
 
         // 上一批点完了：光标少了多少就是实际放进去多少（服务端少接受几下的情况也能自愈）
         if (pendingClick) {
@@ -673,7 +653,7 @@ public class ContainerGetAction extends Action {
         int back = sourceCount - take;
 
         if (pendingClick) {
-            if (handler.getCursorStack().isEmpty()) {
+            if (session.handler().getCursorStack().isEmpty()) {
                 pendingClick = false;
                 stepWaitTicks = 0;
                 ChatUtils.debug("剩下的 %d 个已经放回源格", back);
@@ -682,7 +662,7 @@ public class ContainerGetAction extends Action {
             }
             if (++stepWaitTicks > MAX_STEP_WAIT_TICKS) {
                 fail("把剩下的 " + back + " 个放回源格失败（光标上还有 "
-                    + handler.getCursorStack().getCount() + " 个）");
+                    + session.handler().getCursorStack().getCount() + " 个）");
                 return;
             }
             return;
@@ -693,7 +673,7 @@ public class ContainerGetAction extends Action {
 
     /** 整叠往主背包里放：左键点主背包格，直到光标空（同类半叠优先，其次空格）。 */
     private void tickDump() {
-        ItemStack cursor = handler.getCursorStack();
+        ItemStack cursor = session.handler().getCursorStack();
 
         if (cursor.isEmpty()) {
             pendingClick = false;
@@ -718,9 +698,9 @@ public class ContainerGetAction extends Action {
             return;
         }
 
-        Slot dumpTarget = InventoryUtils.dumpTarget(handler, playerInventory, sourceStack);
+        Slot dumpTarget = InventoryUtils.dumpTarget(session.handler(), playerInventory, sourceStack);
         if (dumpTarget == null) {
-            fail("主背包 27 格里没有能放下 " + describeStack(sourceStack) + " 的格子了（光标上还有 "
+            fail("主背包 27 格里没有能放下 " + InventoryUtils.describe(sourceStack) + " 的格子了（光标上还有 "
                 + cursor.getCount() + " 个）");
             return;
         }
@@ -783,15 +763,11 @@ public class ContainerGetAction extends Action {
     }
 
     private void click(Slot slot, int button, SlotActionType type, String what) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.interactionManager == null || mc.player == null) {
-            fail("拿不到 interactionManager");
+        clickCursorCount = session.handler().getCursorStack().getCount();
+        if (!session.click(slot, button, type, what)) {
+            fail("点不了格子（" + what + "）");
             return;
         }
-        ChatUtils.debug("点击：%s（slot=%d，button=%d，%s，光标=%s）",
-            what, slot.id, button, type, describeStack(handler.getCursorStack()));
-        clickCursorCount = handler.getCursorStack().getCount();
-        mc.interactionManager.clickSlot(handler.syncId, slot.id, button, type, mc.player);
         pendingClick = true;
         stepWaitTicks = 0;
     }
@@ -803,30 +779,12 @@ public class ContainerGetAction extends Action {
      * （放完会有一句汇总）。
      */
     private void clickQuiet(Slot slot, int button, SlotActionType type) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.interactionManager == null || mc.player == null) {
-            fail("拿不到 interactionManager");
+        clickCursorCount = session.handler().getCursorStack().getCount();
+        if (!session.clickQuiet(slot, button, type)) {
+            fail("点不了格子（静默点击）");
             return;
         }
-        clickCursorCount = handler.getCursorStack().getCount();
-        mc.interactionManager.clickSlot(handler.syncId, slot.id, button, type, mc.player);
         pendingClick = true;
         stepWaitTicks = 0;
-    }
-
-    private void closeScreen() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || handler == null) return;
-        if (mc.player.currentScreenHandler != handler) return;
-
-        // 界面本来就没有显示出来（见 ScreenSuppressor），
-        // 这里只要通知服务端关闭，并让客户端把 currentScreenHandler 换回玩家自己的。
-        mc.player.closeHandledScreen();
-        ChatUtils.debug("已关闭容器界面（客户端全程没有显示界面）");
-    }
-
-    private static String describeStack(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return "空";
-        return Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount();
     }
 }

@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.stock;
 
 import org.jetbrains.annotations.Nullable;
-import org.six_coin.playerController.client.station.StationState;
+import org.six_coin.playerController.client.stock.station.StationState;
 
 /**
  * 一次备货任务里，各步共享的运行期数据。

@@ -17,21 +17,15 @@ import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.ContainerGetAction;
 import org.six_coin.playerController.client.action.ContainerPutAction;
 import org.six_coin.playerController.client.action.CraftAction;
-import org.six_coin.playerController.client.action.HotbarQuickMoveAction;
-import org.six_coin.playerController.client.action.MineBlockAction;
 import org.six_coin.playerController.client.action.MoveAction;
 import org.six_coin.playerController.client.action.PathMoveAction;
-import org.six_coin.playerController.client.action.PlaceShulkerBoxAction;
-import org.six_coin.playerController.client.action.PutHotbarItemAction;
-import org.six_coin.playerController.client.action.TakeItemAction;
-import org.six_coin.playerController.client.action.WaitAction;
 import org.six_coin.playerController.client.recipe.CraftPlan;
 import org.six_coin.playerController.client.recipe.MaxCraft;
 import org.six_coin.playerController.client.recipe.RecipePlanner;
-import org.six_coin.playerController.client.station.StationManager;
-import org.six_coin.playerController.client.station.StationPart;
-import org.six_coin.playerController.client.station.StationPos;
-import org.six_coin.playerController.client.station.StationState;
+import org.six_coin.playerController.client.stock.station.StationManager;
+import org.six_coin.playerController.client.stock.station.StationPart;
+import org.six_coin.playerController.client.stock.station.StationPos;
+import org.six_coin.playerController.client.stock.station.StationState;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.ItemList;
 import org.six_coin.playerController.client.util.ItemRules;
@@ -991,10 +985,11 @@ final class Part2Stage3Craft extends StockStep {
                 return;
             }
 
+            // 往暂存盒里放一律 QuickMove：放哪儿、能放多少由服务端决定，满没满也由它说了算
             pushChild("把快捷栏第 " + (RESULT_FROM + 1) + "~" + (RESULT_TO + 1) + " 格的成品放进暂存盒",
-                () -> new PutHotbarItemAction(spot.pos(), RESULT_FROM, RESULT_TO, true),
+                () -> ContainerPutAction.hotbarRange(spot.pos(), RESULT_FROM, RESULT_TO, true),
                 action -> {
-                    PutHotbarItemAction put = (PutHotbarItemAction) action;
+                    ContainerPutAction put = (ContainerPutAction) action;
                     if (put.detail() != null) state.setPlacement(STAGING_ID, put.detail().all());
 
                     if (put.allCleared()) {

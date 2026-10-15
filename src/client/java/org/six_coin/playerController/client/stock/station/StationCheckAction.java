@@ -1,4 +1,4 @@
-package org.six_coin.playerController.client.action;
+package org.six_coin.playerController.client.stock.station;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -7,21 +7,17 @@ import com.google.gson.JsonObject;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.ItemStack;
-import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
+import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
-import org.six_coin.playerController.client.container.ContainerCacheTracker;
-import org.six_coin.playerController.client.container.ContainerOpener;
+import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.ContainerTypes;
-import org.six_coin.playerController.client.feature.ScreenSuppressor;
-import org.six_coin.playerController.client.station.StationManager;
-import org.six_coin.playerController.client.station.StationPart;
-import org.six_coin.playerController.client.station.StationPos;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
-import org.six_coin.playerController.client.util.InventoryUtils;
+import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 
@@ -55,12 +51,6 @@ import java.util.TreeMap;
  */
 public class StationCheckAction extends Action {
 
-    /** 打开界面之后等几 tick 再读，保证槽位数据同步完了。 */
-    private static final int SETTLE_TICKS = 2;
-
-    /** 等容器界面打开最久。 */
-    private static final int MAX_OPEN_WAIT_TICKS = 60;
-
     /** 整个任务最久（20 tick = 1 秒）。 */
     private static final int MAX_TOTAL_TICKS = 20 * 600;
 
@@ -91,9 +81,9 @@ public class StationCheckAction extends Action {
     private final List<String> problems = new ArrayList<>();
 
     private int index;
-    private ScreenHandler handler;
-    private int openWaitTicks;
-    private int settleTicks;
+    /** 当前正在数的那个容器的会话（每换一个容器就换一个）。 */
+    @Nullable
+    private ContainerSession session;
     private int totalTicks;
 
     /** 全部通过、报告也写出来了（备货流程要用它判断预检查过没过）。 */
@@ -113,8 +103,6 @@ public class StationCheckAction extends Action {
 
     @Override
     protected void onStart() {
-        ScreenSuppressor.acquire();
-
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.world == null) {
             fail("没有世界");
@@ -165,51 +153,49 @@ public class StationCheckAction extends Action {
         }
 
         Target target = targets.get(index);
+        if (session == null) {
+            fail("内部状态不对：没有正在检查的容器");
+            return;
+        }
 
         // 阶段一：等容器界面打开
-        if (handler == null) {
-            openWaitTicks++;
-            ScreenHandler current = player.currentScreenHandler;
-            if (current != null && current != player.playerScreenHandler
-                && !ContainerCacheTracker.isCreativeInventory(mc)) {
-                handler = current;
-                settleTicks = 0;
-                return;
-            }
-            if (openWaitTicks > MAX_OPEN_WAIT_TICKS) {
-                addProblem(target.part().display() + " " + target.pos().toShortString()
-                    + " 打不开（等容器界面超时）");
-                advance();
+        if (!session.isOpen()) {
+            switch (session.awaitOpen(mc)) {
+                case READY -> ChatUtils.debug("工作站检查：" + target.part().display() + " "
+                    + target.pos().toShortString() + " 界面已打开");
+                case TIMEOUT -> {
+                    addProblem(target.part().display() + " " + target.pos().toShortString()
+                        + " 打不开（等容器界面超时）");
+                    session.close(mc);
+                    advance();
+                }
+                case WAITING -> {
+                }
             }
             return;
         }
 
         // 界面被别人关掉了
-        if (player.currentScreenHandler != handler) {
+        if (!session.stillOpen(mc)) {
             addProblem(target.part().display() + " " + target.pos().toShortString()
                 + " 打开后被关掉了，没数到");
-            handler = null;
+            session.close(mc);
             advance();
             return;
         }
 
         // 阶段二：等槽位同步完
-        if (settleTicks < SETTLE_TICKS) {
-            settleTicks++;
-            return;
-        }
+        if (!session.settled()) return;
 
         // 阶段三：数一遍
         survey(target);
-        closeScreen();
-        handler = null;
+        session.close(mc);
         advance();
     }
 
     @Override
     protected void onEnd() {
-        closeScreen();
-        ScreenSuppressor.release();
+        if (session != null) session.close(MinecraftClient.getInstance());
 
         if (failureReason() != null) {
             ChatUtils.error("工作站检查中断：" + failureReason());
@@ -274,13 +260,11 @@ public class StationCheckAction extends Action {
         }
 
         Target target = targets.get(index);
-        handler = null;
-        openWaitTicks = 0;
-        settleTicks = 0;
+        session = new ContainerSession(target.pos());
 
         ChatUtils.debug("工作站检查 第 " + (index + 1) + "/" + targets.size() + " 个："
             + target.part().display() + " " + target.pos().toShortString());
-        ContainerOpener.open(mc, player, target.pos());
+        session.open(mc, player);
     }
 
     private void advance() {
@@ -292,25 +276,18 @@ public class StationCheckAction extends Action {
         openNext();
     }
 
-    private void closeScreen() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || handler == null) return;
-        if (mc.player.currentScreenHandler != handler) return;
-        mc.player.closeHandledScreen();
-    }
-
     // ------------------------------------------------------------------
     // 数一个容器
     // ------------------------------------------------------------------
 
     private void survey(Target target) {
-        ContainerCacheManager.Breakdown breakdown = ContainerCacheManager.breakdown(handler);
+        ContainerCacheManager.Breakdown breakdown = ContainerCacheManager.breakdown(session.handler());
         int totalSlots = 0;
         int emptySlots = 0;
         boolean allEmpty = true;
         boolean allEmptyShulkerBoxes = true;
 
-        for (Slot slot : InventoryUtils.containerSlots(handler)) {
+        for (Slot slot : InventoryUtils.containerSlots(session.handler())) {
             ItemStack stack = slot.getStack();
             totalSlots++;
             if (stack.isEmpty()) {

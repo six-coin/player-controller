@@ -18,9 +18,9 @@ import org.six_coin.playerController.client.action.CraftAction;
 import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.recipe.CraftPlan;
 import org.six_coin.playerController.client.recipe.RecipePlanner;
-import org.six_coin.playerController.client.station.StationManager;
-import org.six_coin.playerController.client.station.StationPart;
-import org.six_coin.playerController.client.station.StationPos;
+import org.six_coin.playerController.client.stock.station.StationManager;
+import org.six_coin.playerController.client.stock.station.StationPart;
+import org.six_coin.playerController.client.stock.station.StationPos;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 

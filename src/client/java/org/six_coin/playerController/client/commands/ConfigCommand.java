@@ -9,7 +9,7 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.text.Text;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
-import org.six_coin.playerController.client.station.StationManager;
+import org.six_coin.playerController.client.stock.station.StationManager;
 import org.six_coin.playerController.client.stock.StockManager;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
 

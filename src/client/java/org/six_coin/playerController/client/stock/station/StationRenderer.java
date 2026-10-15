@@ -1,4 +1,4 @@
-package org.six_coin.playerController.client.station;
+package org.six_coin.playerController.client.stock.station;
 
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;

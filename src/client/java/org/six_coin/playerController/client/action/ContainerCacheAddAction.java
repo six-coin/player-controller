@@ -2,13 +2,12 @@ package org.six_coin.playerController.client.action;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.screen.ScreenHandler;
 import net.minecraft.util.math.BlockPos;
+import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.CachedContainer;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
-import org.six_coin.playerController.client.container.ContainerOpener;
+import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.ContainerTypes;
-import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
@@ -19,19 +18,14 @@ import java.util.TreeMap;
 /**
  * 把（一批）容器加进容器缓存：逐个打开、数里面的东西、写进缓存。
  *
- * <p>流程：看向方块 → 右键打开 → 等槽位同步（{@link #SETTLE_TICKS} tick）→
- * 用 {@link ContainerCacheManager#snapshot(ScreenHandler)} 数一遍容器格子 → 写入缓存 → 关界面 → 下一个。
+ * <p>流程：看向方块 → 右键打开 → 等槽位同步 → 用
+ * {@link ContainerCacheManager#snapshot(net.minecraft.screen.ScreenHandler)} 数一遍容器格子 →
+ * 写入缓存 → 关界面 → 下一个。
  *
  * <p>单个添加（{@code add_position} / {@code add_target}）时 {@code verbose = true}，每个容器都报一行；
  * 批量（{@code add_batch}）时在最后汇总一行：成功多少、超出触及范围多少、不是支持的容器多少。
  */
 public class ContainerCacheAddAction extends Action {
-
-    /** 打开界面之后等几 tick 再读，保证槽位数据同步完了。 */
-    private static final int SETTLE_TICKS = 2;
-
-    /** 等容器界面打开最久。 */
-    private static final int MAX_OPEN_WAIT_TICKS = 60;
 
     /** 整个任务最久（20 tick = 1 秒）。 */
     private static final int MAX_TOTAL_TICKS = 20 * 300;
@@ -43,9 +37,9 @@ public class ContainerCacheAddAction extends Action {
     private final boolean verbose;
 
     private int index;
-    private ScreenHandler handler;
-    private int openWaitTicks;
-    private int settleTicks;
+    /** 当前正在处理的容器的会话（每换一个容器就换一个）。 */
+    @Nullable
+    private ContainerSession session;
     private int totalTicks;
 
     private int added;
@@ -73,8 +67,6 @@ public class ContainerCacheAddAction extends Action {
 
     @Override
     protected void onStart() {
-        ScreenSuppressor.acquire();
-
         if (positions.isEmpty()) {
             ChatUtils.debug("没有要缓存的容器（全被筛掉了）");
             finish();
@@ -87,7 +79,7 @@ public class ContainerCacheAddAction extends Action {
     protected void tick() {
         MinecraftClient mc = MinecraftClient.getInstance();
         ClientPlayerEntity player = mc.player;
-        if (player == null) {
+        if (player == null || session == null) {
             fail("玩家不存在");
             return;
         }
@@ -98,54 +90,45 @@ public class ContainerCacheAddAction extends Action {
             return;
         }
 
-        BlockPos pos = positions.get(index);
+        BlockPos pos = session.pos();
 
         // 阶段一：等容器界面打开
-        if (handler == null) {
-            openWaitTicks++;
-            ScreenHandler current = player.currentScreenHandler;
-            if (current != null && current != player.playerScreenHandler) {
-                handler = current;
-                settleTicks = 0;
-                ChatUtils.debug("容器界面已打开（" + pos.toShortString() + "），等 "
-                    + SETTLE_TICKS + " tick 让槽位同步");
-                return;
-            }
-            if (openWaitTicks > MAX_OPEN_WAIT_TICKS) {
-                ChatUtils.error("打开 " + pos.toShortString() + " 的容器超时（"
-                    + openWaitTicks + " tick），跳过");
-                failed++;
-                advance();
+        if (!session.isOpen()) {
+            switch (session.awaitOpen(mc)) {
+                case READY -> ChatUtils.debug("容器界面已打开（" + pos.toShortString() + "）");
+                case TIMEOUT -> {
+                    ChatUtils.error("打开 " + pos.toShortString() + " 的容器超时，跳过");
+                    failed++;
+                    session.close(mc);
+                    advance();
+                }
+                case WAITING -> {
+                }
             }
             return;
         }
 
         // 界面被别人关掉了
-        if (player.currentScreenHandler != handler) {
+        if (!session.stillOpen(mc)) {
             ChatUtils.error("缓存 " + pos.toShortString() + " 时容器界面被关掉了，跳过");
             failed++;
-            handler = null;
+            session.close(mc);
             advance();
             return;
         }
 
         // 阶段二：等槽位同步完
-        if (settleTicks < SETTLE_TICKS) {
-            settleTicks++;
-            return;
-        }
+        if (!session.settled()) return;
 
         // 阶段三：数一遍写进缓存
         record(mc, pos);
-        closeScreen();
-        handler = null;
+        session.close(mc);
         advance();
     }
 
     @Override
     protected void onEnd() {
-        closeScreen();
-        ScreenSuppressor.release();
+        if (session != null) session.close(MinecraftClient.getInstance());
 
         if (verbose) {
             output().info("容器缓存：新加 " + added + " 个，更新 " + updated + " 个"
@@ -173,13 +156,11 @@ public class ContainerCacheAddAction extends Action {
         }
 
         BlockPos pos = positions.get(index);
-        handler = null;
-        openWaitTicks = 0;
-        settleTicks = 0;
+        session = new ContainerSession(pos);
 
         ChatUtils.debug("第 " + (index + 1) + "/" + positions.size() + " 个："
             + pos.toShortString() + "（" + ContainerTypes.idOf(mc.world.getBlockState(pos)) + "）");
-        ContainerOpener.open(mc, player, pos);
+        session.open(mc, player);
     }
 
     private void advance() {
@@ -196,7 +177,7 @@ public class ContainerCacheAddAction extends Action {
         ContainerCacheManager cache = ContainerCacheManager.get();
         String dimension = DimensionUtils.current();
         String type = ContainerTypes.idOf(mc.world.getBlockState(pos));
-        Map<String, Integer> items = ContainerCacheManager.snapshot(handler);
+        Map<String, Integer> items = ContainerCacheManager.snapshot(session.handler());
 
         CachedContainer existing = cache.at(dimension, pos);
         boolean isNew = existing == null;
@@ -231,14 +212,5 @@ public class ContainerCacheAddAction extends Action {
 
         unchanged++;
         ChatUtils.debug("#" + container.id() + " " + pos.toShortString() + " 内容没变，不重复写");
-    }
-
-    private void closeScreen() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || handler == null) return;
-        if (mc.player.currentScreenHandler != handler) return;
-
-        mc.player.closeHandledScreen();
-        ChatUtils.debug("已关闭容器界面（客户端全程没有显示界面）");
     }
 }

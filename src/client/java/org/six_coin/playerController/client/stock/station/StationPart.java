@@ -1,4 +1,4 @@
-package org.six_coin.playerController.client.station;
+package org.six_coin.playerController.client.stock.station;
 
 /**
  * 工作站的各个部分：json 里的字段名、中文名、高亮颜色、是单点还是一个列表。

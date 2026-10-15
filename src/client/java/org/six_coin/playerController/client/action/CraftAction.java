@@ -10,16 +10,14 @@ import net.minecraft.recipe.display.CuttingRecipeDisplay;
 import net.minecraft.recipe.display.SlotDisplayContexts;
 import net.minecraft.registry.Registries;
 import net.minecraft.screen.CraftingScreenHandler;
-import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.StonecutterScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.context.ContextParameterMap;
 import net.minecraft.util.math.BlockPos;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
-import org.six_coin.playerController.client.container.ContainerCacheTracker;
-import org.six_coin.playerController.client.container.ContainerOpener;
-import org.six_coin.playerController.client.feature.ScreenSuppressor;
+import org.six_coin.playerController.client.container.ContainerClicks;
+import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.recipe.CraftPlan;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -73,7 +71,6 @@ public class CraftAction extends Action {
      */
     private static final int PLACE_SETTLE_TICKS = 2;
 
-    private static final int MAX_OPEN_WAIT_TICKS = 60;
 
     private static final int MAX_TOTAL_TICKS = 20 * 600;
 
@@ -95,9 +92,8 @@ public class CraftAction extends Action {
     private final CraftPlan plan;
     private final BlockPos stationPos;
 
-    private ScreenHandler handler;
+    private final ContainerSession session;
     private Phase phase = Phase.OPENING;
-    private int openWaitTicks;
     private int settleTicks;
     private int totalTicks;
     private int cellIndex;
@@ -128,6 +124,10 @@ public class CraftAction extends Action {
     public CraftAction(CraftPlan plan, BlockPos stationPos) {
         this.plan = plan;
         this.stationPos = stationPos;
+        // 只认自己那一种界面（工作台 / 切石机）；等几 tick 的事下面自己管（SETTLE）
+        this.session = new ContainerSession(stationPos,
+            plan.station() == CraftPlan.Station.CRAFTING_TABLE
+                ? CraftingScreenHandler.class : StonecutterScreenHandler.class);
     }
 
     @Override
@@ -139,8 +139,6 @@ public class CraftAction extends Action {
 
     @Override
     protected void onStart() {
-        ScreenSuppressor.acquire();
-
         MinecraftClient mc = MinecraftClient.getInstance();
         ClientPlayerEntity player = mc.player;
         if (player == null || mc.world == null) {
@@ -149,7 +147,7 @@ public class CraftAction extends Action {
         }
 
         ChatUtils.debug("开始 " + plan.describe());
-        ContainerOpener.open(mc, player, stationPos);
+        session.open(mc, player);
     }
 
     @Override
@@ -167,13 +165,13 @@ public class CraftAction extends Action {
             return;
         }
 
-        if (handler != null && player.currentScreenHandler != handler) {
+        if (session.isOpen() && !session.stillOpen(mc)) {
             fail("界面被关掉了");
             return;
         }
 
         switch (phase) {
-            case OPENING -> tickOpening(mc, player);
+            case OPENING -> tickOpening(mc);
             case SETTLE -> tickSettle();
             case PLACE -> tickPlace(mc, player);
             case READY -> tickReady(mc, player);
@@ -184,8 +182,7 @@ public class CraftAction extends Action {
 
     @Override
     protected void onEnd() {
-        closeScreen();
-        ScreenSuppressor.release();
+        session.close(MinecraftClient.getInstance());
 
         if (failureReason() != null) {
             ChatUtils.error(name() + "失败：" + failureReason());
@@ -201,30 +198,17 @@ public class CraftAction extends Action {
     // 各阶段
     // ------------------------------------------------------------------
 
-    private void tickOpening(MinecraftClient mc, ClientPlayerEntity player) {
-        openWaitTicks++;
-        ScreenHandler current = player.currentScreenHandler;
-
-        if (current != null && current != player.playerScreenHandler
-            && !ContainerCacheTracker.isCreativeInventory(mc) && isOurHandler(current)) {
-            handler = current;
-            settleTicks = 0;
-            phase = Phase.SETTLE;
-            ChatUtils.debug("界面已打开（" + current.getClass().getSimpleName() + "），等 "
-                + SETTLE_TICKS + " tick 同步");
-            return;
+    private void tickOpening(MinecraftClient mc) {
+        switch (session.awaitOpen(mc)) {
+            case READY -> {
+                settleTicks = 0;
+                phase = Phase.SETTLE;
+            }
+            case TIMEOUT -> fail("打开" + (plan.station() == CraftPlan.Station.CRAFTING_TABLE ? "工作台" : "切石机")
+                + "超时");
+            case WAITING -> {
+            }
         }
-
-        if (openWaitTicks > MAX_OPEN_WAIT_TICKS) {
-            fail("打开" + (plan.station() == CraftPlan.Station.CRAFTING_TABLE ? "工作台" : "切石机")
-                + "超时（" + openWaitTicks + " tick）");
-        }
-    }
-
-    private boolean isOurHandler(ScreenHandler current) {
-        return plan.station() == CraftPlan.Station.CRAFTING_TABLE
-            ? current instanceof CraftingScreenHandler
-            : current instanceof StonecutterScreenHandler;
     }
 
     private void tickSettle() {
@@ -263,7 +247,7 @@ public class CraftAction extends Action {
         int slotId = gridSlotId(cell.gridSlot());
         int have = slotStack(slotId).getCount();
         int need = amount - have;
-        ItemStack cursor = handler.getCursorStack();
+        ItemStack cursor = session.handler().getCursorStack();
 
         // 1) 先等这一格稳定（上一批点击的收尾 / 服务端同步回来的数字）
         if (cellIndex == lastCellIndex) {
@@ -290,7 +274,7 @@ public class CraftAction extends Action {
                 return;
             }
             if (cursor.getCount() <= need) {
-                click(mc, player, slotId, 0, SlotActionType.PICKUP);   // 整叠放进去
+                click(slotId, 0, SlotActionType.PICKUP);   // 整叠放进去
                 lastCellIndex = cellIndex;
                 lastCellHave = have + cursor.getCount();
                 placeSettleTicks = 0;
@@ -302,7 +286,7 @@ public class CraftAction extends Action {
             int batch = Math.min(Math.min(need, PlayerControllerConfig.getItemsPerTick()), cursor.getCount());
             if (batch <= 0) return;
             for (int i = 0; i < batch; i++) {
-                clickQuiet(mc, player, slotId, 1, SlotActionType.PICKUP);
+                click(slotId, 1, SlotActionType.PICKUP);
             }
             ChatUtils.debug("一次 tick 里往格子 " + cell.gridSlot() + " 放了 " + batch
                 + " 个（这一格 " + (have + batch) + "/" + amount + "）");
@@ -326,7 +310,7 @@ public class CraftAction extends Action {
                 + " 个，还差 " + need + " 个）；" + describeWhereIs(cell.item()));
             return;
         }
-        click(mc, player, source, 0, SlotActionType.PICKUP);
+        click(source, 0, SlotActionType.PICKUP);
     }
 
     /**
@@ -377,7 +361,7 @@ public class CraftAction extends Action {
 
         int grid = 0;
         if (plan.station() == CraftPlan.Station.CRAFTING_TABLE) {
-            for (Slot slot : ((CraftingScreenHandler) handler).getInputSlots()) {
+            for (Slot slot : ((CraftingScreenHandler) session.handler()).getInputSlots()) {
                 ItemStack stack = slot.getStack();
                 if (!stack.isEmpty() && stack.isOf(item)) grid += stack.getCount();
             }
@@ -386,7 +370,7 @@ public class CraftAction extends Action {
             if (!stack.isEmpty() && stack.isOf(item)) grid += stack.getCount();
         }
 
-        ItemStack cursor = handler.getCursorStack();
+        ItemStack cursor = session.handler().getCursorStack();
         int onCursor = !cursor.isEmpty() && cursor.isOf(item) ? cursor.getCount() : 0;
 
         return "现在物品栏里这种材料：主背包 " + main + " 个、快捷栏 " + hotbar + " 个、"
@@ -397,7 +381,7 @@ public class CraftAction extends Action {
     /** 界面里属于玩家物品栏的格子：快捷栏 0~8 + 主背包 9~35。 */
     private List<Slot> inventorySlots() {
         List<Slot> slots = new ArrayList<>();
-        for (Slot slot : handler.slots) {
+        for (Slot slot : session.handler().slots) {
             if (slot.inventory instanceof PlayerInventory && slot.getIndex() < 36) {
                 slots.add(slot);
             }
@@ -453,7 +437,7 @@ public class CraftAction extends Action {
      */
     private void craft(MinecraftClient mc, ClientPlayerEntity player) {
         craftedBefore = countCrafted();
-        click(mc, player, resultSlotId(), 0, SlotActionType.QUICK_MOVE);
+        click(resultSlotId(), 0, SlotActionType.QUICK_MOVE);
         clicks++;
         waitTicks = 0;
         phase = Phase.WAIT_CRAFTED;
@@ -520,7 +504,7 @@ public class CraftAction extends Action {
     /** 物品栏（快捷栏 + 主背包）里现在有多少个成品。 */
     private int countCrafted() {
         int total = 0;
-        for (Slot slot : handler.slots) {
+        for (Slot slot : session.handler().slots) {
             if (!(slot.inventory instanceof PlayerInventory)) continue;
             ItemStack stack = slot.getStack();
             if (!stack.isEmpty() && stack.isOf(plan.target())) total += stack.getCount();
@@ -539,7 +523,7 @@ public class CraftAction extends Action {
         }
 
         CuttingRecipeDisplay.Grouping<StonecuttingRecipe> grouping =
-            ((StonecutterScreenHandler) handler).getAvailableRecipes();
+            ((StonecutterScreenHandler) session.handler()).getAvailableRecipes();
         if (grouping == null || grouping.isEmpty()) {
             if (++recipeWaitTicks > READY_WAIT_TICKS * 2) {
                 recipeWaitTicks = 0;
@@ -554,7 +538,7 @@ public class CraftAction extends Action {
             for (ItemStack option : entry.recipe().optionDisplay().getStacks(context)) {
                 if (!option.isEmpty() && option.isOf(plan.target())) {
                     recipeIndex = index;
-                    mc.interactionManager.clickButton(handler.syncId, index);
+                    ContainerClicks.clickButton(session.handler(), index);
                     ChatUtils.debug("切石机：选中第 " + index + " 个配方（共 "
                         + grouping.size() + " 个选项），等成品格");
                     recipeWaitTicks = 0;
@@ -576,7 +560,7 @@ public class CraftAction extends Action {
         if (plan.station() == CraftPlan.Station.STONECUTTER) {
             return StonecutterScreenHandler.INPUT_ID;   // 切石机只有那唯一一格
         }
-        List<Slot> inputs = ((CraftingScreenHandler) handler).getInputSlots();
+        List<Slot> inputs = ((CraftingScreenHandler) session.handler()).getInputSlots();
         return inputs.get(Math.min(gridSlot, inputs.size() - 1)).id;
     }
 
@@ -587,22 +571,19 @@ public class CraftAction extends Action {
     }
 
     private ItemStack slotStack(int slotId) {
-        return handler.slots.get(slotId).getStack();
+        return session.handler().slots.get(slotId).getStack();
     }
 
-    private void click(MinecraftClient mc, ClientPlayerEntity player, int slotId, int button, SlotActionType type) {
-        mc.interactionManager.clickSlot(handler.syncId, slotId, button, type, player);
-    }
-
-    /** 跟 {@link #click} 一样，但**不逐次打日志**（一次 tick 连点好几下时用）。 */
-    private void clickQuiet(MinecraftClient mc, ClientPlayerEntity player, int slotId, int button,
-                            SlotActionType type) {
-        mc.interactionManager.clickSlot(handler.syncId, slotId, button, type, player);
+    /** 点一下某个槽位（{@code ScreenHandler.slots} 的下标就是槽位号）。 */
+    private void click(int slotId, int button, SlotActionType type) {
+        if (!ContainerClicks.clickQuiet(session.handler(), slotId, button, type)) {
+            fail("点不了格子 #" + slotId);
+        }
     }
 
     /** 把手上的东西放回主背包（优先找放得下的格子）。 */
     private void returnCursor(ClientPlayerEntity player) {
-        ItemStack cursor = handler.getCursorStack();
+        ItemStack cursor = session.handler().getCursorStack();
         if (cursor.isEmpty()) return;
 
         int target = -1;
@@ -626,26 +607,19 @@ public class CraftAction extends Action {
         }
 
         MinecraftClient mc = MinecraftClient.getInstance();
-        click(mc, player, target, 0, SlotActionType.PICKUP);
+        click(target, 0, SlotActionType.PICKUP);
     }
 
     /** 界面里属于玩家主背包（不含快捷栏）的格子。 */
     private List<Slot> mainSlots() {
         List<Slot> slots = new ArrayList<>();
-        for (Slot slot : handler.slots) {
+        for (Slot slot : session.handler().slots) {
             if (slot.inventory instanceof PlayerInventory
                 && slot.getIndex() >= 9 && slot.getIndex() < 36) {
                 slots.add(slot);
             }
         }
         return slots;
-    }
-
-    private void closeScreen() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || handler == null) return;
-        if (mc.player.currentScreenHandler != handler) return;
-        mc.player.closeHandledScreen();
     }
 
     private static String id(Item item) {

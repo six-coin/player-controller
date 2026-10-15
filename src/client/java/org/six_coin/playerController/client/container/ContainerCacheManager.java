@@ -12,7 +12,6 @@ import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
-import org.six_coin.playerController.client.util.InventoryUtils;
 import org.six_coin.playerController.client.util.ItemRules;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 import org.six_coin.playerController.client.waypoint.WaypointManager;

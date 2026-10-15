@@ -1,4 +1,4 @@
-package org.six_coin.playerController.client.station;
+package org.six_coin.playerController.client.stock.station;
 
 import net.minecraft.block.BarrelBlock;
 import net.minecraft.block.BlockState;

@@ -24,12 +24,12 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
 import org.six_coin.playerController.client.action.ActionManager;
-import org.six_coin.playerController.client.action.StationCheckAction;
+import org.six_coin.playerController.client.stock.station.StationCheckAction;
 import org.six_coin.playerController.client.container.ContainerTypes;
-import org.six_coin.playerController.client.station.StationManager;
-import org.six_coin.playerController.client.station.StationPart;
-import org.six_coin.playerController.client.station.StationPos;
-import org.six_coin.playerController.client.station.StationPrecheck;
+import org.six_coin.playerController.client.stock.station.StationManager;
+import org.six_coin.playerController.client.stock.station.StationPart;
+import org.six_coin.playerController.client.stock.station.StationPos;
+import org.six_coin.playerController.client.stock.station.StationPrecheck;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 

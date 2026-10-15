@@ -1,23 +1,20 @@
-package org.six_coin.playerController.client.action;
+package org.six_coin.playerController.client.stock;
 
 import com.google.gson.JsonObject;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
-import org.six_coin.playerController.client.container.ContainerCacheUpdater;
-import org.six_coin.playerController.client.container.ContainerOpener;
-import org.six_coin.playerController.client.feature.ScreenSuppressor;
+import org.six_coin.playerController.client.container.ContainerSession;
+import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
-import org.six_coin.playerController.client.util.InventoryUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
 /**
@@ -52,8 +49,6 @@ public class PutHotbarItemAction extends Action {
         RETURN
     }
 
-    private static final int SETTLE_TICKS = 2;
-    private static final int MAX_OPEN_WAIT_TICKS = 60;
     private static final int MAX_STEP_WAIT_TICKS = 60;
     private static final int MAX_TOTAL_TICKS = 20 * 120;
 
@@ -65,11 +60,9 @@ public class PutHotbarItemAction extends Action {
     private final int hotbarTo;
     private final boolean wantDetail;
 
-    private ScreenHandler handler;
+    private final ContainerSession session;
     private Phase phase = Phase.OPENING;
 
-    private int openWaitTicks;
-    private int settleTicks;
     private int stepWaitTicks;
     private int totalTicks;
     private int moved;
@@ -102,6 +95,7 @@ public class PutHotbarItemAction extends Action {
         this.hotbarFrom = Math.min(hotbarFrom, hotbarTo);
         this.hotbarTo = Math.max(hotbarFrom, hotbarTo);
         this.wantDetail = wantDetail;
+        this.session = new ContainerSession(this.pos);
     }
 
     /** 快捷栏那几格空了（东西都进容器了）。 */
@@ -135,8 +129,6 @@ public class PutHotbarItemAction extends Action {
 
     @Override
     protected void onStart() {
-        ScreenSuppressor.acquire();
-
         MinecraftClient mc = MinecraftClient.getInstance();
         ClientPlayerEntity player = mc.player;
         if (player == null || mc.world == null) {
@@ -160,7 +152,7 @@ public class PutHotbarItemAction extends Action {
 
         ItemStack first = firstStack(player);
         ChatUtils.debug("把快捷栏第 %d~%d 格（第一叠是 %s）放进 %s",
-            hotbarFrom + 1, hotbarTo + 1, describe(first), pos.toShortString());
+            hotbarFrom + 1, hotbarTo + 1, InventoryUtils.describe(first), pos.toShortString());
         if (first.isEmpty()) {
             allCleared = true;
             ChatUtils.debug("快捷栏第 %d~%d 格本来就是空的，不用放", hotbarFrom + 1, hotbarTo + 1);
@@ -168,7 +160,7 @@ public class PutHotbarItemAction extends Action {
             return;
         }
 
-        ContainerOpener.open(mc, player, pos);
+        session.open(mc, player);
     }
 
     @Override
@@ -185,15 +177,15 @@ public class PutHotbarItemAction extends Action {
             fail("超时（" + totalTicks + " tick）");
             return;
         }
-        if (phase != Phase.OPENING && handler != null && player.currentScreenHandler != handler) {
+        if (phase != Phase.OPENING && session.isOpen() && !session.stillOpen(mc)) {
             fail("容器界面被关掉了");
             return;
         }
 
         switch (phase) {
-            case OPENING -> tickOpening(player);
+            case OPENING -> tickOpening(mc);
             case SETTLE -> {
-                if (++settleTicks >= SETTLE_TICKS) {
+                if (session.settled()) {
                     phase = Phase.CARRY;
                     stepWaitTicks = 0;
                 }
@@ -205,17 +197,13 @@ public class PutHotbarItemAction extends Action {
 
     @Override
     protected void onEnd() {
-        if (wantDetail && handler != null) {
-            detail = ContainerCacheManager.breakdown(handler);
-            freeSlots = countFreeSlots();
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (wantDetail && session.isOpen()) {
+            detail = session.breakdown();
+            freeSlots = session.freeSlots();
             if (freeSlots == 0) containerFull = true;
         }
-
-        if (handler != null) {
-            ContainerCacheUpdater.refresh(MinecraftClient.getInstance(), pos, handler);
-        }
-        closeScreen();
-        ScreenSuppressor.release();
+        session.close(mc);
 
         if (failureReason() != null) {
             allCleared = false;
@@ -230,22 +218,17 @@ public class PutHotbarItemAction extends Action {
 
     // ------------------------------------------------------------------
 
-    private void tickOpening(ClientPlayerEntity player) {
-        openWaitTicks++;
-        ScreenHandler current = player.currentScreenHandler;
-        if (current != null && current != player.playerScreenHandler) {
-            handler = current;
-            phase = Phase.SETTLE;
-            settleTicks = 0;
-            ChatUtils.debug("容器已打开：%d 格", handler.slots.size());
-            return;
-        }
-        if (openWaitTicks > MAX_OPEN_WAIT_TICKS) {
-            fail("等待容器界面超时（" + openWaitTicks + " tick）");
+    private void tickOpening(MinecraftClient mc) {
+        switch (session.awaitOpen(mc)) {
+            case READY -> phase = Phase.SETTLE;
+            case TIMEOUT -> fail("等待容器界面超时");
+            case WAITING -> {
+            }
         }
     }
 
     private void tickCarry() {
+        ScreenHandler handler = session.handler();
         ItemStack cursor = handler.getCursorStack();
 
         // 上一次点击还没生效
@@ -280,7 +263,7 @@ public class PutHotbarItemAction extends Action {
                         return;
                     }
                     if (++stepWaitTicks > MAX_STEP_WAIT_TICKS) {
-                        fail("往容器里放物品失败（光标上还有 " + describe(cursor) + "）");
+                        fail("往容器里放物品失败（光标上还有 " + InventoryUtils.describe(cursor) + "）");
                     }
                 }
                 case RETURN -> {
@@ -293,7 +276,7 @@ public class PutHotbarItemAction extends Action {
                         return;
                     }
                     if (++stepWaitTicks > MAX_STEP_WAIT_TICKS) {
-                        fail("把剩下的放回快捷栏失败（光标上还有 " + describe(cursor) + "）");
+                        fail("把剩下的放回快捷栏失败（光标上还有 " + InventoryUtils.describe(cursor) + "）");
                     }
                 }
             }
@@ -312,24 +295,24 @@ public class PutHotbarItemAction extends Action {
             currentIndex = source.getIndex();
 
             ItemStack stack = source.getStack();
-            if (findTarget(stack) == null) {
+            if (InventoryUtils.acceptTarget(handler, stack) == null) {
                 containerFull = true;
                 allCleared = false;
-                ChatUtils.debug("容器收不下 " + describe(stack) + "，结束");
+                ChatUtils.debug("容器收不下 " + InventoryUtils.describe(stack) + "，结束");
                 phase = Phase.DONE;
                 return;
             }
-            click(source, 0, SlotActionType.PICKUP, "拿起 " + describe(stack), Step.PICK);
+            click(source, 0, SlotActionType.PICKUP, "拿起 " + InventoryUtils.describe(stack), Step.PICK);
             return;
         }
 
-        Slot current = hotbarSlot(currentIndex);
+        Slot current = InventoryUtils.hotbarSlot(handler, currentIndex);
         if (current == null) {
             fail("找不到快捷栏第 " + (currentIndex + 1) + " 格");
             return;
         }
 
-        Slot target = findTarget(cursor);
+        Slot target = InventoryUtils.acceptTarget(handler, cursor);
         if (target == null) {
             // 容器装不下了：把光标上剩下的塞回快捷栏那一格
             click(current, 0, SlotActionType.PICKUP, "把剩下的放回快捷栏", Step.RETURN);
@@ -342,7 +325,7 @@ public class PutHotbarItemAction extends Action {
     @Nullable
     private Slot findSource() {
         for (int i = hotbarFrom; i <= hotbarTo; i++) {
-            Slot slot = hotbarSlot(i);
+            Slot slot = InventoryUtils.hotbarSlot(session.handler(), i);
             if (slot != null && !slot.getStack().isEmpty()) return slot;
         }
         return null;
@@ -357,63 +340,17 @@ public class PutHotbarItemAction extends Action {
         return ItemStack.EMPTY;
     }
 
-    /** 容器的格子里有没有能收下这一叠的（空格，或者同类还有余量的格子）。 */
-    @Nullable
-    private Slot findTarget(ItemStack stack) {
-        for (Slot slot : InventoryUtils.containerSlots(handler)) {
-            if (!slot.canInsert(stack)) continue;
-
-            ItemStack existing = slot.getStack();
-            if (existing.isEmpty()) return slot;
-            if (ItemStack.areItemsAndComponentsEqual(existing, stack)
-                && existing.getCount() < Math.min(slot.getMaxItemCount(stack), stack.getMaxCount())) {
-                return slot;
-            }
-        }
-        return null;
-    }
-
-    @Nullable
-    private Slot hotbarSlot(int index) {
-        for (Slot slot : handler.slots) {
-            if (slot.inventory instanceof PlayerInventory && slot.getIndex() == index) return slot;
-        }
-        return null;
-    }
-
+    /** 点一下（该等的结果交给 {@link Step}）。 */
     private void click(Slot slot, int button, SlotActionType type, String action, Step step) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.interactionManager == null) {
-            fail("拿不到 interactionManager");
+        ScreenHandler handler = session.handler();
+        if (!session.click(slot, button, type, action)) {
+            fail("点不了格子（" + action + "）");
             return;
         }
-        ChatUtils.debug("点击：%s（slot=%d，光标=%s）", action, slot.id, describe(handler.getCursorStack()));
         clickCursorCount = handler.getCursorStack().getCount();
-        mc.interactionManager.clickSlot(handler.syncId, slot.id, button, type, mc.player);
         pendingClick = true;
         pendingStep = step;
         stepWaitTicks = 0;
         moved++;
-    }
-
-    private void closeScreen() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || handler == null) return;
-        if (mc.player.currentScreenHandler != handler) return;
-        mc.player.closeHandledScreen();
-    }
-
-    private int countFreeSlots() {
-        if (handler == null) return -1;
-        int free = 0;
-        for (Slot slot : InventoryUtils.containerSlots(handler)) {
-            if (slot.getStack().isEmpty()) free++;
-        }
-        return free;
-    }
-
-    private static String describe(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return "空";
-        return Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount();
     }
 }

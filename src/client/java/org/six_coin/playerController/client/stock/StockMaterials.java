@@ -11,7 +11,7 @@ import net.minecraft.registry.Registries;
 import net.minecraft.util.Identifier;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
-import org.six_coin.playerController.client.station.StationManager;
+import org.six_coin.playerController.client.stock.station.StationManager;
 import org.six_coin.playerController.client.util.ChatUtils;
 
 import java.io.IOException;

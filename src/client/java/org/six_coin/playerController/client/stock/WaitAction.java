@@ -1,5 +1,6 @@
-package org.six_coin.playerController.client.action;
+package org.six_coin.playerController.client.stock;
 
+import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.util.ChatUtils;
 
 import java.util.function.BooleanSupplier;

@@ -284,10 +284,10 @@ public final class AccountSwitcher {
     /**
      * 单人存档的目录名（就是存档文件夹的名字，中文名也没问题）。
      *
-     * <p>坑：{@code WorldSavePath.ROOT} 的相对路径是 {@code "."}，所以
-     * {@code getSavePath(ROOT)} 拿到的是 {@code saves/<存档>/.}，直接 {@code getFileName()}
-     * 得到的是 {@code "."} —— 拿它当存档名去开，MC 会去读 {@code saves/level.dat}，
-     * 然后弹「Failed to load world」。这里改成从 {@code level.dat} 反推，并先把路径里的点去掉。
+     * <p>注意 {@code WorldSavePath.ROOT} 的相对路径是 {@code "."}，所以
+     * {@code getSavePath(ROOT)} 拿到的是 {@code saves/<存档>/.}，它的 {@code getFileName()} 是
+     * {@code "."}，不能当存档名用（拿它去开会去找 {@code saves/level.dat}）。
+     * 这里从 {@code level.dat} 往上推一层拿目录名，中文名原样返回。
      */
     private static String worldDirectoryName(IntegratedServer server) {
         Path levelDat = server.getSavePath(WorldSavePath.LEVEL_DAT).toAbsolutePath().normalize();

@@ -1,4 +1,4 @@
-package org.six_coin.playerController.client.util;
+package org.six_coin.playerController.client.container;
 
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 背包 / 容器相关的查询。
+ * 界面里那些格子的查询：玩家背包的哪几格、容器的格子、空格、能合并的半叠。
  *
  * <p>玩家背包的 27 个主格在 {@link PlayerInventory} 里的下标是 9..35（0..8 是快捷栏），
  * 在界面里就是「{@code slot.inventory == 玩家背包} 且 {@code slot.getIndex()} 落在 9..35」的那些槽位。
@@ -21,6 +21,9 @@ public final class InventoryUtils {
 
     /** 主背包的结束下标（不含）。 */
     public static final int MAIN_END = 36;
+
+    /** 整个物品栏（含快捷栏，不含副手）的结束下标（不含）。 */
+    public static final int INVENTORY_END = 36;
 
     private InventoryUtils() {
     }
@@ -101,12 +104,54 @@ public final class InventoryUtils {
         return result;
     }
 
+    /**
+     * 容器里能收下这一叠的格子：空格，或者装着同样东西、还没满的格子。
+     *
+     * <p>这是「看着像能放」的判断，只有**界面里的格子数据**做依据 —— 真放得下多少，
+     * 得由服务端点一下（Shift 点击）才算数。
+     *
+     * @return 找不到返回 null
+     */
+    public static Slot acceptTarget(ScreenHandler handler, ItemStack stack) {
+        for (Slot slot : containerSlots(handler)) {
+            if (!slot.canInsert(stack)) continue;
+
+            ItemStack existing = slot.getStack();
+            if (existing.isEmpty()) return slot;
+            if (ItemStack.areItemsAndComponentsEqual(existing, stack)
+                && existing.getCount() < Math.min(slot.getMaxItemCount(stack), stack.getMaxCount())) {
+                return slot;
+            }
+        }
+        return null;
+    }
+
+    /** 玩家快捷栏某一格（0~8，也就是背包下标）在这套界面里的槽位。 */
+    public static Slot hotbarSlot(ScreenHandler handler, int index) {
+        for (Slot slot : handler.slots) {
+            if (slot.inventory instanceof PlayerInventory && slot.getIndex() == index) return slot;
+        }
+        return null;
+    }
+
     /** 日志用：一个槽位的简单描述。 */
     public static String describe(Slot slot) {
         ItemStack stack = slot.getStack();
         if (stack.isEmpty()) return "#" + slot.id + "（空）";
-        return "#" + slot.id + " "
-            + net.minecraft.registry.Registries.ITEM.getId(stack.getItem())
-            + " x" + stack.getCount();
+        return "#" + slot.id + " " + describe(stack);
+    }
+
+    /** 日志用：一叠物品的 id、数量；有耐久的把剩余耐久也带上（不然「为什么不合格」看不出来）。 */
+    public static String describe(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return "空";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(net.minecraft.registry.Registries.ITEM.getId(stack.getItem()))
+            .append(" x").append(stack.getCount());
+        if (stack.isDamageable() && stack.getMaxDamage() > 0) {
+            sb.append("（剩余耐久 ").append(stack.getMaxDamage() - stack.getDamage())
+                .append("/").append(stack.getMaxDamage()).append("）");
+        }
+        return sb.toString();
     }
 }
