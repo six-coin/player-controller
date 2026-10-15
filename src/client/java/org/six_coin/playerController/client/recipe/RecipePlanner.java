@@ -92,7 +92,7 @@ public final class RecipePlanner {
         }
 
         // 2) 本地完整配方表：没解锁的配方也能用（见 LocalRecipes）。
-        //    放后面是为了「解锁过的配方怎么选，还跟以前一样」，只有配方书里没有的才用到本地表。
+        //    排在配方书后面：优先用已经解锁的配方，配方书里没有的才落到本地表上。
         for (RecipeDisplay display : LocalRecipes.craftingDisplays(mc)) {
             addOption(display, target, context, seen, options);
         }

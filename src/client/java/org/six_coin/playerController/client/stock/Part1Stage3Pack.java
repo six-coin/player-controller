@@ -1,4 +1,4 @@
-package org.six_coin.playerController.client.action;
+package org.six_coin.playerController.client.stock;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
@@ -8,14 +8,21 @@ import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import org.jetbrains.annotations.Nullable;
-import org.six_coin.playerController.client.config.PlayerControllerConfig;
+import org.six_coin.playerController.client.action.Action;
+import org.six_coin.playerController.client.action.ContainerGetAction;
+import org.six_coin.playerController.client.action.ContainerPutAction;
+import org.six_coin.playerController.client.action.MineBlockAction;
+import org.six_coin.playerController.client.action.MoveAction;
+import org.six_coin.playerController.client.action.PathMoveAction;
+import org.six_coin.playerController.client.action.PlaceShulkerBoxAction;
+import org.six_coin.playerController.client.action.PutHotbarItemAction;
+import org.six_coin.playerController.client.action.TakeItemAction;
+import org.six_coin.playerController.client.action.WaitAction;
 import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.station.StationManager;
 import org.six_coin.playerController.client.station.StationPart;
 import org.six_coin.playerController.client.station.StationPos;
 import org.six_coin.playerController.client.station.StationState;
-import org.six_coin.playerController.client.stock.StockManager;
-import org.six_coin.playerController.client.stock.StockMaterials;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.ItemList;
@@ -38,7 +45,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * {@code /pc stock task <名字> start} 的「第一部分 阶段3：分盒重装并进入第二部分」。
+ * 备货第一部分阶段3（分盒重装）：把要交付的成品装进潜影盒，盒子放去最终产物地。
  *
  * <p>按需求：
  * <ol>
@@ -73,13 +80,13 @@ import java.util.function.Supplier;
  *
  * <p>这里所有开箱子都在站立点上做（工作站里那几个容器本来就在站立点的触及范围内）。
  */
-public class StockStage3Action extends Action {
+final class Part1Stage3Pack extends StockStep {
 
     /** 最终产物暂存处固定用摆放处 id 1。 */
-    public static final int STAGING_ID = 1;
+    static final int STAGING_ID = 1;
 
-    /** 挖盒子用的是快捷栏第一格的钻石镐（阶段1 放进去的）。 */
-    private static final int PICKAXE_HOTBAR = StockStartAction.PICKAXE_HOTBAR;
+    /** 挖盒子用的是快捷栏第一格的钻石镐（准备阶段放进去的）。 */
+    private static final int PICKAXE_HOTBAR = StockTask.PICKAXE_HOTBAR;
 
     /** 捡起来的潜影盒会落在快捷栏第二格（背包下标 1）。 */
     private static final int PICKUP_HOTBAR = 1;
@@ -117,16 +124,6 @@ public class StockStage3Action extends Action {
         /** 物资存储地（从摆放处挖出来的、借来的盒子）。 */
         STORAGE
     }
-
-    private final String task;
-
-    /**
-     * 阶段2 传过来的 station_data（里面记着阶段2 往 item_storage / item_final 里倒进去的东西）。
-     *
-     * <p>传 null 就自己从 check.json 读一份（单独跑阶段3 的时候用）。
-     */
-    @Nullable
-    private final StationState handedState;
 
     private StationState state;
     /** 还要装进暂存处的成品（final_pack，**完整需求量**；每次取货会扣减它）。 */
@@ -180,27 +177,8 @@ public class StockStage3Action extends Action {
     private int replaced;
     private int takenBoxes;
 
-    public StockStage3Action(String task) {
-        this(task, null);
-    }
-
-    public StockStage3Action(String task, @Nullable StationState handedState) {
-        this.task = task;
-        this.handedState = handedState;
-    }
-
-    /**
-     * 这一轮维护的 station_data（第二部分接着用）。
-     *
-     * <p>跑完会把「下一个用哪个摆放处」留给第二部分阶段3（station_data 不落盘，只在内存里传）。
-     */
-    public StationState state() {
-        return state;
-    }
-
-    @Override
-    public String name() {
-        return "备货 " + task + " 阶段3（分盒重装）";
+    Part1Stage3Pack(String task, StockRun run) {
+        super(task, run, "第一部分阶段3（分盒重装）");
     }
 
     // ------------------------------------------------------------------
@@ -216,15 +194,15 @@ public class StockStage3Action extends Action {
         }
 
         try {
-            if (handedState != null) {
-                state = handedState;
-                ChatUtils.debug("阶段3 直接用阶段2 交过来的 station_data（里面有阶段2 倒进去的东西）");
-            } else {
-                state = StationState.load(PlayerControllerConfig.getWorld());
+            state = run.state();
+            if (state == null) {
+                fail("station_data 只在这一轮任务的内存里传，得先有取货那一步建起来");
+                return;
             }
+            ChatUtils.debug("分盒重装接着用取货那一步维护的 station_data");
             loadNeed();
         } catch (Exception e) {
-            fail("准备阶段3 失败：" + e.getMessage());
+            fail("准备分盒重装失败：" + e.getMessage());
             return;
         }
 
@@ -335,9 +313,9 @@ public class StockStage3Action extends Action {
             }
             ChatUtils.info("最终产物暂存处（摆放处 #" + STAGING_ID + "）还留着一个盒子，里面是这次没装满的成品；"
                 + "摆放处 " + placementIds + " 上借来的盒子也留在原地（下次用到那个 id 时会送回 item_storage）");
-            // 把「下一个用哪个摆放处」留给第二部分阶段3 接着用（station_data 不落盘，只在内存里传）
+            // 把「下一个用哪个摆放处」记进 station_data，后面的步骤接着用（不落盘，只在内存里传）
             state.setNextShulkerBoxPlacementId(nextPlacementId);
-            ChatUtils.debug("下一个潜影盒摆放处 id = " + nextPlacementId + "（交给第二部分阶段3）");
+            ChatUtils.debug("下一个潜影盒摆放处 id = " + nextPlacementId + "（留给后面的步骤）");
             finish();
         }
     }
@@ -564,7 +542,7 @@ public class StockStage3Action extends Action {
 
     private void pushPutHotbarBox(PutTarget target) {
         pushSync("把捡起来的盒子放进" + targetName(target), () -> {
-            // 用 station_data 里「还没满」的那些（阶段2 倒过东西，可能已经有满的了）
+            // 用 station_data 里「还没满」的那些（取货那一步倒过东西，可能已经有满的了）
             List<Integer> ids = new ArrayList<>(target == PutTarget.FINAL
                 ? state.finalTargets()
                 : state.storageTargets());

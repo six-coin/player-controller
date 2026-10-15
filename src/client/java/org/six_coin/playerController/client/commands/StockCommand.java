@@ -8,8 +8,8 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.command.CommandSource;
 import net.minecraft.text.Text;
 import org.six_coin.playerController.client.action.ActionManager;
-import org.six_coin.playerController.client.action.StockStartAction;
 import org.six_coin.playerController.client.stock.StockManager;
+import org.six_coin.playerController.client.stock.StockTask;
 
 import java.io.IOException;
 
@@ -119,7 +119,7 @@ public final class StockCommand {
 
         source.sendFeedback(Text.literal("开始备货任务 " + task
             + " —— 第一部分（预检查 → 取货 → 分盒重装）+ 第二部分（预检查 → 取货 → 合成）"));
-        ActionManager.get().submit(new StockStartAction(task));
+        ActionManager.get().submit(new StockTask(task));
         return 1;
     }
 }

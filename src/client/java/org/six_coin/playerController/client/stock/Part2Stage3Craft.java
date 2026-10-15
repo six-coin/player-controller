@@ -1,4 +1,4 @@
-package org.six_coin.playerController.client.action;
+package org.six_coin.playerController.client.stock;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -13,7 +13,18 @@ import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import org.jetbrains.annotations.Nullable;
-import org.six_coin.playerController.client.config.PlayerControllerConfig;
+import org.six_coin.playerController.client.action.Action;
+import org.six_coin.playerController.client.action.ContainerGetAction;
+import org.six_coin.playerController.client.action.ContainerPutAction;
+import org.six_coin.playerController.client.action.CraftAction;
+import org.six_coin.playerController.client.action.HotbarQuickMoveAction;
+import org.six_coin.playerController.client.action.MineBlockAction;
+import org.six_coin.playerController.client.action.MoveAction;
+import org.six_coin.playerController.client.action.PathMoveAction;
+import org.six_coin.playerController.client.action.PlaceShulkerBoxAction;
+import org.six_coin.playerController.client.action.PutHotbarItemAction;
+import org.six_coin.playerController.client.action.TakeItemAction;
+import org.six_coin.playerController.client.action.WaitAction;
 import org.six_coin.playerController.client.recipe.CraftPlan;
 import org.six_coin.playerController.client.recipe.MaxCraft;
 import org.six_coin.playerController.client.recipe.RecipePlanner;
@@ -21,12 +32,9 @@ import org.six_coin.playerController.client.station.StationManager;
 import org.six_coin.playerController.client.station.StationPart;
 import org.six_coin.playerController.client.station.StationPos;
 import org.six_coin.playerController.client.station.StationState;
-import org.six_coin.playerController.client.stock.StockManager;
-import org.six_coin.playerController.client.stock.StockMaterials;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.ItemList;
 import org.six_coin.playerController.client.util.ItemRules;
-import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointGraph;
@@ -45,7 +53,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * {@code /pc stock task <名字> start} 的「第二部分 阶段3：合成」。
+ * 备货第二部分阶段3（合成）：把收集来的材料按需求一步步合成，成品装盒交付。
  *
  * <p>照着 {@code final_steps.json} 一步一步来（它是 {@code final_process.json} 摊平出来的，
  * 顺序是「先零件后组装」）：
@@ -69,13 +77,13 @@ import java.util.function.Supplier;
  * <p>挖盒子那一整套（挖 → 自然下落捡起来 → {@code move y 1} → 回站立点 → 放进容器）跟第一部分
  * 阶段3 是一样的，飞行整段持有，中途不关。
  */
-public class StockPart2Stage3Action extends Action {
+final class Part2Stage3Craft extends StockStep {
 
     /** 最终产物暂存处固定用摆放处 id 1。 */
-    public static final int STAGING_ID = 1;
+    static final int STAGING_ID = 1;
 
     /** 挖盒子用快捷栏第一格的钻石镐。 */
-    private static final int PICKAXE_HOTBAR = StockStartAction.PICKAXE_HOTBAR;
+    private static final int PICKAXE_HOTBAR = StockTask.PICKAXE_HOTBAR;
 
     /** 捡起来的潜影盒落在快捷栏第二格。 */
     private static final int PICKUP_HOTBAR = 1;
@@ -110,11 +118,6 @@ public class StockPart2Stage3Action extends Action {
         /** 物资存储地。 */
         STORAGE
     }
-
-    private final String task;
-    /** 第二阶段2 交过来的 station_data（必须有：它不落盘）。 */
-    @Nullable
-    private final StationState handedState;
 
     private StationState state;
     private final List<StepData> steps = new ArrayList<>();
@@ -169,23 +172,8 @@ public class StockPart2Stage3Action extends Action {
     /** 拿盒子之前那个 item_storage 里有哪些盒子。 */
     private List<Map<String, Integer>> boxesBeforeTake = List.of();
 
-    public StockPart2Stage3Action(String task) {
-        this(task, null);
-    }
-
-    public StockPart2Stage3Action(String task, @Nullable StationState handedState) {
-        this.task = task;
-        this.handedState = handedState;
-    }
-
-    /** 这一轮维护的 station_data（收尾 / 单独跑的时候可以写出去）。 */
-    public StationState state() {
-        return state;
-    }
-
-    @Override
-    public String name() {
-        return "备货 " + task + " 第二阶段3（合成）";
+    Part2Stage3Craft(String task, StockRun run) {
+        super(task, run, "第二部分阶段3（合成）");
     }
 
     // ------------------------------------------------------------------
@@ -201,16 +189,15 @@ public class StockPart2Stage3Action extends Action {
         }
 
         try {
-            if (handedState == null) {
-                fail("station_data 不落盘（只在一次任务的内存里传），第二部分只能从 "
-                    + "/pc stock task <名字> start 一路跑下来");
+            state = run.state();
+            if (state == null) {
+                fail("station_data 只在这一轮任务的内存里传，得先有前面取货 / 分盒那几步建起来");
                 return;
             }
-            state = handedState;
             loadSteps();
             loadUnreachable();
         } catch (Exception e) {
-            fail("准备第二阶段3 失败：" + e.getMessage());
+            fail("准备合成失败：" + e.getMessage());
             return;
         }
 
@@ -1027,9 +1014,8 @@ public class StockPart2Stage3Action extends Action {
     /**
      * 从盒子/摆放处掏完材料之后，把**这种材料**（散装的）存回 item_storage。
      *
-     * <p>以前这里是 {@code EVERYTHING}（把 27 格整扫一遍）。改成只存这一种：
-     * 掏盒子只往物品栏里拿了这一种材料，存它一个就等价；而 {@code EVERYTHING} 会把物品栏里
-     * **别的东西**也一起扫走 —— 比如上一步特意留下来给下一步用的中间产物，
+     * <p>只存这一种：掏盒子只往物品栏里拿了这一种材料，存它一个就等价；而 {@code EVERYTHING}
+     * 会把物品栏里**别的东西**也一起扫走 —— 比如上一步特意留下来给下一步用的中间产物，
      * 那就白留了（下一步还得跑去 item_storage 收集一趟）。
      */
     private void pushStoreItemToStorage(String itemId, Runnable next) {
