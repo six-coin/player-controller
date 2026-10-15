@@ -40,8 +40,8 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " container put to_target|to_id|to_position ... all_items|all_shulker_boxes|everything §8- §7把物品栏 27 格（不含快捷栏）里的东西放进容器（输出 all_cleared）"));
                 source.sendFeedback(Text.literal("§7    §7everything_include_hotbar：连快捷栏 9 格一起放（清空整个物品栏用）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " container cache ... §8- §7容器缓存（add/add_position/add_target/add_batch、del/del_id/del_position/del_target/del_batch、optimize、list、show、get_all_items）"));
-                source.sendFeedback(Text.literal("§7  /" + name + " station ... §8- §7工作站（各部分的 set/set_target/add/del/list、show 高亮、check 检查并导出报告）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " recipe crafting_table|stonecutter <item> <count> §8- §7在工作站上合成 / 切石（成品 QuickMove 进快捷栏）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " stock station ... §8- §7工作站配置（各部分的 set/set_target/add/del/list、show 高亮、check 检查并导出报告）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " stock add_task|del_task <名字>、/" + name + " stock task <名字> start §8- §7备货（第一部分：预检查 → 取货 → 分盒重装；第二部分：预检查 → 取货 → 合成）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " waypoints ... §8- §7路径点 / 边 / 出生点"));
                 source.sendFeedback(Text.literal("§7    §7子命令：show、edit、list、optimize default|radical"));
@@ -56,7 +56,6 @@ public final class PcCommand {
             })
             .then(MoveCommand.build())
             .then(ContainerCommand.build())
-            .then(StationCommand.build())
             .then(RecipeCommand.build())
             .then(StockCommand.build())
             .then(WaypointsCommand.build())

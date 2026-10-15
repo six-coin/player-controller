@@ -40,8 +40,8 @@ import java.util.Set;
 import java.util.TreeMap;
 
 /**
- * {@code /pc station check} 的执行体（分多 tick）：把工作站里那几个容器挨个打开数一遍，
- * 验证内容相关的硬性要求，全过了就把报告写到 {@code world_<n>/station/check.json}。
+ * {@code /pc stock station check} 的执行体（分多 tick）：把工作站里那几个容器挨个打开数一遍，
+ * 验证内容相关的硬性要求，全过了就把报告写到 {@code world_<n>/stock/station/check.json}。
  *
  * <p>同步能查的（方块类型、空气、路径点、触及范围、数量）都在命令里先查过了，
  * 这里只管必须要开箱才知道的东西：

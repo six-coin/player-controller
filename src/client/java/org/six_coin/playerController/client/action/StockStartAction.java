@@ -22,15 +22,15 @@ import java.util.List;
  *
  * <p>按顺序做这些事：
  * <ol>
- *   <li>跑一遍工作站检查（{@link StationCheckAction}，和 {@code /pc station check} 同一个动作），
- *       生成 {@code station/check.json}；</li>
+ *   <li>跑一遍工作站检查（{@link StationCheckAction}，和 {@code /pc stock station check} 同一个动作），
+ *       生成 {@code stock/station/check.json}；</li>
  *   <li>把**整个物品栏**（27 格主背包 + 快捷栏 9 格，也就是 {@code everything_include_hotbar}）
  *       里的东西全放进任务前物品暂存处（item_temp）；</li>
  *   <li>从 item_temp 里拿一把**剩余耐久 ≥ 1000** 的钻石镐，放进快捷栏第一格
  *       （没有这样的镐就终止，拒绝执行）；</li>
  *   <li>跑一遍容器物品汇总（{@link ContainerItemsExporter}，和
  *       {@code /pc container cache get_all_items} 一样），生成 {@code container/all_items.json}；</li>
- *   <li>读 {@code stock/<名字>/material.json}，处理出 {@code 1_1_material_clean.json}、
+ *   <li>读 {@code stock/tasks/<名字>/material.json}，处理出 {@code 1_1_material_clean.json}、
  *       {@code 1_2_material_optimized.json} 和 {@code final_final.json}（见 {@link StockMaterials}）；</li>
  *   <li>阶段2：取货（{@link StockStage2Action}）；</li>
  *   <li>阶段3：分盒重装（{@link StockStage3Action}）；</li>

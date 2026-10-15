@@ -27,7 +27,7 @@ import java.util.TreeMap;
  *   <li>从第一部分阶段3 继承 station_data（不落盘，只在内存里传）；</li>
  *   <li>再跑一遍 {@code /pc container cache get_all_items}，重新生成 {@code container/all_items.json}
  *       （第一部分取过货的容器，缓存已经刷新过了）；</li>
- *   <li>读 {@code stock/<名字>/material.json}（跟第一部分同一份），按附件 2.1.3 处理出
+ *   <li>读 {@code stock/tasks/<名字>/material.json}（跟第一部分同一份），按附件 2.1.3 处理出
  *       {@code 2_1_process_raw.json} … {@code 2_5_material_cleaner.json}、
  *       {@code final_material.json}、{@code final_process.json}（见 {@link StockProcessMaterials}）。</li>
  * </ol>

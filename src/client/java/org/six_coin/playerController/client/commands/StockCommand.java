@@ -14,10 +14,11 @@ import org.six_coin.playerController.client.stock.StockManager;
 import java.io.IOException;
 
 /**
- * {@code /pc stock ...} —— 备货。
+ * {@code /pc stock ...} —— 备货（含工作站配置 {@code /pc stock station ...}）。
  *
  * <pre>
- * /pc stock add_task &lt;名字&gt;         新建任务（建 stock/&lt;名字&gt;/ 文件夹 + 记到 stock.json）
+ * /pc stock station ...              工作站：站位点、工作台、切石机、各容器（见 StationCommand）
+ * /pc stock add_task &lt;名字&gt;         新建任务（建 stock/tasks/&lt;名字&gt;/ 文件夹 + 记到 stock/tasks.json）
  * /pc stock del_task &lt;名字&gt;         删除任务（删文件夹 + 删记录）
  * /pc stock task &lt;名字&gt; start        完整跑一遍：第一部分（检查 → 取货 → 分盒重装）+ 第二部分（预检查 → 取货 → 合成）
  * </pre>
@@ -32,6 +33,7 @@ public final class StockCommand {
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
         return ClientCommandManager.literal("stock")
             .executes(StockCommand::status)
+            .then(StationCommand.build())
             .then(ClientCommandManager.literal("add_task")
                 .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
                     .executes(StockCommand::addTask)))

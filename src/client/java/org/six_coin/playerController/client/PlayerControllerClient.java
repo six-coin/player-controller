@@ -13,6 +13,7 @@ import org.six_coin.playerController.client.feature.AccountSwitcher;
 import org.six_coin.playerController.client.feature.AntiKick;
 import org.six_coin.playerController.client.feature.DimensionWait;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
+import org.six_coin.playerController.client.recipe.LocalRecipes;
 import org.six_coin.playerController.client.station.StationManager;
 import org.six_coin.playerController.client.station.StationRenderer;
 import org.six_coin.playerController.client.stock.StockManager;
@@ -67,6 +68,10 @@ public class PlayerControllerClient implements ClientModInitializer {
 
         // 换完账户重新进世界时补一条提示：切世界的过程中聊天栏会被清空
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> AccountSwitcher.onJoin(client));
+
+        // 配方：进世界时在后台把本地那份**完整**配方表读出来（服务端从 1.21.2 起不再同步合成配方表，
+        // 没解锁的配方只能从本地读；见 LocalRecipes）。后台读，第一次要用配方时就不用等。
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> LocalRecipes.warmUp(client));
 
         ChatUtils.debug("Player Controller 已加载，使用 /pc 查看命令；当前 debug="
             + PlayerControllerConfig.isDebug());

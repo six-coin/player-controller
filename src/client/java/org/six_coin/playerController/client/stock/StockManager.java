@@ -21,27 +21,27 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * 备货任务表：{@code config/player-controller/world_<n>/stock.json}（就是一个任务名数组），
- * 每个任务一个文件夹 {@code stock/<名字>/}，里面放材料清单和中间产物。
+ * 备货任务表：{@code config/player-controller/world_<n>/stock/tasks.json}（就是一个任务名数组），
+ * 每个任务一个文件夹 {@code stock/tasks/<名字>/}，里面放材料清单和中间产物。
  *
  * <pre>
- * stock.json           ["test_task", "test_task_2"]
- * stock/&lt;名字&gt;/material.json              用户手写放进去的
- * stock/&lt;名字&gt;/1_1_material_clean.json    第一部分阶段1 第 1 步产物
- * stock/&lt;名字&gt;/1_2_material_optimized.json 第一部分阶段1 第 2 步产物（要去容器里取多少）
- * stock/&lt;名字&gt;/final_final.json            第一部分阶段2 照它取货（1_2 的副本）
- * stock/&lt;名字&gt;/1_3_material_can_access_all.json 第一部分阶段1 第 4 步产物（完整需求量，凑得齐的）
- * stock/&lt;名字&gt;/final_pack.json             第一部分阶段3 照它分盒（1_3 的副本）
- * stock/&lt;名字&gt;/2_1_process_raw.json        第二部分阶段1 第 1 步产物
- * stock/&lt;名字&gt;/2_2_material_raw.json       第二部分阶段1 第 2 步产物
- * stock/&lt;名字&gt;/2_3_material_clean.json     第二部分阶段1 第 3 步产物
- * stock/&lt;名字&gt;/2_4_process_clean.json      第二部分阶段1 第 4 步产物
- * stock/&lt;名字&gt;/2_5_material_cleaner.json   第二部分阶段1 第 5 步产物
- * stock/&lt;名字&gt;/2_6_material_final.json     第二部分阶段1 第 6 步产物
- * stock/&lt;名字&gt;/final_material.json         第二部分阶段2 照着它取货（2_6 的副本）
- * stock/&lt;名字&gt;/final_process.json          第二部分阶段3 合成用（2_4 的副本）
- * stock/&lt;名字&gt;/final_steps.json            第二部分阶段3 照着它一步步合成（final_process 摊平）
- * stock/&lt;名字&gt;/unreachable.json            整个过程中拿不到的最终产物
+ * tasks.json           ["test_task", "test_task_2"]
+ * stock/tasks/&lt;名字&gt;/material.json              用户手写放进去的
+ * stock/tasks/&lt;名字&gt;/1_1_material_clean.json    第一部分阶段1 第 1 步产物
+ * stock/tasks/&lt;名字&gt;/1_2_material_optimized.json 第一部分阶段1 第 2 步产物（要去容器里取多少）
+ * stock/tasks/&lt;名字&gt;/final_final.json            第一部分阶段2 照它取货（1_2 的副本）
+ * stock/tasks/&lt;名字&gt;/1_3_material_can_access_all.json 第一部分阶段1 第 4 步产物（完整需求量，凑得齐的）
+ * stock/tasks/&lt;名字&gt;/final_pack.json             第一部分阶段3 照它分盒（1_3 的副本）
+ * stock/tasks/&lt;名字&gt;/2_1_process_raw.json        第二部分阶段1 第 1 步产物
+ * stock/tasks/&lt;名字&gt;/2_2_material_raw.json       第二部分阶段1 第 2 步产物
+ * stock/tasks/&lt;名字&gt;/2_3_material_clean.json     第二部分阶段1 第 3 步产物
+ * stock/tasks/&lt;名字&gt;/2_4_process_clean.json      第二部分阶段1 第 4 步产物
+ * stock/tasks/&lt;名字&gt;/2_5_material_cleaner.json   第二部分阶段1 第 5 步产物
+ * stock/tasks/&lt;名字&gt;/2_6_material_final.json     第二部分阶段1 第 6 步产物
+ * stock/tasks/&lt;名字&gt;/final_material.json         第二部分阶段2 照着它取货（2_6 的副本）
+ * stock/tasks/&lt;名字&gt;/final_process.json          第二部分阶段3 合成用（2_4 的副本）
+ * stock/tasks/&lt;名字&gt;/final_steps.json            第二部分阶段3 照着它一步步合成（final_process 摊平）
+ * stock/tasks/&lt;名字&gt;/unreachable.json            整个过程中拿不到的最终产物
  * </pre>
  */
 public final class StockManager {
@@ -54,9 +54,9 @@ public final class StockManager {
     private static final Type FILE_TYPE = new TypeToken<List<String>>() {
     }.getType();
 
-    private static final String FILE_NAME = "stock.json";
+    private static final String FILE_NAME = "tasks.json";
 
-    /** 任务名同时也是文件夹名，限制一下别让它跑出 stock 目录。 */
+    /** 任务名同时也是文件夹名，限制一下别让它跑出 tasks 目录。 */
     private static final Pattern NAME_PATTERN = Pattern.compile("[A-Za-z0-9_\\-]{1,64}");
 
     private static final StockManager INSTANCE = new StockManager();
@@ -77,11 +77,12 @@ public final class StockManager {
     // ------------------------------------------------------------------
 
     public static Path stockFile(int world) {
-        return WaypointManager.worldDir(world).resolve(FILE_NAME);
+        return WaypointManager.worldDir(world).resolve("stock").resolve(FILE_NAME);
     }
 
+    /** 任务文件夹的父目录：{@code world_<n>/stock/tasks/}。 */
     public static Path stockDir(int world) {
-        return WaypointManager.worldDir(world).resolve("stock");
+        return WaypointManager.worldDir(world).resolve("stock").resolve("tasks");
     }
 
     public static Path taskDir(int world, String task) {
@@ -271,7 +272,7 @@ public final class StockManager {
         Path path = stockFile(world);
         if (!Files.exists(path)) {
             loadedOk = true;
-            ChatUtils.debug("world_" + world + " 还没有 stock.json，用空的: " + path);
+            ChatUtils.debug("world_" + world + " 还没有 tasks.json，用空的: " + path);
             return;
         }
 

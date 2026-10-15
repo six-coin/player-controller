@@ -37,23 +37,23 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * {@code /pc station ...} —— 工作站：站位点、工作台、切石机、任务前物品暂存处、
+ * {@code /pc stock station ...} —— 工作站：站位点、工作台、切石机、任务前物品暂存处、
  * 空潜影盒提供处、潜影盒摆放处、物资存储地、最终产物地。
  *
  * <pre>
- * /pc station show                          开关高亮（各部分颜色见 StationPart）
- * /pc station list                          列出所有部分的坐标
- * /pc station check                         检查工作站是否就绪，过了就写 station/check.json
+ * /pc stock station show                          开关高亮（各部分颜色见 StationPart）
+ * /pc stock station list                          列出所有部分的坐标
+ * /pc stock station check                         检查工作站是否就绪，过了就写 stock/station/check.json
  *
- * /pc station stand_point set_here          把站立点设在脚下（当前维度）
- * /pc station stand_point set &lt;x&gt; &lt;y&gt; &lt;z&gt;
- * /pc station crafting_table set_target     工作台
- * /pc station stonecutter set_target        切石机
- * /pc station item_temp set_target          任务执行前的物品暂存处
- * /pc station shulker_box_provider set_target   空潜影盒提供处
- * /pc station &lt;crafting_table|stonecutter|item_temp|shulker_box_provider&gt; set &lt;x&gt; &lt;y&gt; &lt;z&gt;
- * /pc station &lt;shulker_box_placement|item_storage|item_final&gt; add_target|add &lt;x&gt; &lt;y&gt; &lt;z&gt;
- * /pc station &lt;...&gt; del_target|del &lt;x&gt; &lt;y&gt; &lt;z&gt; [dim] |list
+ * /pc stock station stand_point set_here          把站立点设在脚下（当前维度）
+ * /pc stock station stand_point set &lt;x&gt; &lt;y&gt; &lt;z&gt;
+ * /pc stock station crafting_table set_target     工作台
+ * /pc stock station stonecutter set_target        切石机
+ * /pc stock station item_temp set_target          任务执行前的物品暂存处
+ * /pc stock station shulker_box_provider set_target   空潜影盒提供处
+ * /pc stock station &lt;crafting_table|stonecutter|item_temp|shulker_box_provider&gt; set &lt;x&gt; &lt;y&gt; &lt;z&gt;
+ * /pc stock station &lt;shulker_box_placement|item_storage|item_final&gt; add_target|add &lt;x&gt; &lt;y&gt; &lt;z&gt;
+ * /pc stock station &lt;...&gt; del_target|del &lt;x&gt; &lt;y&gt; &lt;z&gt; [dim] |list
  * </pre>
  *
  * <p>坐标都带维度（station.json 里也是）：set / add 用当前维度；del 想删别的维度的可以补一个 [dim]。
@@ -62,7 +62,7 @@ import java.util.List;
  */
 public final class StationCommand {
 
-    private static final String ROOT = "/pc station ";
+    private static final String ROOT = "/pc stock station ";
 
     private StationCommand() {
     }
@@ -103,7 +103,7 @@ public final class StationCommand {
     private static int toggleShow(CommandContext<FabricClientCommandSource> context) {
         boolean showing = StationManager.get().toggleShow();
         context.getSource().sendFeedback(Text.literal("工作站高亮已"
-            + (showing ? "§a开启" : "§c关闭") + "§r（各部分的颜色见 /pc station list 的行首标签）"));
+            + (showing ? "§a开启" : "§c关闭") + "§r（各部分的颜色见 /pc stock station list 的行首标签）"));
         return 1;
     }
 

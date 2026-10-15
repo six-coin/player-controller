@@ -22,7 +22,7 @@ import java.util.List;
 /**
  * 工作站检查里「不开箱子就能查」的那部分硬性要求。
  *
- * <p>{@code /pc station check} 和 {@code /pc stock task <名字> start} 用的是同一套，
+ * <p>{@code /pc stock station check} 和 {@code /pc stock task <名字> start} 用的是同一套，
  * 所以放在这里，别在两个地方各写一遍。
  *
  * <p>内容相关的（大箱子空不空、木桶里是不是空潜影盒、空闲格够不够）必须开箱才知道，
@@ -58,7 +58,7 @@ public final class StationPrecheck {
         // 必须站在站立点上（同一个维度、同一个坐标）
         StationPos stand = manager.single(StationPart.STAND_POINT);
         if (stand == null) {
-            problems.add("还没有设置站立点（站到工作站中间，/pc station stand_point set_here）");
+            problems.add("还没有设置站立点（站到工作站中间，/pc stock station stand_point set_here）");
             return new Result(problems, hints);
         }
         if (!stand.dimension().equals(dimension)) {

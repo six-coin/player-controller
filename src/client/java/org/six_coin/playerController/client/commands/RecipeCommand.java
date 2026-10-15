@@ -77,7 +77,7 @@ public final class RecipeCommand {
         // 1. 必须站在站立点上，工作站要设了对应的方块、而且那里真的是那个方块
         StationPos stand = StationManager.get().single(StationPart.STAND_POINT);
         if (stand == null) {
-            source.sendError(Text.literal("还没有设置工作站站立点：先站到工作站中间，/pc station stand_point set_here"));
+            source.sendError(Text.literal("还没有设置工作站站立点：先站到工作站中间，/pc stock station stand_point set_here"));
             return 0;
         }
         if (!stand.dimension().equals(DimensionUtils.current())) {
@@ -94,7 +94,7 @@ public final class RecipeCommand {
 
         StationPos stationPos = StationManager.get().single(part);
         if (stationPos == null) {
-            source.sendError(Text.literal("工作站还没有设置" + part.display() + "（/pc station "
+            source.sendError(Text.literal("工作站还没有设置" + part.display() + "（/pc stock station "
                 + part.id() + " set_target）"));
             return 0;
         }

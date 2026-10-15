@@ -29,13 +29,15 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 配方规划：从「配方书 / 切石机配方」里找出能做出目标物品的配方，检查材料够不够、
- * 能不能一次摆到格子里，最后给出一份 {@link CraftPlan}。
+ * 配方规划：从「配方书 / 本地完整配方表 / 切石机配方」里找出能做出目标物品的配方，
+ * 检查材料够不够、能不能一次摆到格子里，最后给出一份 {@link CraftPlan}。
  *
  * <p>几点说明：
  * <ul>
- *   <li>1.21.11 的客户端拿不到完整的合成配方表（{@code RecipeManager} 只剩原料属性表和切石机），
- *       能用的只有配方书里同步过来的显示数据，也就是**已经解锁过的配方** —— 没解锁的找不到；</li>
+ *   <li>工作台配方有两个来源：配方书（服务器同步过来的、**已经解锁**的）和本地完整配方表
+ *       （{@link LocalRecipes}：单人问集成的服务端，联机读客户端自带的原版数据包）。
+ *       服务端 1.21.2 起不再同步合成配方表，所以没解锁的配方只能从本地表里找 ——
+ *       合成本身跟解锁没关系，服务端是拿格子里的材料去它自己的完整表里匹配的；</li>
  *   <li>材料只看主背包 27 格（不含快捷栏 9 格）；</li>
  *   <li>材料一格装不下（要合的次数超过堆叠上限）就**分几轮**：每轮摆能摆的最大值，合完再摆下一轮，
  *       不再因此拒绝执行（需求里明说的）；</li>
@@ -72,58 +74,85 @@ public final class RecipePlanner {
     // 候选配方
     // ------------------------------------------------------------------
 
-    /** 配方书里所有能做出 {@code target} 的工作台配方。 */
+    /** 能做出 {@code target} 的工作台配方：配方书里已经解锁的先来，再接上本地完整配方表。 */
     public static List<Option> craftingOptions(Item target) {
         MinecraftClient mc = MinecraftClient.getInstance();
         ClientPlayerEntity player = mc.player;
         if (player == null || mc.world == null) return List.of();
 
         ContextParameterMap context = SlotDisplayContexts.createParameters(mc.world);
-        List<RecipeDisplayEntry> entries = new ArrayList<>();
-        for (RecipeResultCollection collection : player.getRecipeBook().getOrderedResults()) {
-            entries.addAll(collection.getAllRecipes());
-        }
-
         List<Option> options = new ArrayList<>();
         Set<String> seen = new HashSet<>();
 
-        for (RecipeDisplayEntry entry : entries) {
-            RecipeDisplay display = entry.display();
-
-            List<SlotDisplay> ingredients;
-            boolean shaped;
-            int width;
-            String recipeType;
-            if (display instanceof ShapedCraftingRecipeDisplay shapedDisplay) {
-                shaped = true;
-                ingredients = shapedDisplay.ingredients();
-                width = Math.max(1, shapedDisplay.width());
-                recipeType = "crafting_shaped";
-            } else if (display instanceof ShapelessCraftingRecipeDisplay shapelessDisplay) {
-                shaped = false;
-                ingredients = shapelessDisplay.ingredients();
-                width = 3;
-                recipeType = "crafting_shapeless";
-            } else {
-                continue;
+        // 1) 配方书：服务器同步过来的、这个号**已经解锁**的（顺序还是配方书里的顺序）
+        for (RecipeResultCollection collection : player.getRecipeBook().getOrderedResults()) {
+            for (RecipeDisplayEntry entry : collection.getAllRecipes()) {
+                addOption(entry.display(), target, context, seen, options);
             }
+        }
 
-            ItemStack result = display.result().getFirst(context);
-            if (result.isEmpty() || !result.isOf(target)) continue;
-            if (!seen.add(entry.id() + " " + ingredients.size())) continue;
-
-            List<List<Item>> cells = new ArrayList<>();
-            for (SlotDisplay slot : ingredients) {
-                List<Item> accepted = new ArrayList<>();
-                for (ItemStack option : slot.getStacks(context)) {
-                    if (!option.isEmpty()) accepted.add(option.getItem());
-                }
-                cells.add(accepted);
-            }
-
-            options.add(new Option(recipeType, Math.max(1, result.getCount()), shaped, width, cells));
+        // 2) 本地完整配方表：没解锁的配方也能用（见 LocalRecipes）。
+        //    放后面是为了「解锁过的配方怎么选，还跟以前一样」，只有配方书里没有的才用到本地表。
+        for (RecipeDisplay display : LocalRecipes.craftingDisplays(mc)) {
+            addOption(display, target, context, seen, options);
         }
         return options;
+    }
+
+    /** 把一个配方的显示数据变成候选项：有形状按 width 摆进 3×3，无序的就一格一个。 */
+    private static void addOption(RecipeDisplay display, Item target, ContextParameterMap context,
+                                  Set<String> seen, List<Option> options) {
+        List<SlotDisplay> ingredients;
+        boolean shaped;
+        int width;
+        String recipeType;
+        if (display instanceof ShapedCraftingRecipeDisplay shapedDisplay) {
+            shaped = true;
+            ingredients = shapedDisplay.ingredients();
+            width = Math.max(1, shapedDisplay.width());
+            recipeType = "crafting_shaped";
+        } else if (display instanceof ShapelessCraftingRecipeDisplay shapelessDisplay) {
+            shaped = false;
+            ingredients = shapelessDisplay.ingredients();
+            width = 3;
+            recipeType = "crafting_shapeless";
+        } else {
+            return;
+        }
+
+        ItemStack result = display.result().getFirst(context);
+        if (result.isEmpty() || !result.isOf(target)) return;
+
+        List<List<Item>> cells = new ArrayList<>();
+        for (SlotDisplay slot : ingredients) {
+            List<Item> accepted = new ArrayList<>();
+            for (ItemStack option : slot.getStacks(context)) {
+                if (!option.isEmpty()) accepted.add(option.getItem());
+            }
+            cells.add(accepted);
+        }
+
+        // 两个来源会给同一份配方（本地表里当然也有解锁过的那些），内容一样就只留一份
+        int perCraft = Math.max(1, result.getCount());
+        if (!seen.add(signature(recipeType, perCraft, shaped, width, cells))) return;
+
+        options.add(new Option(recipeType, perCraft, shaped, width, cells));
+    }
+
+    /** 一份配方的「内容指纹」：单次产量、形状、每格能放什么 —— 用来去重。 */
+    private static String signature(String recipeType, int perCraft, boolean shaped, int width,
+                                    List<List<Item>> cells) {
+        StringBuilder sb = new StringBuilder(recipeType)
+            .append('|').append(perCraft)
+            .append('|').append(shaped)
+            .append('|').append(width);
+        for (List<Item> cell : cells) {
+            sb.append('|');
+            for (Item item : cell) {
+                sb.append(Registries.ITEM.getId(item)).append(',');
+            }
+        }
+        return sb.toString();
     }
 
     /** 服务器同步过来的、能切出 {@code target} 的切石机配方。 */
@@ -172,7 +201,7 @@ public final class RecipePlanner {
 
         List<Option> options = craftingOptions(target);
         if (options.isEmpty()) {
-            return fail("配方书里没有能做出 " + name(target) + " 的配方（没解锁的配方客户端看不到）");
+            return fail("配方表里没有能做出 " + name(target) + " 的配方（配方书和本地原版配方表都找过了）");
         }
 
         Map<Item, Integer> available = inventoryCounts(player);

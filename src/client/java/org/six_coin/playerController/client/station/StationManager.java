@@ -21,9 +21,10 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 工作站数据的读写：{@code config/player-controller/world_<n>/station.json}。
+ * 工作站数据的读写：{@code config/player-controller/world_<n>/stock/station/station.json}。
  *
- * <p>格式见 {@link StationData}；检查报告写到同目录的 {@code station/check.json}。
+ * <p>格式见 {@link StationData}；检查报告写到同目录的 {@code check.json}
+ * （{@code world_<n>/stock/station/check.json}）。
  *
  * <p>坐标不带维度（按需求给的文件格式），所以 show / check 这些都是「当前维度的这些坐标」。
  */
@@ -54,13 +55,18 @@ public final class StationManager {
     // 文件
     // ------------------------------------------------------------------
 
-    public static Path stationFile(int world) {
-        return WaypointManager.worldDir(world).resolve(FILE_NAME);
+    /** 工作站数据的目录：{@code world_<n>/stock/station/}。 */
+    public static Path stationDir(int world) {
+        return WaypointManager.worldDir(world).resolve("stock").resolve("station");
     }
 
-    /** 检查报告：{@code world_<n>/station/check.json}。 */
+    public static Path stationFile(int world) {
+        return stationDir(world).resolve(FILE_NAME);
+    }
+
+    /** 检查报告：{@code world_<n>/stock/station/check.json}。 */
     public static Path checkFile(int world) {
-        return WaypointManager.worldDir(world).resolve("station").resolve("check.json");
+        return stationDir(world).resolve("check.json");
     }
 
     public Path currentFile() {
