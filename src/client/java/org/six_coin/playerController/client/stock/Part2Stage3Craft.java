@@ -152,6 +152,8 @@ final class Part2Stage3Craft extends StockStep {
     private boolean executing;
     private Action child;
     private Consumer<Action> afterChild;
+    /** 正在跑的那个子动作在步骤队列里的说法（出错时用来交代走哪一步挂的）。 */
+    private String runningLabel = "";
 
     /** 飞行持有（挖盒子那一段「挖 → 落 → 捡 → 飞上来 → 走回去」中途不关）。 */
     private boolean flightHeld;
@@ -258,7 +260,7 @@ final class Part2Stage3Craft extends StockStep {
 
             done.cleanup();
             if (done.failureReason() != null) {
-                fail("子任务失败（" + done.name() + "）：" + done.failureReason());
+                fail(runningLabel + " → " + done.failureReason());
                 return;
             }
             if (after != null) runWithInsertion(() -> after.accept(done));
@@ -283,6 +285,7 @@ final class Part2Stage3Craft extends StockStep {
                 return;
             }
             child = action;
+            runningLabel = childStep.label();
             afterChild = childStep.after();
             child.start();
             return;
@@ -299,9 +302,6 @@ final class Part2Stage3Craft extends StockStep {
     @Override
     protected void onEnd() {
         endFlightHold();
-        if (failureReason() != null) {
-            ChatUtils.error(name() + "没做完：" + failureReason());
-        }
     }
 
     // ------------------------------------------------------------------

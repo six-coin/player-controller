@@ -198,7 +198,7 @@ public class StationCheckAction extends Action {
         if (session != null) session.close(MinecraftClient.getInstance());
 
         if (failureReason() != null) {
-            ChatUtils.error("工作站检查中断：" + failureReason());
+            // 原因由 Action#cleanup 报一行；这里只把已经查出来的问题列出来
             for (String problem : problems) ChatUtils.error("  · " + problem);
             return;
         }

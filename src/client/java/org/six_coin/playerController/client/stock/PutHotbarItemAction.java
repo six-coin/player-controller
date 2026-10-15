@@ -207,7 +207,6 @@ public class PutHotbarItemAction extends Action {
 
         if (failureReason() != null) {
             allCleared = false;
-            ChatUtils.error(name() + "失败：" + failureReason());
         }
 
         JsonObject result = new JsonObject();
@@ -340,14 +339,18 @@ public class PutHotbarItemAction extends Action {
         return ItemStack.EMPTY;
     }
 
-    /** 点一下（该等的结果交给 {@link Step}）。 */
+    /**
+     * 点一下（该等的结果交给 {@link Step}）。
+     *
+     * <p>光标上有多少个要**在点之前**记下来：点击是本地预测的，点完这一刻光标数字已经变了，
+     * 之后再读就把「点之后」当成「点之前」，判断不出这一下有没有放进去（尤其是往同类半叠上合并的那种）。
+     */
     private void click(Slot slot, int button, SlotActionType type, String action, Step step) {
-        ScreenHandler handler = session.handler();
+        clickCursorCount = session.handler().getCursorStack().getCount();
         if (!session.click(slot, button, type, action)) {
             fail("点不了格子（" + action + "）");
             return;
         }
-        clickCursorCount = handler.getCursorStack().getCount();
         pendingClick = true;
         pendingStep = step;
         stepWaitTicks = 0;

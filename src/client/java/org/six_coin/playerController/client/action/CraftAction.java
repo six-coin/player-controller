@@ -185,8 +185,7 @@ public class CraftAction extends Action {
         session.close(MinecraftClient.getInstance());
 
         if (failureReason() != null) {
-            ChatUtils.error(name() + "失败：" + failureReason());
-            return;
+            return;   // 原因由 Action#cleanup 报一行
         }
 
         output().info(name() + "完成：" + id(plan.target()) + " x" + plan.actualCount()

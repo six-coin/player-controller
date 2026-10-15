@@ -136,6 +136,8 @@ final class Part1Stage3Pack extends StockStep {
     private final Deque<Step> steps = new ArrayDeque<>();
     private Action child;
     private Consumer<Action> afterChild;
+    /** 正在跑的那个子动作在步骤队列里的说法（出错时用来交代走哪一步挂的）。 */
+    private String runningLabel = "";
 
     /**
      * 正在跑的这一步（同步步骤 / 子动作的收尾回调）里新加的步骤。
@@ -269,7 +271,7 @@ final class Part1Stage3Pack extends StockStep {
 
             done.cleanup();
             if (done.failureReason() != null) {
-                fail("子任务失败（" + done.name() + "）：" + done.failureReason());
+                fail(runningLabel + " → " + done.failureReason());
                 return;
             }
             if (after != null) runWithInsertion(() -> after.accept(done));
@@ -295,6 +297,7 @@ final class Part1Stage3Pack extends StockStep {
                 return;
             }
             child = action;
+            runningLabel = childStep.label();
             afterChild = childStep.after();
             child.start();
             return;
@@ -318,9 +321,6 @@ final class Part1Stage3Pack extends StockStep {
     @Override
     protected void onEnd() {
         endFlightHold();
-        if (failureReason() != null) {
-            ChatUtils.error(name() + "没做完：" + failureReason());
-        }
     }
 
     // ------------------------------------------------------------------

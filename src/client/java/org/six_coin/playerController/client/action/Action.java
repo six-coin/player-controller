@@ -88,10 +88,15 @@ public abstract class Action {
         } catch (Exception e) {
             ChatUtils.error(name() + " 收尾异常: " + e);
         }
+
+        // 只有「命令直接要的」那个动作报成功 / 失败：被内嵌跑的子动作把原因交给调用方往上带，
+        // 由最外面那一个动作报一行（不然一层套一层，同一句话要刷好几遍）。
         if (failureReason == null) {
             ChatUtils.debug("✔ 完成: " + name());
-        } else {
+        } else if (output().isEnabled()) {
             ChatUtils.error("✘ 失败: " + name() + " —— " + failureReason);
+        } else {
+            ChatUtils.debug("✘ 失败: " + name() + " —— " + failureReason);
         }
     }
 

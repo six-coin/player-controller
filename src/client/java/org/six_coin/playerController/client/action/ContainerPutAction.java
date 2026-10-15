@@ -263,7 +263,6 @@ public class ContainerPutAction extends Action {
 
         if (failureReason() != null) {
             allCleared = false;
-            ChatUtils.error(name() + "失败：" + failureReason());
         }
 
         JsonObject result = new JsonObject();

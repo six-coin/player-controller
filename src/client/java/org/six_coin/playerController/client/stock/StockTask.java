@@ -71,13 +71,15 @@ public final class StockTask extends Action {
     protected void tick() {
         Action finished = steps.tick();
         if (finished != null) {
-            ChatUtils.info("第 " + steps.number() + "/" + steps.total() + " 步完成：" + finished.name());
+            ChatUtils.info("第 " + steps.number() + "/" + steps.total() + " 步完成："
+                + phaseOf(finished));
         }
 
         Action failed = steps.failedStep();
         if (failed != null) {
-            fail("第 " + steps.number() + "/" + steps.total() + " 步（" + failed.name() + "）失败："
-                + failed.failureReason());
+            // 失败原因一层层往上带，最后只由 Action 的收尾报一行
+            fail("第 " + steps.number() + "/" + steps.total() + " 步 " + phaseOf(failed)
+                + " → " + failed.failureReason());
             return;
         }
 
@@ -87,10 +89,8 @@ public final class StockTask extends Action {
         }
     }
 
-    @Override
-    protected void onEnd() {
-        if (failureReason() != null) {
-            ChatUtils.error(name() + "没做完：" + failureReason());
-        }
+    /** 打进度 / 失败信息用的名字：流水线的步骤就是它的阶段名。 */
+    private static String phaseOf(Action action) {
+        return action instanceof StockStep step ? step.phase() : action.name();
     }
 }

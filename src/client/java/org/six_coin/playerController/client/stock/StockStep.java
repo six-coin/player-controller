@@ -29,4 +29,9 @@ abstract class StockStep extends Action {
     public final String name() {
         return "备货 " + task + " " + phase;
     }
+
+    /** 这一步在流程里的名字（不含任务名），用来打「第 x/y 步 …」这种进度 / 失败信息。 */
+    String phase() {
+        return phase;
+    }
 }

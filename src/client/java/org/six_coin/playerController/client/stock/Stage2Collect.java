@@ -210,9 +210,7 @@ abstract class Stage2Collect extends StockStep {
 
     @Override
     protected void onEnd() {
-        if (failureReason() != null) {
-            ChatUtils.error(name() + "没做完：" + failureReason());
-        }
+        // 失败原因由最外层那个动作报一行（见 Action#cleanup），这里不重复说
     }
 
     // ------------------------------------------------------------------
@@ -341,7 +339,8 @@ abstract class Stage2Collect extends StockStep {
         String failure = child == null ? null : child.failureReason();
         Stage done = stage;
         if (failure != null) {
-            fail("子任务失败（" + done + "）：" + failure);
+            // 只带一层上下文（哪个子动作挂的），原因本身不再重复包
+            fail((child == null ? "子动作" : child.name()) + " → " + failure);
             return;
         }
 
