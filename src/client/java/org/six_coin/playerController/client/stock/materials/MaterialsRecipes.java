@@ -19,6 +19,7 @@ import org.six_coin.playerController.client.recipe.LocalRecipes;
 import org.six_coin.playerController.client.util.ChatUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -414,7 +415,8 @@ public final class MaterialsRecipes {
             }
             picked.add(item);
         }
-        return new Decision(chosen, null, List.copyOf(picked));
+        // 注意：空格子对应 null，所以这里不能用 List.copyOf（它不收 null）
+        return new Decision(chosen, null, Collections.unmodifiableList(picked));
     }
 
     private static Problem ambiguous() {

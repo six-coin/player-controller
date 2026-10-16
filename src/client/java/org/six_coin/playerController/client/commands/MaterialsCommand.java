@@ -101,6 +101,10 @@ public final class MaterialsCommand {
         } catch (IOException e) {
             source.sendError(Text.literal("生成材料清单失败：" + e.getMessage()));
             return 0;
+        } catch (RuntimeException e) {
+            // 没预料到的错也要说话，不然聊天栏一片空白、只能去翻日志
+            source.sendError(Text.literal("生成材料清单时出错了（这算 bug，把日志发我）：" + e));
+            return 0;
         }
 
         if (!result.ok()) {
@@ -120,7 +124,7 @@ public final class MaterialsCommand {
     /** 生成失败时的汇总（每一行都能点，点了自动填好对应的命令）。 */
     private static void sendIssues(FabricClientCommandSource source, String task,
                                    MaterialsGenerator.Result result) {
-        source.sendError(Text.literal("材料列表生成失败："));
+        source.sendError(Text.literal("材料列表生成失败：" + result.issues().size() + " 处"));
         for (MaterialTreeBuilder.Issue issue : result.issues()) {
             MutableText line = Text.literal(" ");
             line.append(button("[处理]", commandFor(issue)));
@@ -151,7 +155,9 @@ public final class MaterialsCommand {
             case BAD_PREFERENCE -> Text.literal("偏好不对：").append(itemLabel(issue.item()))
                 .append(Text.literal("定成了 " + issue.detail() + "，但这条配方做不出它"));
             case UNDECIDED_TAG -> Text.literal("未决定的标签："
-                + MaterialsConfig.tagId(issue.tag()));
+                + MaterialsConfig.tagId(issue.tag()))
+                .append(Text.literal("（做 " + MaterialsConfig.itemId(issue.item()) + " 的时候用到）")
+                    .formatted(Formatting.GRAY));
             case UNDECIDED_INGREDIENT -> Text.literal("未决定的原料：" + issue.detail() + " 这一格（")
                 .append(namesOf(issue.items())).append(Text.literal("）"));
             case TOO_BIG -> Text.literal("材料树太大了（超过 " + MaterialTreeBuilder.MAX_NODES

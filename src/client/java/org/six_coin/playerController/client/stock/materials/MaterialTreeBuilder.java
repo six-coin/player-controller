@@ -32,16 +32,21 @@ import java.util.Map;
  * 不会因为一处出错就看不见别处的问题。
  *
  * <p>另外有两个兜底，免得循环把游戏卡死（循环要是带分支，光靠层数会长出天文数字的节点）：
- * 同一条链上同一个物品第二次出现就判循环（报的也是那个物品，比数到 50 层更准），
- * 整棵树超过 {@value #MAX_NODES} 个节点就停止再往下追。
+ * 同一条链上同一个物品第二次出现就判循环（报的也是那个物品，比数层数更准），
+ * **一棵树**超过 {@value #MAX_NODES} 个节点就停止再往下追。
  */
 public final class MaterialTreeBuilder {
 
-    /** 最多追多少层；到了就认为踩上循环了。 */
+    /** 最多追多少层；到了就认为踩上循环了（真正的循环已经被「链上重复」拦住了，这是兜底）。 */
     public static final int MAX_DEPTH = 10;
 
-    /** 整棵树最多几个节点；超了就停止再往下追（八成是循环）。 */
-    public static final int MAX_NODES = 100;
+    /**
+     * **一棵**树最多几个节点；超了就停止再往下追（八成是循环）。
+     *
+     * <p>一棵正常的材料树通常只有几个到几十个节点，所以这个数只管「明显不正常」的情况；
+     * 它是**每棵**树的上限，不是整份清单的上限 —— 投影里有几百种最终产物是常事。
+     */
+    public static final int MAX_NODES = 500;
 
     /** 一个问题。 */
     public record Issue(Kind kind, Item item, @Nullable TagKey<Item> tag,
@@ -76,9 +81,14 @@ public final class MaterialTreeBuilder {
     /** 当前这条链上已经追过的物品（判循环用）。 */
     private final List<Item> path = new ArrayList<>();
 
+    /** 整份清单一共追了多少个节点（只看日志）。 */
     private int nodes = 0;
-    private int deepest = 0;
+
+    /** 当前这棵树追了多少个节点 / 有没有报过「太大了」。 */
+    private int treeNodes = 0;
     private boolean tooBig = false;
+
+    private int deepest = 0;
 
     private MaterialTreeBuilder(MaterialsRecipes index, MaterialsConfig config) {
         this.index = index;
@@ -92,6 +102,8 @@ public final class MaterialTreeBuilder {
 
         List<MaterialTreeNode> roots = new ArrayList<>();
         for (Map.Entry<Item, Integer> entry : wanted.entrySet()) {
+            builder.treeNodes = 0;
+            builder.tooBig = false;
             roots.add(builder.node(entry.getKey(), entry.getValue(), 0));
         }
 
@@ -104,6 +116,7 @@ public final class MaterialTreeBuilder {
 
     private MaterialTreeNode node(Item item, int need, int depth) {
         nodes++;
+        treeNodes++;
         deepest = Math.max(deepest, depth + 1);
 
         if (need <= 0) return new MaterialTreeNode(item, 0, null, List.of());
@@ -112,12 +125,15 @@ public final class MaterialTreeBuilder {
             report(new Issue(Issue.Kind.LOOP, item, null, null, List.of()));
             return new MaterialTreeNode(item, need, null, List.of());
         }
-        if (depth >= MAX_DEPTH || nodes > MAX_NODES) {
-            if (nodes > MAX_NODES && !tooBig) {
+        if (depth >= MAX_DEPTH) {
+            report(new Issue(Issue.Kind.LOOP, item, null, null, List.of()));
+            return new MaterialTreeNode(item, need, null, List.of());
+        }
+        if (treeNodes > MAX_NODES) {
+            // 每棵树只报一次，不然剩下的节点会挨个报一遍
+            if (!tooBig) {
                 tooBig = true;
                 report(new Issue(Issue.Kind.TOO_BIG, item, null, null, List.of()));
-            } else {
-                report(new Issue(Issue.Kind.LOOP, item, null, null, List.of()));
             }
             return new MaterialTreeNode(item, need, null, List.of());
         }
@@ -147,12 +163,23 @@ public final class MaterialTreeBuilder {
         path.add(item);
         try {
             for (Map.Entry<Item, Integer> entry : wanted.entrySet()) {
-                subs.add(node(entry.getKey(), crafts * entry.getValue(), depth + 1));
+                subs.add(node(entry.getKey(), demand(crafts, entry.getValue()), depth + 1));
             }
         } finally {
             path.remove(path.size() - 1);
         }
         return new MaterialTreeNode(item, need, recipe, List.copyOf(subs));
+    }
+
+    /** 下一层要几个：{@code 合几次 × 这一格用几个}（乘出来太大就截住，免得溢出成负数）。 */
+    private static int demand(int crafts, int perSlot) {
+        long total = (long) crafts * perSlot;
+        if (total > Integer.MAX_VALUE) {
+            ChatUtils.debug("数量太大了，按 " + Integer.MAX_VALUE + " 截住（"
+                + crafts + " x " + perSlot + "）");
+            return Integer.MAX_VALUE;
+        }
+        return (int) total;
     }
 
     private static Issue issueOf(MaterialsRecipes.Problem problem, Item item) {
@@ -167,11 +194,20 @@ public final class MaterialTreeBuilder {
         };
     }
 
-    /** 记一个问题；同一种（同一个物品 / 同一个标签 / 同一处）只留一条。 */
+    /**
+     * 记一个问题。
+     *
+     * <p>去重的粒度按「一次修复能解决多少」来定：循环 / 多种合成方式 / 偏好不对是**物品**级的，
+     * 未决定的标签是**标签**级的（一个标签填一次，几十个产物都跟着好），
+     * 未决定的可选原料是**那一格**级的。不然一个 {@code #minecraft:planks} 会在聊天栏里刷几十行。
+     */
     private void report(Issue issue) {
-        String tag = issue.tag() == null ? "" : issue.tag().id().toString();
-        String key = issue.kind() + "|" + MaterialsConfig.itemId(issue.item()) + "|" + tag
-            + "|" + (issue.detail() == null ? "" : issue.detail());
+        String key = switch (issue.kind()) {
+            case UNDECIDED_TAG -> issue.kind() + "|" + (issue.tag() == null ? "?" : issue.tag().id());
+            case UNDECIDED_INGREDIENT -> issue.kind() + "|" + issue.detail();
+            default -> issue.kind() + "|" + MaterialsConfig.itemId(issue.item())
+                + "|" + (issue.detail() == null ? "" : issue.detail());
+        };
         issues.putIfAbsent(key, issue);
     }
 }
