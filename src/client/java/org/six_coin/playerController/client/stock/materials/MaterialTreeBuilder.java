@@ -28,7 +28,7 @@ import java.util.Map;
  * 每一格用掉 {@code 合几次 × 这一格用几个}，再继续往下追。所以
  * 「99 个泥砖墙 → 99 个泥砖 → 100 个压实泥巴（一次出 4 个，凑 25 次）→ 100 个泥 + 100 个小麦」。
  *
- * <p>所有问题都**先记下来、等整棵树走完再一起报**（{@link #issues()}），
+ * <p>所有问题都**先记下来、等整棵树走完再一起报**，
  * 不会因为一处出错就看不见别处的问题。
  *
  * <p>另外有两个兜底，免得循环把游戏卡死（循环要是带分支，光靠层数会长出天文数字的节点）：
@@ -38,10 +38,10 @@ import java.util.Map;
 public final class MaterialTreeBuilder {
 
     /** 最多追多少层；到了就认为踩上循环了。 */
-    public static final int MAX_DEPTH = 50;
+    public static final int MAX_DEPTH = 10;
 
     /** 整棵树最多几个节点；超了就停止再往下追（八成是循环）。 */
-    public static final int MAX_NODES = 20000;
+    public static final int MAX_NODES = 100;
 
     /** 一个问题。 */
     public record Issue(Kind kind, Item item, @Nullable TagKey<Item> tag,
