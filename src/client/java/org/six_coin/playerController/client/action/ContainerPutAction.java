@@ -40,7 +40,7 @@ import java.util.List;
  * 所以每一处都先点一下看结果；哪一格点不动就换别的格子试，**每一格都试过、都搬不动**才算真的满了。
  *
  * <p>点击是本地预测、立即生效的，所以一 tick 里可以把该点的格子一起点完（数量上限见配置
- * {@code actions.items_per_tick}），不用一格一格等 —— 核对放在服务端的同步回来之后做。
+ * {@code ContainerClicks.MAX_CLICKS_PER_TICK}），不用一格一格等 —— 核对放在服务端的同步回来之后做。
  */
 public class ContainerPutAction extends Action {
 

@@ -6,6 +6,7 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
@@ -26,9 +27,6 @@ import java.util.List;
  * （原版是把槽位数据发给界面处理器的）。
  */
 public final class ContainerCacheTracker {
-
-    /** 界面开了几个 tick 之后才信任里面的数据（太短可能还没同步完）。 */
-    private static final int MIN_OPEN_TICKS = 2;
 
     @Nullable
     private static ScreenHandler openHandler;
@@ -64,7 +62,10 @@ public final class ContainerCacheTracker {
         viewingPos = null;
 
         if (previous != null && previousPos != null) {
-            if (previousTicks < MIN_OPEN_TICKS) {
+            // 内容跟在开界面的包后面才同步过来：状态号还是 0（一个内容包都没收到）又开得太短，就不刷新，
+            // 免得把一箱子空气写进缓存
+            if (previous.getRevision() == 0
+                && previousTicks < PlayerControllerConfig.getNetworkDelayTicks()) {
                 ChatUtils.debug("容器界面只开了 " + previousTicks + " tick，数据可能还没同步，这次不刷新缓存");
             } else {
                 ContainerCacheUpdater.refresh(client, previousPos, previous);

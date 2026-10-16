@@ -7,6 +7,7 @@ import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -38,43 +39,27 @@ public final class ContainerSession {
     /** 等容器界面出来最多等这么多 tick。 */
     private static final int MAX_OPEN_WAIT_TICKS = 60;
 
-    /** 默认打开之后等几 tick 再动（让槽位数据同步完）。 */
-    private static final int DEFAULT_SETTLE_TICKS = 2;
-
     private final BlockPos pos;
-    private final int settleTicks;
     /** 等的是哪种界面；null = 只要是容器界面（不是玩家自己的那个）就行。 */
     @Nullable
     private final Class<? extends ScreenHandler> expected;
 
     private ScreenHandler handler;
     private int openWaitTicks;
+    /** 兜底：状态号一直没动静时，最多再等这么多 tick（界面出来的时候按配置充满）。 */
     private int settleLeft;
     /** 现在是不是我们占着「不显示界面」（占着才由我们放开）。 */
     private boolean holding;
 
     public ContainerSession(BlockPos pos) {
-        this(pos, DEFAULT_SETTLE_TICKS, null);
-    }
-
-    /**
-     * @param settleTicks 界面出来之后先等几 tick（槽位数据是服务端同步过来的）
-     */
-    public ContainerSession(BlockPos pos, int settleTicks) {
-        this(pos, settleTicks, null);
+        this(pos, null);
     }
 
     /**
      * @param expected 只认这种界面（合成用：工作台 / 切石机各是一种）；null = 什么都行
      */
-    public ContainerSession(BlockPos pos, Class<? extends ScreenHandler> expected) {
-        this(pos, DEFAULT_SETTLE_TICKS, expected);
-    }
-
-    private ContainerSession(BlockPos pos, int settleTicks,
-                             @Nullable Class<? extends ScreenHandler> expected) {
+    public ContainerSession(BlockPos pos, @Nullable Class<? extends ScreenHandler> expected) {
         this.pos = pos.toImmutable();
-        this.settleTicks = Math.max(0, settleTicks);
         this.expected = expected;
     }
 
@@ -93,9 +78,18 @@ public final class ContainerSession {
         ContainerOpener.open(mc, player, pos);
     }
 
-    /** 每次 tick 调一次，直到返回 {@link OpenState#READY} 或 {@link OpenState#TIMEOUT}。 */
+    /**
+     * 每次 tick 调一次，直到返回 {@link OpenState#READY} 或 {@link OpenState#TIMEOUT}。
+     *
+     * <p>界面这一下出来的时候，**格子里的内容还没到**：服务端是先发「开界面」，再把背包内容
+     * 跟在一个内容包里发过来的。所以这里要等到内容真的到了才算 READY（见 {@link #settled()}），
+     * 不然会读到一箱子空气。
+     */
     public OpenState awaitOpen(MinecraftClient mc) {
-        if (handler != null) return OpenState.READY;
+        if (handler != null) {
+            if (settled()) return OpenState.READY;
+            return ++openWaitTicks > MAX_OPEN_WAIT_TICKS ? OpenState.TIMEOUT : OpenState.WAITING;
+        }
 
         openWaitTicks++;
         ScreenHandler current = mc.player == null ? null : mc.player.currentScreenHandler;
@@ -103,19 +97,29 @@ public final class ContainerSession {
             && !ContainerCacheTracker.isCreativeInventory(mc)
             && (expected == null || expected.isInstance(current))) {
             handler = current;
-            settleLeft = settleTicks;
-            ChatUtils.debug("容器界面已打开：%s（%d 格）",
+            settleLeft = PlayerControllerConfig.getNetworkDelayTicks();
+            ChatUtils.debug("容器界面已打开：%s（%d 格），等格子内容同步过来",
                 current.getClass().getSimpleName(), current.slots.size());
-            return OpenState.READY;
+            if (settled()) return OpenState.READY;
         }
 
         if (openWaitTicks > MAX_OPEN_WAIT_TICKS) return OpenState.TIMEOUT;
         return OpenState.WAITING;
     }
 
-    /** 界面刚出来那一小段等待到头了没（每次 tick 调一次；到点了返回 true）。 */
+    /**
+     * 界面里的内容同步过来了没有（每次 tick 调一次；到点了返回 true）。
+     *
+     * <p>正常情况看界面的「状态号」：客户端这边是跟着服务端的内容包一起更新过来的，界面刚建出来时是 0，
+     * 收到内容包（{@code InventoryS2CPacket} / 单格更新）之后才变成服务端那边的号 —— 内容一到就立刻开工，
+     * 网络快就不用白等。
+     *
+     * <p>等不到就按「网络延迟」（{@code actions.network_delay_ticks}）兜底放行：
+     * 万一哪个界面不走这一套（状态号一直是 0），也不至于一直卡在这儿。
+     */
     public boolean settled() {
-        if (settleLeft > 0) settleLeft--;
+        if (handler != null && handler.getRevision() != 0) return true;
+        settleLeft--;
         return settleLeft <= 0;
     }
 

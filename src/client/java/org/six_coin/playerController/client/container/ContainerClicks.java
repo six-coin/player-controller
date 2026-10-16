@@ -18,6 +18,15 @@ import org.six_coin.playerController.client.util.ChatUtils;
  */
 public final class ContainerClicks {
 
+    /**
+     * 一个 tick 里最多点几下。
+     *
+     * <p>点击是本地预测、立即生效的，一 tick 连点几十下没问题：服务端会按顺序处理每一击，
+     * 并且把它**实际**的结果推回来（对不上的格子会重发）。64 就是「一次把整个物品栏
+     * （27 格主背包 + 9 格快捷栏）扫一遍」的量，多出来的下一 tick 接着点。
+     */
+    public static final int MAX_CLICKS_PER_TICK = 64;
+
     private ContainerClicks() {
     }
 

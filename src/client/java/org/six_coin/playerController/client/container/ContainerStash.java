@@ -3,7 +3,6 @@ package org.six_coin.playerController.client.container;
 import net.minecraft.screen.slot.Slot;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -18,8 +17,8 @@ import java.util.Set;
  * <ul>
  *   <li><b>一轮</b>：把这一轮要点的格子（有东西、而且还没被判成搬不动的）连着点一遍。
  *       点击是本地预测、立即生效的，一 tick 里点几十下没问题，服务端会按顺序处理；</li>
- *   <li><b>核对</b>：等 {@value #SETTLE_TICKS} tick 让服务端的同步回来，再逐格比
- *       「点之前有几个 / 现在有几个」。少了就是搬动了，没少就记进「这格搬不动」；</li>
+ *   <li><b>核对</b>：等「网络延迟」（{@code actions.network_delay_ticks}）那么多 tick 让服务端的同步回来，
+ *       再逐格比「点之前有几个 / 现在有几个」。少了就是搬动了，没少就记进「这格搬不动」；</li>
  *   <li><b>满没满</b>：整轮一格都没搬动时，先把「搬不动」清掉再试一轮确认；连着两轮都没搬动
  *       才算容器满了 —— 免得一次同步抖动就被当成满了，跑去换下一个容器。</li>
  * </ul>
@@ -41,9 +40,6 @@ public final class ContainerStash {
         /** 连着两轮一点都没搬动：容器装不下了。 */
         FULL
     }
-
-    /** 一轮点完之后等几 tick 再核对（服务端的同步要一个来回）。 */
-    private static final int SETTLE_TICKS = 2;
 
     private final ContainerSession session;
 
@@ -97,8 +93,8 @@ public final class ContainerStash {
         batch.clear();
         batchBefore.clear();
 
-        // 一 tick 最多点这么多下（actions.items_per_tick 就是为这种连点准备的）
-        int budget = PlayerControllerConfig.getItemsPerTick();
+        // 一 tick 最多点这么多下（点完下一 tick 再核对）
+        int budget = ContainerClicks.MAX_CLICKS_PER_TICK;
         for (Slot slot : candidates) {
             if (slot.getStack().isEmpty()) continue;
             anything = true;
@@ -113,7 +109,7 @@ public final class ContainerStash {
         if (!anything) return Result.CLEARED;
         if (batch.isEmpty()) return confirmOrGiveUp("能试的格子都试过了");
         if (batch.size() > 1) ChatUtils.debug("一轮 QuickMove %d 格", batch.size());
-        settleTicks = SETTLE_TICKS;
+        settleTicks = PlayerControllerConfig.getNetworkDelayTicks();
         return Result.WORKING;
     }
 

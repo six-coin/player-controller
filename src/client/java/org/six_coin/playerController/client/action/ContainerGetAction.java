@@ -12,8 +12,8 @@ import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
-import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
+import org.six_coin.playerController.client.container.ContainerClicks;
 import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -50,7 +50,7 @@ import java.util.Set;
  * 所有往背包放的操作都只点主背包 27 格。
  *
  * <p>点击方式：点击是**本地预测、立即生效**的，所以一个 tick 里可以把「拿起 → 放 → 放回」整串走完
- * （一 tick 的点击上限见配置 {@code actions.items_per_tick}），不用一步一步等下一个 tick；
+ * （一 tick 的点击上限见 {@code ContainerClicks.MAX_CLICKS_PER_TICK}），不用一步一步等下一个 tick；
  * 只有「本地预测还没变成预期值」时才停下来等，等太久就报错停下，日志里能看到卡在哪一步。
  * 整叠用「拿起整叠 → 左键点主背包格（同类半叠优先，其次空格）直到光标空」；
  * 只取一部分用「拿起整叠 → 右键往目标格放 N 个 → 剩下的放回原格」。
@@ -252,8 +252,8 @@ public class ContainerGetAction extends Action {
 
         // 一个 tick 里能走几步就走几步：点击是本地预测、立即生效的，「拿起 → 放 → 放回」这一串
         // 没必要一点一个 tick。走不动了（本地预测还没变成预期值、要等服务端）就停下，下一 tick 接着来。
-        // 一 tick 的点击上限还是 actions.items_per_tick。
-        int budget = PlayerControllerConfig.getItemsPerTick();
+        // 一 tick 的点击上限见 ContainerClicks.MAX_CLICKS_PER_TICK。
+        int budget = ContainerClicks.MAX_CLICKS_PER_TICK;
         while (!isFinished() && budget > 0) {
             Phase before = phase;
             int clicksBefore = clicks;
@@ -680,14 +680,12 @@ public class ContainerGetAction extends Action {
         }
 
         // 一个 tick 里连点几下（右键一次放 1 个），别一个一个等 tick。
-        // 点几下由配置 actions.items_per_tick 决定（客户端点击是本地预测、同步生效的，
-        // 一 tick 连点几下能快好几倍；每一批点完下一 tick 会按「光标少了多少」核对一次，
-        // 服务端少接受几下也能自己纠正）。
+        // 客户端点击是本地预测、同步生效的，一 tick 连点几下能快好几倍；
+        // 每一批点完下一 tick 会按「光标少了多少」核对一次，服务端少接受几下也能自己纠正。
         int room = target.getStack().isEmpty() ? 0
             : Math.min(target.getMaxItemCount(sourceStack), sourceStack.getMaxCount())
                 - target.getStack().getCount();
-        int perTick = PlayerControllerConfig.getItemsPerTick();
-        int batch = Math.min(take - placed, Math.min(perTick, cursor.getCount()));
+        int batch = Math.min(take - placed, Math.min(ContainerClicks.MAX_CLICKS_PER_TICK, cursor.getCount()));
         if (!target.getStack().isEmpty()) {
             batch = Math.min(batch, Math.max(0, room));
         }

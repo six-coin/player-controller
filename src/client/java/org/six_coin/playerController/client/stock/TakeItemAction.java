@@ -9,7 +9,7 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
-import org.six_coin.playerController.client.config.PlayerControllerConfig;
+import org.six_coin.playerController.client.container.ContainerClicks;
 import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -183,7 +183,7 @@ public class TakeItemAction extends Action {
 
         // 点击是本地预测、立即生效的：「拿起 → 放进快捷栏」这一串在一个 tick 里就能走完，
         // 只有本地预测还没变成预期值时才停下来等下一个 tick。
-        int budget = PlayerControllerConfig.getItemsPerTick();
+        int budget = ContainerClicks.MAX_CLICKS_PER_TICK;
         while (!isFinished() && budget > 0) {
             Phase before = phase;
             int clicksBefore = clicks;

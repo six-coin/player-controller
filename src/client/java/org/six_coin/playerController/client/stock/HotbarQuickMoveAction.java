@@ -29,7 +29,7 @@ import java.util.List;
  * 直接对着这个 syncId 发点击就会被接受 —— 不需要真的把背包画出来。
  *
  * <p>搬法：一轮把范围内还有东西的格子一起点一遍（点击是本地预测、立即生效的，一 tick 能连点好几下，
- * 上限见配置 {@code actions.items_per_tick}），等两 tick 逐格核对。整格空了算挪进去了；
+ * 上限见 {@code ContainerClicks.MAX_CLICKS_PER_TICK}），等「网络延迟」那么多 tick 逐格核对。整格空了算挪进去了；
  * 还剩着就是 27 格那边塞不下了（一次 QuickMove 会把能塞的都塞完），记进 {@link #leftovers()}，
  * 由调用方决定怎么办（一般是照旧存进 item_storage）。
  */
@@ -43,13 +43,12 @@ public class HotbarQuickMoveAction extends Action {
         DONE
     }
 
-    /** 关掉别的界面之后再等几 tick（服务端也要把 currentScreenHandler 切回来）。 */
-    private static final int SETTLE_TICKS = 3;
-
     private static final int MAX_IDLE_WAIT_TICKS = 60;
 
-    /** 一轮点完之后等几 tick 再核对（服务端的同步要一个来回）。 */
-    private static final int ROUND_TICKS = 2;
+    /** 一轮点完之后等几 tick 再核对：等「网络延迟」（{@code actions.network_delay_ticks}）。 */
+    private int roundWaitTicks() {
+        return PlayerControllerConfig.getNetworkDelayTicks();
+    }
 
     private static final int MAX_TOTAL_TICKS = 20 * 60;
 
@@ -181,7 +180,8 @@ public class HotbarQuickMoveAction extends Action {
             }
             return;
         }
-        if (++idleTicks < SETTLE_TICKS) return;
+        // 关界面的包发出去之后，服务端把 currentScreenHandler 切回来也要一个来回
+        if (++idleTicks < PlayerControllerConfig.getNetworkDelayTicks() + 1) return;
         phase = Phase.MOVE;
     }
 
@@ -202,7 +202,7 @@ public class HotbarQuickMoveAction extends Action {
 
         // 一轮把范围内还有东西的格子一起点一遍
         batch.clear();
-        int budget = PlayerControllerConfig.getItemsPerTick();
+        int budget = ContainerClicks.MAX_CLICKS_PER_TICK;
         for (int i = hotbarFrom; i <= hotbarTo && batch.size() < budget; i++) {
             if (leftoverIndexes.contains(i)) continue;
             if (player.getInventory().getStack(i).isEmpty()) continue;
@@ -225,7 +225,7 @@ public class HotbarQuickMoveAction extends Action {
         }
 
         if (batch.size() > 1) ChatUtils.debug("一轮 QuickMove %d 格", batch.size());
-        roundTicks = ROUND_TICKS;
+        roundTicks = roundWaitTicks();
     }
 
     /**

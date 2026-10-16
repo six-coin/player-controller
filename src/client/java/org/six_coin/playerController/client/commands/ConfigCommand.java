@@ -24,7 +24,7 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * /pc config actions interaction_range [range]
  * /pc config actions anti_kick_delay [tick]
  * /pc config actions anti_kick_off_time [tick]
- * /pc config actions items_per_tick [1~64]
+ * /pc config actions network_delay_ticks [1~40]
  * /pc config actions wait_ticks_after_dimension_teleport [tick]
  * </pre>
  */
@@ -162,19 +162,19 @@ public final class ConfigCommand {
                             "防踢补包时间已设为 " + PlayerControllerConfig.getAntiKickOffTime() + " tick"));
                         return 1;
                     })))
-            .then(ClientCommandManager.literal("items_per_tick")
+            .then(ClientCommandManager.literal("network_delay_ticks")
                 .executes(context -> {
-                    showItemsPerTick(context.getSource());
+                    showNetworkDelayTicks(context.getSource());
                     return 1;
                 })
-                .then(ClientCommandManager.argument("count",
-                        IntegerArgumentType.integer(PlayerControllerConfig.MIN_ITEMS_PER_TICK,
-                            PlayerControllerConfig.MAX_ITEMS_PER_TICK))
+                .then(ClientCommandManager.argument("ticks",
+                        IntegerArgumentType.integer(PlayerControllerConfig.MIN_NETWORK_DELAY_TICKS,
+                            PlayerControllerConfig.MAX_NETWORK_DELAY_TICKS))
                     .executes(context -> {
-                        int count = IntegerArgumentType.getInteger(context, "count");
-                        PlayerControllerConfig.setItemsPerTick(count);
+                        int ticks = IntegerArgumentType.getInteger(context, "ticks");
+                        PlayerControllerConfig.setNetworkDelayTicks(ticks);
                         context.getSource().sendFeedback(Text.literal(
-                            "一个 tick 里最多点 " + PlayerControllerConfig.getItemsPerTick() + " 下"));
+                            "等服务器同步的 tick 数已设为 " + PlayerControllerConfig.getNetworkDelayTicks()));
                         return 1;
                     })))
             .then(ClientCommandManager.literal("wait_ticks_after_dimension_teleport")
@@ -211,8 +211,8 @@ public final class ConfigCommand {
             + PlayerControllerConfig.getAntiKickDelay() + " tick"));
         source.sendFeedback(Text.literal("  actions.anti_kick_off_time = "
             + PlayerControllerConfig.getAntiKickOffTime() + " tick"));
-        source.sendFeedback(Text.literal("  actions.items_per_tick = "
-            + PlayerControllerConfig.getItemsPerTick()));
+        source.sendFeedback(Text.literal("  actions.network_delay_ticks = "
+            + PlayerControllerConfig.getNetworkDelayTicks() + " tick（等服务器同步：开界面之后、连点之后）"));
         source.sendFeedback(Text.literal("  actions.wait_ticks_after_dimension_teleport = "
             + PlayerControllerConfig.getWaitTicksAfterDimensionTeleport() + " tick"));
         source.sendFeedback(Text.literal("  文件: " + PlayerControllerConfig.configFile()));
@@ -227,7 +227,7 @@ public final class ConfigCommand {
         showInteractionRange(source);
         showAntiKickDelay(source);
         showAntiKickOffTime(source);
-        showItemsPerTick(source);
+        showNetworkDelayTicks(source);
         showWaitAfterTeleport(source);
         return 1;
     }
@@ -258,12 +258,12 @@ public final class ConfigCommand {
             + PlayerControllerConfig.getAntiKickOffTime() + " tick（防踢：补包持续几 tick）"));
     }
 
-    private static void showItemsPerTick(FabricClientCommandSource source) {
-        source.sendFeedback(Text.literal("  items_per_tick = "
-            + PlayerControllerConfig.getItemsPerTick()
-            + "（一个 tick 里最多点几下：搬容器、往背包格放东西这种连点批次的上限，"
-            + PlayerControllerConfig.MIN_ITEMS_PER_TICK + "~"
-            + PlayerControllerConfig.MAX_ITEMS_PER_TICK + "）"));
+    private static void showNetworkDelayTicks(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  network_delay_ticks = "
+            + PlayerControllerConfig.getNetworkDelayTicks()
+            + "（等服务器把数据同步回来的 tick 数：容器界面刚打开、一 tick 连点之后都先等这么多 tick，"
+            + PlayerControllerConfig.MIN_NETWORK_DELAY_TICKS + "~"
+            + PlayerControllerConfig.MAX_NETWORK_DELAY_TICKS + "；网络不好就调大）"));
     }
 
     private static void showWaitAfterTeleport(FabricClientCommandSource source) {

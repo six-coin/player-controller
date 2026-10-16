@@ -31,9 +31,10 @@ import java.util.List;
  * 然后 QuickMove 成品（原版 QuickMove 是从最后一格往前填，所以成品会进快捷栏靠后的格子）。
  *
  * <p><b>摆材料跟往容器里搬东西是一回事</b>：格子里的数量点击是本地预测、立即生效的，
- * 所以一个 tick 里就能把这一轮的格子全摆好（点击上限见配置 {@code actions.items_per_tick}），
- * 不用一格一格等。摆完等 {@link #VERIFY_TICKS} tick 让服务端把数量同步回来，再**逐格核对**
- * 「计划的格子有对的材料、别的输入格是空的」，不对就再摆一遍（连点被服务端少接受的情况在这里发现）。
+ * 所以一个 tick 里就能把这一轮的格子全摆好（点击上限见 {@code ContainerClicks.MAX_CLICKS_PER_TICK}），
+ * 不用一格一格等。摆完等「网络延迟」（{@code actions.network_delay_ticks}）那么多 tick 让服务端把数量同步回来，
+ * 再**逐格核对**「计划的格子有对的材料、别的输入格是空的」，不对就再摆一遍
+ * （连点被服务端少接受的情况在这里发现）。
  *
  * <p><b>唯一不能照搬的是成品格</b>：它不是客户端算的，是服务端按配方算出来推给客户端的。
  * 所以「材料齐了没有」不能靠看成品格（那一刻客户端看到的可能还是旧的），而是靠核对输入格；
@@ -47,16 +48,16 @@ import java.util.List;
  */
 public class CraftAction extends Action {
 
-    /** 界面打开之后等几 tick 再动，保证槽位数据同步完了。 */
-    private static final int SETTLE_TICKS = 2;
-
     /**
      * 一轮材料摆完（本地预测看着是对的）之后，先等几 tick 再核对格子。
      *
      * <p>一 tick 连发一大串点击时，服务端可能只接受了其中一部分、并把它那份数量推回来 ——
      * 等它推完再核对，才不会把「客户端以为摆好了」当成真的摆好了。
+     * 等的是配置里的「网络延迟」（{@code actions.network_delay_ticks}）。
      */
-    private static final int VERIFY_TICKS = 2;
+    private int verifyWaitTicks() {
+        return PlayerControllerConfig.getNetworkDelayTicks();
+    }
 
     /** 材料摆好之后，等服务器把成品格算出来最多等几 tick（20 tick = 1 秒）。 */
     private static final int READY_WAIT_TICKS = 20;
@@ -77,10 +78,8 @@ public class CraftAction extends Action {
     private static final int MAX_TOTAL_TICKS = 20 * 600;
 
     private enum Phase {
-        /** 等界面打开。 */
+        /** 等界面打开（还能用之前，界面里的格子内容也要同步过来）。 */
         OPENING,
-        /** 等槽位同步。 */
-        SETTLE,
         /** 把这一轮的输入格摆成计划的样子。 */
         PLACE,
         /** 摆完等几 tick，然后核对格子。 */
@@ -97,13 +96,12 @@ public class CraftAction extends Action {
 
     private final ContainerSession session;
     private Phase phase = Phase.OPENING;
-    private int settleTicks;
     private int totalTicks;
 
     /** 摆到第几个输入格了（每轮从头开始）。 */
     private int gridIndex;
 
-    /** 这一 tick 还能点几下（每 tick 开头按配置充满）。 */
+    /** 这一 tick 还能点几下（每 tick 开头充满）。 */
     private int clicksLeft;
     /** 一共点了几下（日志用）。 */
     private int clicks;
@@ -131,7 +129,7 @@ public class CraftAction extends Action {
 
     public CraftAction(CraftPlan plan, BlockPos stationPos) {
         this.plan = plan;
-        // 只认自己那一种界面（工作台 / 切石机）；等几 tick 的事下面自己管（SETTLE）
+        // 只认自己那一种界面（工作台 / 切石机）；界面打开之后等同步的事由 session 管
         this.session = new ContainerSession(stationPos,
             plan.station() == CraftPlan.Station.CRAFTING_TABLE
                 ? CraftingScreenHandler.class : StonecutterScreenHandler.class);
@@ -177,12 +175,11 @@ public class CraftAction extends Action {
             return;
         }
 
-        // 点击是本地预测、立即生效的，一 tick 里可以连点好几下（上限见配置）；这一步点满了就下一 tick 接着来
-        clicksLeft = PlayerControllerConfig.getItemsPerTick();
+        // 点击是本地预测、立即生效的，一 tick 里可以连点好几下；这一步点满了就下一 tick 接着来
+        clicksLeft = ContainerClicks.MAX_CLICKS_PER_TICK;
 
         switch (phase) {
             case OPENING -> tickOpening(mc);
-            case SETTLE -> tickSettle();
             case PLACE -> tickPlace();
             case VERIFY -> tickVerify();
             case READY -> tickReady(mc);
@@ -211,8 +208,8 @@ public class CraftAction extends Action {
     private void tickOpening(MinecraftClient mc) {
         switch (session.awaitOpen(mc)) {
             case READY -> {
-                settleTicks = 0;
-                phase = Phase.SETTLE;
+                gridIndex = 0;
+                phase = Phase.PLACE;
             }
             case TIMEOUT -> fail("打开" + (plan.station() == CraftPlan.Station.CRAFTING_TABLE ? "工作台" : "切石机")
                 + "超时");
@@ -221,18 +218,11 @@ public class CraftAction extends Action {
         }
     }
 
-    private void tickSettle() {
-        settleTicks++;
-        if (settleTicks < SETTLE_TICKS) return;
-        gridIndex = 0;
-        phase = Phase.PLACE;
-    }
-
     /**
      * 摆这一轮的材料：一格一格来，该空的弄空、该放的按数量放够，手上多的放回物品栏。
      *
      * <p>一个 tick 里能干完就干完（点击是本地预测、立即生效的）—— 摆完不急着下结论，
-     * 先等 {@link #VERIFY_TICKS} tick 让服务端把格子的数量同步回来，再核对一遍（见 {@link #tickVerify}）。
+     * 先等「网络延迟」那么多 tick 让服务端把格子的数量同步回来，再核对一遍（见 {@link #tickVerify}）。
      */
     private void tickPlace() {
         int amount = plan.amountForRound(round);
@@ -261,7 +251,7 @@ public class CraftAction extends Action {
         }
 
         placePasses++;
-        verifyTicks = VERIFY_TICKS;
+        verifyTicks = verifyWaitTicks();
         phase = Phase.VERIFY;
         ChatUtils.debug("第 %d/%d 轮材料摆好了（每格 %d 个，这一轮摆了 %d 遍、点了 %d 下），等服务器同步格子的数量",
             round + 1, plan.rounds(), amount, placePasses, clicks);

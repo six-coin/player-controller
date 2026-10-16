@@ -29,7 +29,7 @@ import java.nio.file.Path;
  *     "interaction_range": 4.5,
  *     "anti_kick_delay": 40,
  *     "anti_kick_off_time": 1,
- *     "items_per_tick": 64,
+ *     "network_delay_ticks": 2,
  *     "wait_ticks_after_dimension_teleport": 40
  *   }
  * }
@@ -74,10 +74,15 @@ public final class PlayerControllerConfig {
     public static final int MIN_ANTI_KICK_OFF_TIME = 1;
     public static final int MAX_ANTI_KICK_OFF_TIME = 20;
 
-    /** 一个 tick 里最多往一个格子里放几个（「一个一个放」的批量上限）。 */
-    public static final int DEFAULT_ITEMS_PER_TICK = 64;
-    public static final int MIN_ITEMS_PER_TICK = 1;
-    public static final int MAX_ITEMS_PER_TICK = 64;
+    /**
+     * 等「服务端把数据同步回来」的默认 tick 数。
+     *
+     * <p>容器界面打开之后格子的内容才同步过来，一 tick 连点之后服务端也会把真实状态推回来，
+     * 所以读服务端状态之前都要先等这么多 tick。
+     */
+    public static final int DEFAULT_NETWORK_DELAY_TICKS = 2;
+    public static final int MIN_NETWORK_DELAY_TICKS = 1;
+    public static final int MAX_NETWORK_DELAY_TICKS = 40;
 
     /**
      * 换维度（走传送门）之后先等多少 tick 再继续移动。
@@ -149,18 +154,20 @@ public final class PlayerControllerConfig {
         private int antiKickOffTime = DEFAULT_ANTI_KICK_OFF_TIME;
 
         /**
-         * 一个 tick 里最多点几下。
+         * 等「服务端把数据同步回来」的 tick 数（默认 {@value #DEFAULT_NETWORK_DELAY_TICKS}）。
          *
-         * <p>点击是**本地预测、立即生效**的，没必要点一下等一个 tick：「往容器里搬东西」「往背包格里放东西」
-         * 这些一 tick 可以连点好几下（一批点完再一起核对结果）。服务端要是少接受了几下，
-         * 下一 tick 会按服务端同步回来的状态自己纠正。
+         * <p>凡是「点完/开完界面之后要读服务端的状态」的地方都先等这么多 tick：
+         * <ul>
+         *   <li>容器界面刚打开时，格子的内容是**之后**才同步过来的 —— 不等就可能读到一箱子空气；</li>
+         *   <li>一 tick 连点很多下之后，服务端会把它**实际**接受到的状态推回来覆盖客户端的本地预测，
+         *       不等就会拿着过期的数字继续算（搬了多少、格子里有几个）。</li>
+         * </ul>
          *
-         * <p>调成 1 就是「一 tick 一下点击」的老实节奏。
-         * 合法范围 {@value #MIN_ITEMS_PER_TICK}~{@value #MAX_ITEMS_PER_TICK}，默认
-         * {@value #DEFAULT_ITEMS_PER_TICK}。
+         * <p>网络不好（延迟高、丢包）就把这个调大；单机 / 局域网可以调小。
+         * 合法范围 {@value #MIN_NETWORK_DELAY_TICKS}~{@value #MAX_NETWORK_DELAY_TICKS}。
          */
-        @SerializedName("items_per_tick")
-        private int itemsPerTick = DEFAULT_ITEMS_PER_TICK;
+        @SerializedName("network_delay_ticks")
+        private int networkDelayTicks = DEFAULT_NETWORK_DELAY_TICKS;
 
         /**
          * 换维度（走传送门）之后先等多少 tick 再继续移动。
@@ -214,12 +221,13 @@ public final class PlayerControllerConfig {
                 Math.max(MIN_ANTI_KICK_OFF_TIME, value));
         }
 
-        public int itemsPerTick() {
-            return itemsPerTick;
+        public int networkDelayTicks() {
+            return networkDelayTicks;
         }
 
-        public void itemsPerTick(int value) {
-            itemsPerTick = Math.min(MAX_ITEMS_PER_TICK, Math.max(MIN_ITEMS_PER_TICK, value));
+        public void networkDelayTicks(int value) {
+            networkDelayTicks = Math.min(MAX_NETWORK_DELAY_TICKS,
+                Math.max(MIN_NETWORK_DELAY_TICKS, value));
         }
 
         public int waitTicksAfterDimensionTeleport() {
@@ -306,13 +314,13 @@ public final class PlayerControllerConfig {
         instance.save();
     }
 
-    /** 一个 tick 里最多往一个格子里放几个。 */
-    public static int getItemsPerTick() {
-        return instance.actions.itemsPerTick();
+    /** 等「服务端把数据同步回来」的 tick 数。 */
+    public static int getNetworkDelayTicks() {
+        return instance.actions.networkDelayTicks();
     }
 
-    public static void setItemsPerTick(int value) {
-        instance.actions.itemsPerTick(value);
+    public static void setNetworkDelayTicks(int value) {
+        instance.actions.networkDelayTicks(value);
         instance.save();
     }
 
@@ -367,7 +375,7 @@ public final class PlayerControllerConfig {
                 + ", interaction_range=" + instance.actions.interactionRange()
                 + ", anti_kick_delay=" + instance.actions.antiKickDelay()
                 + ", anti_kick_off_time=" + instance.actions.antiKickOffTime()
-                + ", items_per_tick=" + instance.actions.itemsPerTick()
+                + ", network_delay_ticks=" + instance.actions.networkDelayTicks()
                 + ", wait_ticks_after_dimension_teleport="
                 + instance.actions.waitTicksAfterDimensionTeleport() + ")");
         } catch (Exception e) {

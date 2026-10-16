@@ -38,9 +38,8 @@ import java.util.List;
 public class PutHotbarItemAction extends Action {
 
     private enum Phase {
+        /** 等界面打开（内容同步过来才算好，见 {@link ContainerSession#awaitOpen}）。 */
         OPENING,
-        /** 打开之后等几 tick，让槽位同步完。 */
-        SETTLE,
         PUT,
         DONE
     }
@@ -169,9 +168,6 @@ public class PutHotbarItemAction extends Action {
 
         switch (phase) {
             case OPENING -> tickOpening(mc);
-            case SETTLE -> {
-                if (session.settled()) phase = Phase.PUT;
-            }
             case PUT -> tickPut();
             case DONE -> finish();
         }
@@ -202,7 +198,7 @@ public class PutHotbarItemAction extends Action {
 
     private void tickOpening(MinecraftClient mc) {
         switch (session.awaitOpen(mc)) {
-            case READY -> phase = Phase.SETTLE;
+            case READY -> phase = Phase.PUT;
             case TIMEOUT -> fail("等待容器界面超时");
             case WAITING -> {
             }
