@@ -22,6 +22,7 @@ import org.six_coin.playerController.client.recipe.CraftAction;
 import org.six_coin.playerController.client.recipe.CraftPlan;
 import org.six_coin.playerController.client.recipe.MaxCraft;
 import org.six_coin.playerController.client.recipe.RecipePlanner;
+import org.six_coin.playerController.client.stock.materials.MaterialsRecipes;
 import org.six_coin.playerController.client.stock.station.StationManager;
 import org.six_coin.playerController.client.stock.station.StationPart;
 import org.six_coin.playerController.client.stock.station.StationPos;
@@ -606,12 +607,29 @@ final class Part2Stage3Craft extends StockStep {
             }
 
             boolean stonecutter = step.recipeType().startsWith("stonecutting");
+            MaterialsRecipes.Kind kind = stonecutter
+                ? MaterialsRecipes.Kind.STONECUTTER : MaterialsRecipes.Kind.CRAFTING_TABLE;
+
             MaxCraft.Result max = stonecutter
                 ? MaxCraft.stonecutter(item, available)
                 : MaxCraft.craftingTable(item, available);
             if (max == null) {
-                fail("用 " + step.materials().keySet() + " 这些材料" + (stonecutter ? "切" : "合")
-                    + "不出 " + step.itemId() + "（配方没解锁？材料对不上？）");
+                // 配方挑不出来（没定偏好 / 标签没定）和「材料对不上」要分开说，不然没法照做
+                String problem = RecipePlanner.decisionProblem(item, kind);
+                if (problem != null) {
+                    fail(problem);
+                    return;
+                }
+                List<String> missing = new ArrayList<>();
+                for (Item needed : RecipePlanner.recipeMaterials(item, kind)) {
+                    if (!available.contains(needed)) {
+                        missing.add(Registries.ITEM.getId(needed).toString());
+                    }
+                }
+                fail("配方要的材料和这一步的材料对不上：缺 "
+                    + (missing.isEmpty() ? "（配方没定？）" : String.join("、", missing))
+                    + "；这一步只有 " + step.materials().keySet()
+                    + "（材料清单是旧的？重新 generate_materials_list 再跑一次）");
                 return;
             }
             ChatUtils.info("单背包最大合成：" + MaxCraft.describe(item, max));

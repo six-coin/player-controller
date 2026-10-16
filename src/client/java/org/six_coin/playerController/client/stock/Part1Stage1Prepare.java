@@ -31,7 +31,7 @@ import java.util.List;
  *   <li>从 item_temp 里拿一把**剩余耐久 ≥ {@link StockTask#REQUIRED_PICKAXE_DURABILITY}** 的钻石镐，
  *       放进快捷栏第一格（没有这样的镐就终止，拒绝执行）；</li>
  *   <li>汇总容器物品（{@link ContainerItemsExporter}，和 {@code /pc container cache get_all_items} 一样）
- *       生成 {@code container/all_items.json}，再读 {@code stock/tasks/<名字>/material.json}，
+ *       生成 {@code container/all_items.json}，再读 {@code stock/tasks/<名字>/materials.json}，
  *       处理出 {@code 1_1_material_clean.json}、{@code 1_2_material_optimized.json}、
  *       {@code final_final.json}，以及 {@code 1_3_material_can_access_all.json} /
  *       {@code final_pack.json}（见 {@link StockMaterials}）。</li>

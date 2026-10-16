@@ -26,7 +26,8 @@ import java.util.stream.Stream;
  *
  * <pre>
  * tasks.json           ["test_task", "test_task_2"]
- * stock/tasks/&lt;名字&gt;/material.json              用户手写放进去的
+ * stock/tasks/&lt;名字&gt;/original.json             从 litematica 导出的投影材料表（自己放进去）
+ * stock/tasks/&lt;名字&gt;/materials.json            generate_materials_list 处理出来的材料树
  * stock/tasks/&lt;名字&gt;/1_1_material_clean.json    第一部分阶段1 第 1 步产物
  * stock/tasks/&lt;名字&gt;/1_2_material_optimized.json 第一部分阶段1 第 2 步产物（要去容器里取多少）
  * stock/tasks/&lt;名字&gt;/final_final.json            第一部分阶段2 照它取货（1_2 的副本）
@@ -89,8 +90,19 @@ public final class StockManager {
         return stockDir(world).resolve(task);
     }
 
+    /**
+     * {@code original.json}：从 litematica 的投影材料列表界面选「As Json」导出、改名放进来的那份。
+     *
+     * <p>这是唯一需要用户手动准备的文件；{@link #materialFile} 那份是
+     * {@code /pc stock task <名字> generate_materials_list} 根据它生成的。
+     */
+    public static Path originalFile(int world, String task) {
+        return taskDir(world, task).resolve("original.json");
+    }
+
+    /** {@code materials.json}：备货真正用的那份材料树（generate_materials_list 生成）。 */
     public static Path materialFile(int world, String task) {
-        return taskDir(world, task).resolve("material.json");
+        return taskDir(world, task).resolve("materials.json");
     }
 
     public static Path cleanFile(int world, String task) {
@@ -117,7 +129,7 @@ public final class StockManager {
 
     // ---- 第二部分（收集需要合成的材料）的文件 ----
 
-    /** {@code 2_1_process_raw.json}：material.json 去掉 final_final 已经收过的那些。 */
+    /** {@code 2_1_process_raw.json}：materials.json 去掉 final_final 已经收过的那些。 */
     public static Path processRawFile(int world, String task) {
         return taskDir(world, task).resolve("2_1_process_raw.json");
     }
@@ -181,6 +193,10 @@ public final class StockManager {
 
     public Path currentMaterialFile(String task) {
         return materialFile(world(), task);
+    }
+
+    public Path currentOriginalFile(String task) {
+        return originalFile(world(), task);
     }
 
     public Path currentCleanFile(String task) {

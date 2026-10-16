@@ -22,7 +22,7 @@ import java.util.List;
 /**
  * 工作站检查里「不开箱子就能查」的那部分硬性要求。
  *
- * <p>{@code /pc stock station check} 和 {@code /pc stock task <名字> start} 用的是同一套，
+ * <p>{@code /pc stock station check} 和 {@code /pc stock task <名字> start_collect} 用的是同一套，
  * 所以放在这里，别在两个地方各写一遍。
  *
  * <p>内容相关的（大箱子空不空、木桶里是不是空潜影盒、空闲格够不够）必须开箱才知道，

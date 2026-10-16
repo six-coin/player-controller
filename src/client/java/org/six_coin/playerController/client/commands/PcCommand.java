@@ -42,7 +42,9 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " container cache ... §8- §7容器缓存（add/add_position/add_target/add_batch、del/del_id/del_position/del_target/del_batch、optimize、list、show、get_all_items）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " recipe crafting_table|stonecutter <item> <count> §8- §7在工作站上合成 / 切石（成品 QuickMove 进快捷栏）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " stock station ... §8- §7工作站配置（各部分的 set/set_target/add/del/list、show 高亮、check 检查并导出报告）"));
-                source.sendFeedback(Text.literal("§7  /" + name + " stock add_task|del_task <名字>、/" + name + " stock task <名字> start §8- §7备货（第一部分：预检查 → 取货 → 分盒重装；第二部分：预检查 → 取货 → 合成）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " stock add_task|del_task <名字>、/" + name + " stock task <名字> generate_materials_list|start_collect"));
+                source.sendFeedback(Text.literal("§7    §7generate_materials_list 把 litematica 导出的 original.json 处理成 materials.json；start_collect 开始备货（预检查 → 取货 → 分盒重装 → 合成）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " materials ... §8- §7材料清单配置（terminal_items、recipe_preferences、tag_preferences、ingredient_preferences、replace_materials）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " waypoints ... §8- §7路径点 / 边 / 出生点"));
                 source.sendFeedback(Text.literal("§7    §7子命令：show、edit、list、optimize default|radical"));
                 source.sendFeedback(Text.literal("§7    §7  add_waypoint here|target|position <x> <y> <z> <dim> [name]"));
@@ -58,6 +60,7 @@ public final class PcCommand {
             .then(ContainerCommand.build())
             .then(RecipeCommand.build())
             .then(StockCommand.build())
+            .then(MaterialsCommand.build())
             .then(WaypointsCommand.build())
             .then(ConfigCommand.build())
             .then(AccountCommand.build());

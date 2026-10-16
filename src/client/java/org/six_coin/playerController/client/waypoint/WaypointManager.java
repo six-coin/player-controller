@@ -87,7 +87,7 @@ public final class WaypointManager {
     }
 
     /**
-     * 直接设置编辑模式（{@code /pc stock task ... start} 开头会用它把编辑模式关掉：
+     * 直接设置编辑模式（{@code /pc stock task ... start_collect} 开头会用它把编辑模式关掉：
      * 备货过程中有大量移动，开着编辑模式会顺手记一堆路径点和边）。
      *
      * @return 之前是不是开着

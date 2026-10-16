@@ -1,44 +1,36 @@
 package org.six_coin.playerController.client.recipe;
 
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.recipebook.RecipeResultCollection;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.recipe.Ingredient;
-import net.minecraft.recipe.RecipeDisplayEntry;
-import net.minecraft.recipe.RecipeManager;
-import net.minecraft.recipe.StonecuttingRecipe;
-import net.minecraft.recipe.display.CuttingRecipeDisplay;
-import net.minecraft.recipe.display.RecipeDisplay;
-import net.minecraft.recipe.display.ShapedCraftingRecipeDisplay;
-import net.minecraft.recipe.display.ShapelessCraftingRecipeDisplay;
-import net.minecraft.recipe.display.SlotDisplay;
-import net.minecraft.recipe.display.SlotDisplayContexts;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.util.context.ContextParameterMap;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.stock.materials.MaterialsConfig;
+import org.six_coin.playerController.client.stock.materials.MaterialsRecipes;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
- * 配方规划：从「配方书 / 本地完整配方表 / 切石机配方」里找出能做出目标物品的配方，
+ * 配方规划：从**本地完整配方表**（{@link LocalRecipes}）里按用户定好的偏好
+ * （{@code config/player-controller/materials/recipe_preferences.json}、
+ * {@code tag_preferences.json}、{@code ingredient_preferences.json}）找出目标物品的那一条配方，
  * 检查材料够不够、能不能一次摆到格子里，最后给出一份 {@link CraftPlan}。
  *
  * <p>几点说明：
  * <ul>
- *   <li>工作台配方有两个来源：配方书（服务器同步过来的、**已经解锁**的）和本地完整配方表
- *       （{@link LocalRecipes}：单人问集成的服务端，联机读客户端自带的原版数据包）。
- *       服务端 1.21.2 起不再同步合成配方表，所以没解锁的配方只能从本地表里找 ——
- *       合成本身跟解锁没关系，服务端是拿格子里的材料去它自己的完整表里匹配的；</li>
- *   <li>材料只看主背包 27 格（不含快捷栏 9 格）；</li>
+ *   <li>配方不再「看背包里有什么就猜哪条」：同一个产物有好几种做法时，
+ *       用哪一条由偏好决定（见 {@link MaterialsRecipes#decide}）；
+ *       {@code /pc recipe crafting_table} 只在工作台配方里挑，{@code stonecutter} 只在切石机配方里挑；</li>
+ *   <li>配方里的标签格 / 「一串可选物品」格也用偏好定死了（标签格不在偏好里就直接报错，
+ *       不会拿背包里碰巧有的那个顶上）；</li>
+ *   <li>材料只看主背包 27 格（不含快捷栏）；</li>
  *   <li>材料一格装不下（要合的次数超过堆叠上限）就**分几轮**：每轮摆能摆的最大值，合完再摆下一轮，
  *       不再因此拒绝执行（需求里明说的）；</li>
  *   <li>产物数量必须是单次产量的整数倍，而且不超过「快捷栏第 4~9 格的空位 × 64」
@@ -74,114 +66,35 @@ public final class RecipePlanner {
     // 候选配方
     // ------------------------------------------------------------------
 
-    /** 能做出 {@code target} 的工作台配方：配方书里已经解锁的先来，再接上本地完整配方表。 */
+    /** 能做出 {@code target} 的工作台配方：定下来的那一条（没定下来就是空的）。 */
     public static List<Option> craftingOptions(Item target) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) return List.of();
-
-        ContextParameterMap context = SlotDisplayContexts.createParameters(mc.world);
-        List<Option> options = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-
-        // 1) 配方书：服务器同步过来的、这个号**已经解锁**的（顺序还是配方书里的顺序）
-        for (RecipeResultCollection collection : player.getRecipeBook().getOrderedResults()) {
-            for (RecipeDisplayEntry entry : collection.getAllRecipes()) {
-                addOption(entry.display(), target, context, seen, options);
-            }
-        }
-
-        // 2) 本地完整配方表：没解锁的配方也能用（见 LocalRecipes）。
-        //    排在配方书后面：优先用已经解锁的配方，配方书里没有的才落到本地表上。
-        for (RecipeDisplay display : LocalRecipes.craftingDisplays(mc)) {
-            addOption(display, target, context, seen, options);
-        }
-        return options;
+        MaterialsRecipes.Decision decision = decide(target, MaterialsRecipes.Kind.CRAFTING_TABLE);
+        if (!decision.ok()) return List.of();
+        return List.of(optionOf(decision));
     }
 
-    /** 把一个配方的显示数据变成候选项：有形状按 width 摆进 3×3，无序的就一格一个。 */
-    private static void addOption(RecipeDisplay display, Item target, ContextParameterMap context,
-                                  Set<String> seen, List<Option> options) {
-        List<SlotDisplay> ingredients;
-        boolean shaped;
-        int width;
-        String recipeType;
-        if (display instanceof ShapedCraftingRecipeDisplay shapedDisplay) {
-            shaped = true;
-            ingredients = shapedDisplay.ingredients();
-            width = Math.max(1, shapedDisplay.width());
-            recipeType = "crafting_shaped";
-        } else if (display instanceof ShapelessCraftingRecipeDisplay shapelessDisplay) {
-            shaped = false;
-            ingredients = shapelessDisplay.ingredients();
-            width = 3;
-            recipeType = "crafting_shapeless";
-        } else {
-            return;
-        }
-
-        ItemStack result = display.result().getFirst(context);
-        if (result.isEmpty() || !result.isOf(target)) return;
-
-        List<List<Item>> cells = new ArrayList<>();
-        for (SlotDisplay slot : ingredients) {
-            List<Item> accepted = new ArrayList<>();
-            for (ItemStack option : slot.getStacks(context)) {
-                if (!option.isEmpty()) accepted.add(option.getItem());
-            }
-            cells.add(accepted);
-        }
-
-        // 两个来源会给同一份配方（本地表里当然也有解锁过的那些），内容一样就只留一份
-        int perCraft = Math.max(1, result.getCount());
-        if (!seen.add(signature(recipeType, perCraft, shaped, width, cells))) return;
-
-        options.add(new Option(recipeType, perCraft, shaped, width, cells));
-    }
-
-    /** 一份配方的「内容指纹」：单次产量、形状、每格能放什么 —— 用来去重。 */
-    private static String signature(String recipeType, int perCraft, boolean shaped, int width,
-                                    List<List<Item>> cells) {
-        StringBuilder sb = new StringBuilder(recipeType)
-            .append('|').append(perCraft)
-            .append('|').append(shaped)
-            .append('|').append(width);
-        for (List<Item> cell : cells) {
-            sb.append('|');
-            for (Item item : cell) {
-                sb.append(Registries.ITEM.getId(item)).append(',');
-            }
-        }
-        return sb.toString();
-    }
-
-    /** 服务器同步过来的、能切出 {@code target} 的切石机配方。 */
+    /** 能切出 {@code target} 的切石机配方：定下来的那一条（没定下来就是空的）。 */
     public static List<Option> stonecuttingOptions(Item target) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.getNetworkHandler() == null) return List.of();
+        MaterialsRecipes.Decision decision = decide(target, MaterialsRecipes.Kind.STONECUTTER);
+        if (!decision.ok()) return List.of();
+        return List.of(optionOf(decision));
+    }
 
-        RecipeManager manager = mc.getNetworkHandler().getRecipeManager();
-        if (manager == null) return List.of();
-        CuttingRecipeDisplay.Grouping<StonecuttingRecipe> grouping = manager.getStonecutterRecipes();
-        if (grouping == null || grouping.isEmpty()) return List.of();
-
-        ContextParameterMap context = SlotDisplayContexts.createParameters(mc.world);
-        List<Option> options = new ArrayList<>();
-
-        for (CuttingRecipeDisplay.GroupEntry<StonecuttingRecipe> entry : grouping.entries()) {
-            ItemStack result = firstMatch(entry.recipe().optionDisplay().getStacks(context), target);
-            if (result == null) continue;
-
-            List<Item> accepted = new ArrayList<>();
-            for (RegistryEntry<Item> item : entry.input().getMatchingItems().toList()) {
-                accepted.add(item.value());
-            }
-            if (accepted.isEmpty()) continue;
-
-            options.add(new Option("stonecutting", Math.max(1, result.getCount()),
-                false, 1, List.of(accepted)));
+    /** 一条定下来的配方 -> 一个候选项（每一格都是唯一物品，或者空格子）。 */
+    private static Option optionOf(MaterialsRecipes.Decision decision) {
+        MaterialsRecipes.Recipe recipe = decision.recipe();
+        List<List<Item>> cells = new ArrayList<>();
+        for (Item picked : decision.picked()) {
+            cells.add(picked == null ? List.of() : List.of(picked));
         }
-        return options;
+        return new Option(recipe.recipeType(), recipe.perCraft(), recipe.shaped(), recipe.width(),
+            cells);
+    }
+
+    /** 按偏好挑配方。 */
+    private static MaterialsRecipes.Decision decide(Item target, MaterialsRecipes.Kind only) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        return MaterialsRecipes.decide(mc, MaterialsConfig.load(), target, only);
     }
 
     // ------------------------------------------------------------------
@@ -199,27 +112,11 @@ public final class RecipePlanner {
                 + hotbarFreeSlots(player) + " 格，每格最多 64 个）");
         }
 
-        List<Option> options = craftingOptions(target);
-        if (options.isEmpty()) {
-            return fail("配方表里没有能做出 " + name(target) + " 的配方（配方书和本地原版配方表都找过了）");
-        }
+        MaterialsRecipes.Decision decision = decide(target, MaterialsRecipes.Kind.CRAFTING_TABLE);
+        if (!decision.ok()) return fail(describeProblem(decision, target, "工作台"));
 
-        Map<Item, Integer> available = inventoryCounts(player);
-        List<String> rejected = new ArrayList<>();
-
-        for (Option option : options) {
-            CraftPlan plan = planFromOption(CraftPlan.Station.CRAFTING_TABLE, option, target,
-                count, available, rejected);
-            if (plan == null) continue;
-            if (plan.actualCount() > maxCount) {
-                rejected.add("向上取整到 " + plan.actualCount() + " 个，超过快捷栏第 4~9 格能装的 "
-                    + maxCount + " 个");
-                continue;
-            }
-            return ok(plan);
-        }
-
-        return fail("这些配方都不行：" + String.join("；", rejected));
+        return planFromOptions(List.of(optionOf(decision)), CraftPlan.Station.CRAFTING_TABLE,
+            target, count, player, maxCount);
     }
 
     // ------------------------------------------------------------------
@@ -237,17 +134,25 @@ public final class RecipePlanner {
                 + hotbarFreeSlots(player) + " 格，每格最多 64 个）");
         }
 
-        List<Option> options = stonecuttingOptions(target);
-        if (options.isEmpty()) {
-            return fail("切石机配方里没有能切出 " + name(target) + " 的（或者还没连上服务器）");
-        }
+        MaterialsRecipes.Decision decision = decide(target, MaterialsRecipes.Kind.STONECUTTER);
+        if (!decision.ok()) return fail(describeProblem(decision, target, "切石机"));
 
+        return planFromOptions(List.of(optionOf(decision)), CraftPlan.Station.STONECUTTER,
+            target, count, player, maxCount);
+    }
+
+    // ------------------------------------------------------------------
+    // 把候选配方变成计划
+    // ------------------------------------------------------------------
+
+    private static Result planFromOptions(List<Option> options, CraftPlan.Station station,
+                                          Item target, int count, ClientPlayerEntity player,
+                                          int maxCount) {
         Map<Item, Integer> available = inventoryCounts(player);
         List<String> rejected = new ArrayList<>();
 
         for (Option option : options) {
-            CraftPlan plan = planFromOption(CraftPlan.Station.STONECUTTER, option, target,
-                count, available, rejected);
+            CraftPlan plan = planFromOption(station, option, target, count, available, rejected);
             if (plan == null) continue;
             if (plan.actualCount() > maxCount) {
                 rejected.add("向上取整到 " + plan.actualCount() + " 个，超过快捷栏第 4~9 格能装的 "
@@ -257,7 +162,53 @@ public final class RecipePlanner {
             return ok(plan);
         }
 
-        return fail("这些配方都不行：" + String.join("；", rejected));
+        return fail("这个配方不行：" + String.join("；", rejected));
+    }
+
+    /**
+     * 这个产物的配方定下来没有；没定下来返回一句为什么（定下来了返回 null）。
+     *
+     * <p>给「已经知道材料有哪些、只是没配出配方」的调用方用来拼报错
+     * （比如备货第二部分阶段3 的 {@code MaxCraft}）。
+     */
+    @Nullable
+    public static String decisionProblem(Item target, MaterialsRecipes.Kind only) {
+        MaterialsRecipes.Decision decision = decide(target, only);
+        if (decision.ok()) return null;
+        return describeProblem(decision, target, only.display());
+    }
+
+    /** 一条定下来的配方要用的材料（每一格一个物品，空的格子不算）。 */
+    public static List<Item> recipeMaterials(Item target, MaterialsRecipes.Kind only) {
+        MaterialsRecipes.Decision decision = decide(target, only);
+        if (!decision.ok()) return List.of();
+
+        List<Item> items = new ArrayList<>();
+        for (Item picked : decision.picked()) {
+            if (picked != null && !items.contains(picked)) items.add(picked);
+        }
+        return items;
+    }
+
+    /** 挑不出配方时给用户一句能照做的话。 */
+    private static String describeProblem(MaterialsRecipes.Decision decision, Item target,
+                                          String station) {        MaterialsRecipes.Problem problem = decision.problem();
+        if (problem == null) {
+            return "本地配方表里没有能用" + station + "做出 " + name(target) + " 的配方";
+        }
+        return switch (problem.kind()) {
+            case AMBIGUOUS -> name(target) + " 有好几种" + station + "的做法，先选一条：/pc materials "
+                + "recipe_preferences show " + name(target);
+            case BAD_PREFERENCE -> "recipe_preferences 里把 " + name(target) + " 定成了 "
+                + problem.recipe() + "，但这条配方做不出它、也不是" + station + "配方（/pc materials "
+                + "recipe_preferences show " + name(target) + " 看有哪些）";
+            case UNDECIDED_TAG -> "配方里的标签 " + MaterialsConfig.tagId(problem.tag())
+                + " 还没定用哪个物品（/pc materials tag_preferences show "
+                + MaterialsConfig.tagId(problem.tag()) + "）";
+            case UNDECIDED_INGREDIENT -> "配方里的 " + problem.slotKey()
+                + " 这一格有好几种可选物品，还没定用哪个（/pc materials ingredient_preferences show "
+                + problem.slotKey() + "）";
+        };
     }
 
     // ------------------------------------------------------------------

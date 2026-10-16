@@ -24,15 +24,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 备货「第二部分 阶段1」的第 3 步：把用户手写的 {@code material.json}（跟第一部分读的是同一份）
+ * 备货「第二部分 阶段1」的第 3 步：把 {@code materials.json}（跟第一部分读的是同一份）
  * 再处理一遍，算出**这次要合成哪些最终产物、要去取哪些原材料**（附件 2.1.3 的那七步）。
  *
  * <pre>
  * 提前处理：把第一部分阶段3 交过来的 station_data 反推成 check.json 里 item_storage 那种
  *          最简单的 item_list，**再加上摆放处上那些盒子里的东西**（id=1 的暂存盒除外），
  *          记作 current_item_storage_and_shulker_boxes（只在这次处理里用，用完就扔）
- * 第一步：material.json 里去掉 **final_pack** 已经处理过的最终产物 → 2_1_process_raw.json
- * 第二步：把 2_1 里所有「原材料」（recipe_type = base）摊平成 item_list → 2_2_material_raw.json
+ * 第一步：materials.json 里去掉 **final_pack** 已经处理过的最终产物 → 2_1_process_raw.json
+ * 第二步：把 2_1 里所有「原材料」（type = base）摊平成 item_list → 2_2_material_raw.json
  * 第三步：all_items 的 overall + current_item_storage 凑得齐的才留 → 2_3_material_clean.json
  * 第四步：2_1 里「用到的材料有一个不在 2_3 里」的最终产物整个删掉 → 2_4_process_clean.json
  * 第五步：把 2_4 里所有原材料摊平成 item_list → 2_5_material_cleaner.json
@@ -141,9 +141,10 @@ public final class StockProcessMaterials {
         ChatUtils.debug("第二部分 current_item_storage_and_shulker_boxes："
             + currentItemStorageAndShulkerBoxes.size() + " 种");
 
-        // material.json
+        // materials.json
         if (!Files.exists(files.material())) {
-            throw new IOException("找不到材料清单 " + files.material() + "（需要你自己放一份进去）");
+            throw new IOException("找不到材料清单 " + files.material()
+                + "（先跑 /pc stock task <名字> generate_materials_list）");
         }
         JsonArray tree = readTree(files.material());
 
@@ -342,11 +343,22 @@ public final class StockProcessMaterials {
         out.add(step);
     }
 
-    /** 这棵树的 recipe_type（没有就按有形状的合成算）。 */
+    /**
+     * 这棵树的合成方式（写进 final_steps 的那种写法）。
+     *
+     * <p>materials.json 里是 {@code crafting_table} / {@code stonecutter} / {@code base}
+     * （{@link org.six_coin.playerController.client.stock.materials.MaterialsRecipes} 定的），
+     * 下游（{@link Part2Stage3Craft}）认的是 {@code crafting_shaped} / {@code stonecutting}。
+     */
     @Nullable
     private static String recipeTypeOf(JsonObject object) {
-        JsonElement type = object.get("recipe_type");
-        return type == null || !type.isJsonPrimitive() ? "crafting_shaped" : type.getAsString();
+        JsonElement type = object.get("type");
+        if (type == null || !type.isJsonPrimitive()) return "crafting_shaped";
+        return switch (type.getAsString()) {
+            case "stonecutter" -> "stonecutting";
+            case "base" -> "base";
+            default -> "crafting_shaped";
+        };
     }
 
     /** 一批树的顶层物品 id。 */
@@ -363,7 +375,7 @@ public final class StockProcessMaterials {
     // 树的操作
     // ------------------------------------------------------------------
 
-    /** 读 material.json（最外层必须是数组，原样保留每一棵树）。 */
+    /** 读 {@code materials.json}（最外层必须是数组，原样保留每一棵树）。 */
     private static JsonArray readTree(Path file) throws IOException {
         JsonElement root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
         if (!root.isJsonArray()) {
@@ -373,7 +385,7 @@ public final class StockProcessMaterials {
     }
 
     /**
-     * 把一棵棵树里所有「原材料」（{@code recipe_type = "base"}）摊平累加。
+     * 把一棵棵树里所有「原材料」（{@code type = "base"}）摊平累加。
      *
      * <p>base 当叶子看：它自己算一份，不再往里递归（正常格式里它的 sub_materials 本来就是空的）。
      */
@@ -429,7 +441,7 @@ public final class StockProcessMaterials {
     }
 
     private static boolean isBase(JsonObject object) {
-        JsonElement type = object.get("recipe_type");
+        JsonElement type = object.get("type");
         return type != null && type.isJsonPrimitive() && "base".equals(type.getAsString());
     }
 

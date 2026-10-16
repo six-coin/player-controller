@@ -27,7 +27,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * 备货「第一部分 阶段1」的第 3 步：把用户手写的 {@code material.json} 处理成几份文件。
+ * 备货「第一部分 阶段1」的第 3 步：把 {@code materials.json}（
+ * {@code /pc stock task <名字> generate_materials_list} 生成的材料树）处理成几份文件。
  *
  * <ol>
  *   <li>{@code 1_1_material_clean.json}：只留最外层的「物品 + 数量」（也就是**完整需求量**）；</li>
@@ -79,10 +80,11 @@ public final class StockMaterials {
         int world = manager.loadedWorld() >= 0 ? manager.loadedWorld()
             : org.six_coin.playerController.client.config.PlayerControllerConfig.getWorld();
 
-        // 第一步：material.json -> 1_1_material_clean.json
+        // 第一步：materials.json -> 1_1_material_clean.json
         Path material = manager.currentMaterialFile(task);
         if (!Files.exists(material)) {
-            throw new IOException("找不到材料清单 " + material + "（需要你自己放一份进去）");
+            throw new IOException("找不到材料清单 " + material
+                + "（先跑 /pc stock task " + task + " generate_materials_list）");
         }
         Map<Item, Integer> clean = readMaterial(material);
         Path cleanFile = manager.currentCleanFile(task);
@@ -157,12 +159,12 @@ public final class StockMaterials {
     // 读
     // ------------------------------------------------------------------
 
-    /** 读 material.json 的最外层：物品 -> 数量（重复的会加在一起，嵌套的 sub_materials 不看）。 */
+    /** 读 {@code materials.json} 的最外层：物品 -> 数量（重复的会加在一起，嵌套的 sub_materials 不看）。 */
     private static Map<Item, Integer> readMaterial(Path file) throws IOException {
         String raw = Files.readString(file, StandardCharsets.UTF_8);
         JsonElement root = JsonParser.parseString(raw);
         if (!root.isJsonArray()) {
-            throw new IOException("material.json 最外层应该是一个数组 [ ... ]");
+            throw new IOException(file.getFileName() + " 最外层应该是一个数组 [ ... ]");
         }
 
         Map<Item, Integer> items = new LinkedHashMap<>();

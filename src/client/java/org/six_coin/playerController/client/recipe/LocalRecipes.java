@@ -10,6 +10,7 @@ import net.minecraft.recipe.ServerRecipeManager;
 import net.minecraft.recipe.display.RecipeDisplay;
 import net.minecraft.recipe.display.ShapedCraftingRecipeDisplay;
 import net.minecraft.recipe.display.ShapelessCraftingRecipeDisplay;
+import net.minecraft.recipe.display.StonecutterRecipeDisplay;
 import net.minecraft.registry.RegistryOps;
 import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.resource.DefaultResourcePack;
@@ -29,7 +30,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * 本地那份**完整**的工作台配方表（没解锁的也在里面）。
+ * 本地那份**完整**的配方表（没解锁的也在里面），只要能摆进工作台 / 切石机的那些。
  *
  * <p>为什么需要它：1.21.2 起服务端不再把合成配方表同步给客户端了 ——
  * {@code SynchronizeRecipesS2CPacket} 里只剩原料属性表（{@code RecipePropertySet}）和切石机配方，
@@ -46,6 +47,9 @@ import java.util.List;
  *   <li><b>联机</b>：读客户端自带原版数据包里的 {@code data/minecraft/recipe/*.json}，
  *       用原版的 {@link Recipe#CODEC} 反序列化（和原版服务端读配方是同一套代码）。</li>
  * </ul>
+ *
+ * <p>留着的是**配方 id + 显示数据**这一对：备货的材料清单要靠 id 认「用户偏好的是哪一条配方」，
+ * 靠显示数据拿到「摆进哪几格、出几个」。
  *
  * <p>结果按**这一次连接**缓存：换了世界 / 换了服务器就重读。进世界时会在后台先读一遍
  * （见 {@link #warmUp}），第一次要用配方的时候就不用等。
@@ -69,7 +73,7 @@ public final class LocalRecipes {
     @Nullable
     private static Object loadedKey;
 
-    private static List<RecipeDisplay> displays = List.of();
+    private static List<LocalRecipe> recipes = List.of();
 
     /** 读失败的重试计数：连接标识 + 已经试了几次。 */
     @Nullable
@@ -84,16 +88,26 @@ public final class LocalRecipes {
     // ------------------------------------------------------------------
 
     /**
-     * 本地完整配方表里所有**工作台**配方（有形状 / 无形状的那些）。
+     * 一条本地配方：配方 id 加上它的显示数据。
+     *
+     * <p>显示数据里就有「这个配方一次出几个」（{@code result()}）、
+     * 「每一格能放什么」（{@code ingredients()} / {@code input()}）——
+     * 后者连标签物品都分得清清楚楚（{@code SlotDisplay.TagSlotDisplay}）。
+     */
+    public record LocalRecipe(Identifier id, RecipeDisplay display) {
+    }
+
+    /**
+     * 本地完整配方表里所有**工作台 / 切石机**配方。
      *
      * <p>读不出来（单人还没起服务端、联机没连上、解析全失败）就是空表，调用方照旧只用配方书。
      */
-    public static List<RecipeDisplay> craftingDisplays(MinecraftClient mc) {
+    public static List<LocalRecipe> recipes(MinecraftClient mc) {
         Object key = connectionKey(mc);
         if (key == null) return List.of();
 
         synchronized (LOCK) {
-            if (key.equals(loadedKey)) return displays;
+            if (key.equals(loadedKey)) return recipes;
         }
         return load(mc, key, registries(mc));
     }
@@ -101,7 +115,7 @@ public final class LocalRecipes {
     /**
      * 进世界的时候在后台先读一遍，省得第一次用到配方时卡一下（读一次 100~500 ms 的量级）。
      *
-     * <p>读的时候如果主线程正好也要配方，{@link #craftingDisplays} 会等这次读完（不会读两遍）。
+     * <p>读的时候如果主线程正好也要配方，{@link #recipes} 会等这次读完（不会读两遍）。
      */
     public static void warmUp(MinecraftClient mc) {
         Object key = connectionKey(mc);
@@ -122,13 +136,13 @@ public final class LocalRecipes {
     // ------------------------------------------------------------------
 
     /** 真正读一遍并记下来；同一个连接只会读一次（后到的线程看到已经读好了就直接拿缓存）。 */
-    private static List<RecipeDisplay> load(MinecraftClient mc, Object key,
-                                            @Nullable RegistryWrapper.WrapperLookup lookup) {
+    private static List<LocalRecipe> load(MinecraftClient mc, Object key,
+                                          @Nullable RegistryWrapper.WrapperLookup lookup) {
         synchronized (LOCK) {
-            if (key.equals(loadedKey)) return displays;
+            if (key.equals(loadedKey)) return recipes;
 
             long start = System.currentTimeMillis();
-            List<Named> found = new ArrayList<>();
+            List<LocalRecipe> found = new ArrayList<>();
             String source = "（没有可读的来源）";
             Read read = new Read(0, 0);
             @Nullable String problem = null;
@@ -166,28 +180,28 @@ public final class LocalRecipes {
             }
 
             // 按配方 id 排序：顺序每次都一样，出问题好复现
-            found.sort(Comparator.comparing(named -> named.id().toString()));
+            found.sort(Comparator.comparing(local -> local.id().toString()));
 
             loadedKey = key;
-            displays = List.copyOf(found.stream().map(Named::display).toList());
+            recipes = List.copyOf(found);
 
-            if (problem != null) return displays;
+            if (problem != null) return recipes;
 
-            LOGGER.info("本地配方表：读了 {} 条配方，其中工作台 {} 条（来源 {}, 耗时 {} ms{}）",
-                read.recipes(), displays.size(), source, System.currentTimeMillis() - start,
+            LOGGER.info("本地配方表：读了 {} 条配方，其中能摆出来的 {} 条（来源 {}, 耗时 {} ms{}）",
+                read.recipes(), recipes.size(), source, System.currentTimeMillis() - start,
                 read.failed() == 0 ? "" : ", " + read.failed() + " 条读不出来");
 
             // 聊天栏只在主线程上发（后台线程读的时候不能碰聊天栏）
             if (mc.isOnThread()) {
-                ChatUtils.debug("本地配方表：" + displays.size() + " 条工作台配方（" + source
+                ChatUtils.debug("本地配方表：" + recipes.size() + " 条工作台 / 切石机配方（" + source
                     + "，没解锁的也能用），耗时 " + (System.currentTimeMillis() - start) + " ms");
             }
-            return displays;
+            return recipes;
         }
     }
 
     /** 单人：集成的服务端的配方表（一定是最准的）。 */
-    private static Read readFromServer(MinecraftClient mc, List<Named> out) {
+    private static Read readFromServer(MinecraftClient mc, List<LocalRecipe> out) {
         ServerRecipeManager manager = mc.getServer().getRecipeManager();
         for (RecipeEntry<?> entry : manager.values()) {
             addDisplays(entry.id().getValue(), entry.value(), out);
@@ -198,7 +212,7 @@ public final class LocalRecipes {
     /**
      * 联机：原版数据包里的 {@code data/<命名空间>/recipe/*.json}。
      */
-    private static Read readFromDataPack(RegistryWrapper.WrapperLookup lookup, List<Named> out) {
+    private static Read readFromDataPack(RegistryWrapper.WrapperLookup lookup, List<LocalRecipe> out) {
         DefaultResourcePack pack = VanillaDataPackProvider.createDefaultPack();
         RegistryOps<JsonElement> ops = lookup.getOps(JsonOps.INSTANCE);
 
@@ -228,12 +242,13 @@ public final class LocalRecipes {
         return new Read(counters[0], counters[1]);
     }
 
-    /** 只要是工作台配方（有形状 / 无形状）就把它的显示数据留下来。 */
-    private static void addDisplays(Identifier id, Recipe<?> recipe, List<Named> out) {
+    /** 只要能摆进工作台 / 切石机的配方，就把「id + 显示数据」留下来。 */
+    private static void addDisplays(Identifier id, Recipe<?> recipe, List<LocalRecipe> out) {
         for (RecipeDisplay display : recipe.getDisplays()) {
             if (display instanceof ShapedCraftingRecipeDisplay
-                || display instanceof ShapelessCraftingRecipeDisplay) {
-                out.add(new Named(id, display));
+                || display instanceof ShapelessCraftingRecipeDisplay
+                || display instanceof StonecutterRecipeDisplay) {
+                out.add(new LocalRecipe(id, display));
             }
         }
     }
@@ -260,10 +275,6 @@ public final class LocalRecipes {
     @Nullable
     private static RegistryWrapper.WrapperLookup registries(MinecraftClient mc) {
         return mc == null || mc.world == null ? null : mc.world.getRegistryManager();
-    }
-
-    /** 配方 id + 它的显示数据（读的时候要按 id 排序，所以先配对放着）。 */
-    private record Named(Identifier id, RecipeDisplay display) {
     }
 
     /** 一次读的结果：读到几条配方、几条读不出来。 */

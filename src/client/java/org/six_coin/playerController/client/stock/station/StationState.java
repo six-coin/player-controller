@@ -27,7 +27,7 @@ import java.util.TreeMap;
  * </pre>
  *
  * <p><b>这份数据永远不落盘</b>：只在这一轮任务的内存里传递、用完就没了
- * （所以第二部分只能从 {@code /pc stock task <名字> start} 一路跑下来）。
+ * （所以第二部分只能从 {@code /pc stock task <名字> start_collect} 一路跑下来）。
  *
  * <p>更新时机很重要：只要是**我们**改了 item_storage / item_final / 摆放处里的东西，就要在那一刻主动更新，
  * 不能靠关闭箱子时的自动监听（会有竞态：关箱之后我们可能马上就要用这份数据）。

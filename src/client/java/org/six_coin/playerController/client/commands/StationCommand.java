@@ -391,7 +391,7 @@ public final class StationCommand {
             return 0;
         }
 
-        // 不开箱子就能查的那部分（/pc stock task start 用的是同一套）
+        // 不开箱子就能查的那部分（/pc stock task start_collect 用的是同一套）
         StationPrecheck.Result result = StationPrecheck.run(mc);
         for (String hint : result.hints()) source.sendFeedback(Text.literal("§e提示：" + hint));
 

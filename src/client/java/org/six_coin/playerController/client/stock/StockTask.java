@@ -7,7 +7,7 @@ import org.six_coin.playerController.client.util.ChatUtils;
 import java.util.List;
 
 /**
- * {@code /pc stock task <名字> start}：备货整条流水线。
+ * {@code /pc stock task <名字> start_collect}：备货整条流水线。
  *
  * <p>流水线就是下面 {@link #StockTask(String)} 里列出来的那张**有序步骤表**：
  * {@link StepQueue} 一次跑一步、跑完自动接下一步，哪一步失败整条就停。
@@ -18,7 +18,7 @@ import java.util.List;
  * <p>流程（按需求）：
  * <ol>
  *   <li>第一部分阶段1（准备）：检查工作站 → 腾空物品栏到 item_temp → 取一把够耐久的钻石镐 →
- *       容器物品汇总 + 从 {@code material.json} 算出要取哪些货；</li>
+ *       容器物品汇总 + 从 {@code materials.json} 算出要取哪些货；</li>
  *   <li>第一部分阶段2（取货）：按 {@code final_final.json} 去容器里取；</li>
  *   <li>第一部分阶段3（分盒重装）：按 {@code final_pack.json} 装盒，盒子放去 item_final；</li>
  *   <li>第二部分阶段1（预检查）：再汇总一次容器物品，算出要合成什么（{@code 2_x}、{@code final_steps}）；</li>

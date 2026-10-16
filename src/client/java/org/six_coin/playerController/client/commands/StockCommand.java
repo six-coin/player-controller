@@ -12,6 +12,7 @@ import org.six_coin.playerController.client.stock.StockManager;
 import org.six_coin.playerController.client.stock.StockTask;
 
 import java.io.IOException;
+import java.nio.file.Files;
 
 /**
  * {@code /pc stock ...} —— 备货（含工作站配置 {@code /pc stock station ...}）。
@@ -20,7 +21,11 @@ import java.io.IOException;
  * /pc stock station ...              工作站：站位点、工作台、切石机、各容器（见 StationCommand）
  * /pc stock add_task &lt;名字&gt;         新建任务（建 stock/tasks/&lt;名字&gt;/ 文件夹 + 记到 stock/tasks.json）
  * /pc stock del_task &lt;名字&gt;         删除任务（删文件夹 + 删记录）
- * /pc stock task &lt;名字&gt; start        完整跑一遍：第一部分（检查 → 取货 → 分盒重装）+ 第二部分（预检查 → 取货 → 合成）
+ * /pc stock task &lt;名字&gt; generate_materials_list
+ *                                    把 original.json（litematica 导出的投影材料表）处理成
+ *                                    materials.json（材料树，见 MaterialsCommand）
+ * /pc stock task &lt;名字&gt; start_collect
+ *                                    完整跑一遍：第一部分（检查 → 取货 → 分盒重装）+ 第二部分（预检查 → 取货 → 合成）
  * </pre>
  *
  * <p>station_data 不落盘（只在这一轮任务的内存里传），所以没有「只跑第二部分」这种单独入口。
@@ -44,8 +49,10 @@ public final class StockCommand {
             .then(ClientCommandManager.literal("task")
                 .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
                     .suggests((context, builder) -> CommandSource.suggestMatching(StockManager.get().tasks(), builder))
-                    .then(ClientCommandManager.literal("start")
-                        .executes(StockCommand::start))));
+                    .then(ClientCommandManager.literal("generate_materials_list")
+                        .executes(StockCommand::generateMaterialsList))
+                    .then(ClientCommandManager.literal("start_collect")
+                        .executes(StockCommand::startCollect))));
     }
 
     // ------------------------------------------------------------------
@@ -81,8 +88,9 @@ public final class StockCommand {
             return 0;
         }
 
-        source.sendFeedback(Text.literal("已新建任务 " + task + "，把这个任务的材料清单放到 "
-            + StockManager.get().currentMaterialFile(task)));
+        source.sendFeedback(Text.literal("已新建任务 " + task + "，把 litematica 导出的 original.json 放到 "
+            + StockManager.get().currentOriginalFile(task)
+            + "，再跑 /pc stock task " + task + " generate_materials_list"));
         return 1;
     }
 
@@ -104,7 +112,17 @@ public final class StockCommand {
         return 1;
     }
 
-    private static int start(CommandContext<FabricClientCommandSource> context) {
+    /** {@code /pc stock task <名字> generate_materials_list}：original.json -> materials.json。 */
+    private static int generateMaterialsList(CommandContext<FabricClientCommandSource> context) {
+        String task = StringArgumentType.getString(context, "task_name");
+        if (!StockManager.get().has(task)) {
+            context.getSource().sendError(Text.literal("没有 " + task + " 这个任务（/pc stock add_task " + task + "）"));
+            return 0;
+        }
+        return MaterialsCommand.generate(context, task);
+    }
+
+    private static int startCollect(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
         String task = StringArgumentType.getString(context, "task_name");
 
@@ -114,6 +132,12 @@ public final class StockCommand {
         }
         if (source.getPlayer() == null || source.getWorld() == null) {
             source.sendError(Text.literal("没有玩家或世界"));
+            return 0;
+        }
+        if (!Files.exists(StockManager.get().currentMaterialFile(task))) {
+            source.sendError(Text.literal("还没有材料清单 "
+                + StockManager.get().currentMaterialFile(task)
+                + "（先跑 /pc stock task " + task + " generate_materials_list）"));
             return 0;
         }
 
