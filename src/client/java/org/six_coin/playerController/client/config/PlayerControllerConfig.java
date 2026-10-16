@@ -149,13 +149,14 @@ public final class PlayerControllerConfig {
         private int antiKickOffTime = DEFAULT_ANTI_KICK_OFF_TIME;
 
         /**
-         * 一个 tick 里最多往一个格子里放几个。
+         * 一个 tick 里最多点几下。
          *
-         * <p>「一个一个放」的那些步骤（往合成格子里摆材料、右键往背包格放物品）一 tick 可以连点好几下，
-         * 因为客户端点击是**本地预测、同步生效**的，没必要点一下等一个 tick。
-         * 服务端要是少接受了几下，下一 tick 会按「光标少了多少」自己纠正。
+         * <p>点击是**本地预测、立即生效**的，没必要点一下等一个 tick：「往容器里搬东西」「往背包格里放东西」
+         * 这些一 tick 可以连点好几下（一批点完再一起核对结果）。服务端要是少接受了几下，
+         * 下一 tick 会按服务端同步回来的状态自己纠正。
          *
-         * <p>合法范围 {@value #MIN_ITEMS_PER_TICK}~{@value #MAX_ITEMS_PER_TICK}，默认
+         * <p>调成 1 就是「一 tick 一下点击」的老实节奏。
+         * 合法范围 {@value #MIN_ITEMS_PER_TICK}~{@value #MAX_ITEMS_PER_TICK}，默认
          * {@value #DEFAULT_ITEMS_PER_TICK}。
          */
         @SerializedName("items_per_tick")

@@ -10,13 +10,14 @@ import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerSession;
+import org.six_coin.playerController.client.container.ContainerStash;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.ItemList;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * {@code /pc container put to_id|to_position ... all_items|all_shulker_boxes|everything|everything_include_hotbar}
@@ -29,15 +30,17 @@ import java.util.Set;
  * <p>流程（按需求）：
  * <ol>
  *   <li>物品栏里没有这类东西 → 直接 {@code all_cleared = true}，容器都不用开；</li>
- *   <li>循环：对物品栏里一处匹配的格子 Shift 点击（QuickMove）；连着几次点击都没搬走东西
- *       → 容器满了、{@code all_cleared = false} 结束；物品栏里没有匹配的槽位了 → {@code all_cleared = true}。</li>
+ *   <li>开容器，然后交给 {@link ContainerStash}：一轮把要动的格子里还有东西的都 QuickMove 一遍，
+ *       等两 tick 逐格核对有没有真的搬走；连着两轮一点都没搬动才算容器满了
+ *       （物品栏里没有匹配的格子了 → {@code all_cleared = true}）。</li>
  * </ol>
  *
  * <p>「容器满没满」**只认服务端有没有真的搬走东西**，不拿界面里的空位去猜：
  * 空着几格和实际能不能收下这一叠不一定对得上（能不能收下由服务端算），猜错了会白白换容器 / 换盒子。
  * 所以每一处都先点一下看结果；哪一格点不动就换别的格子试，**每一格都试过、都搬不动**才算真的满了。
  *
- * <p>一 tick 一下点击，点完等两 tick 再看物品栏里这类东西的总数有没有变少。
+ * <p>点击是本地预测、立即生效的，所以一 tick 里可以把该点的格子一起点完（数量上限见配置
+ * {@code actions.items_per_tick}），不用一格一格等 —— 核对放在服务端的同步回来之后做。
  */
 public class ContainerPutAction extends Action {
 
@@ -60,9 +63,6 @@ public class ContainerPutAction extends Action {
     /** 主背包（27 格，不含快捷栏）在玩家背包里的起始下标。 */
     private static final int MAIN_START = InventoryUtils.MAIN_START;
 
-    /** 打开界面之后等几 tick 再动。 */
-    private static final int SETTLE_TICKS = 2;
-
     private static final int MAX_TOTAL_TICKS = 20 * 600;
 
     private enum Phase {
@@ -83,15 +83,10 @@ public class ContainerPutAction extends Action {
     private final int hotbarTo;
 
     private final ContainerSession session;
+    /** 搬运本身（一轮点一遍 → 核对 → 判定满没满）。 */
+    private final ContainerStash stash;
     private Phase phase = Phase.OPENING;
-    private int settleTicks;
     private int totalTicks;
-    private int moved;
-    private int beforeCount;
-    /** 上一次点击点的是哪一格（{@code Slot.id}），验证有没有搬动时用。 */
-    private int lastSourceId = -1;
-    /** 点过、而且一点都没搬动的源格：换别的格子试，全都试过才算容器满了。 */
-    private final Set<Integer> triedNoMove = new HashSet<>();
     private boolean allCleared;
     private boolean containerFull;
     private int freeSlots = -1;
@@ -121,6 +116,7 @@ public class ContainerPutAction extends Action {
         this.hotbarFrom = Math.min(hotbarFrom, hotbarTo);
         this.hotbarTo = Math.max(hotbarFrom, hotbarTo);
         this.session = new ContainerSession(this.pos);
+        this.stash = new ContainerStash(this.session);
     }
 
     /**
@@ -243,7 +239,7 @@ public class ContainerPutAction extends Action {
 
         switch (phase) {
             case OPENING -> tickOpening(mc);
-            case PUT -> tickPut(player);
+            case PUT -> tickPut();
             case DONE -> finish();
         }
     }
@@ -268,7 +264,8 @@ public class ContainerPutAction extends Action {
         JsonObject result = new JsonObject();
         result.addProperty("all_cleared", allCleared);
 
-        ChatUtils.debug("放物结果：all_cleared=%s，一共搬了 %d 次", allCleared, moved);
+        ChatUtils.debug("放物结果：all_cleared=%s，一共点了 %d 下（搬空 %d 格）",
+            allCleared, stash.clicks(), stash.stacks());
         output().info("放物结果：all_cleared=" + allCleared + (allCleared
             ? "（" + rangeName() + "里要放的都放进去了）"
             : "（没放完：容器满了）"));
@@ -286,63 +283,49 @@ public class ContainerPutAction extends Action {
         }
     }
 
-    private void tickPut(ClientPlayerEntity player) {
-        // 上一次点击还在等结果
-        if (settleTicks > 0) {
-            settleTicks--;
-            if (settleTicks == 0) verifyMove(player);
-            return;
-        }
-
-        // 物品栏里没有这类东西了 → 放完了
-        if (countInInventory(player) == 0) {
-            allCleared = true;
-            ChatUtils.debug("物品栏里没有" + modeName() + "了，放完了");
-            phase = Phase.DONE;
-            return;
-        }
-
-        Slot source = findSource();
-        if (source == null) {
-            if (triedNoMove.isEmpty()) {
-                allCleared = true;
-                ChatUtils.debug("物品栏里找不到能放的格子了，放完了");
-            } else {
-                // 每一格都点过了，一点都搬不动：容器是真的满了
-                allCleared = false;
-                ChatUtils.debug("能试的 " + triedNoMove.size() + " 格都点过了、一点都没搬动，容器满了");
-            }
-            phase = Phase.DONE;
-            return;
-        }
-
-        beforeCount = countInInventory(player);
-        lastSourceId = source.id;
-        if (!session.quickMove(source, "放进容器 " + InventoryUtils.describe(source.getStack()))) {
+    private void tickPut() {
+        ContainerStash.Result result = stash.tick(candidates());
+        if (stash.rejected()) {
             fail("点不了格子（放进容器）");
             return;
         }
-        moved++;
-        settleTicks = SETTLE_TICKS;
+
+        switch (result) {
+            case WORKING -> {
+            }
+            case CLEARED -> {
+                allCleared = true;
+                ChatUtils.debug("%s里没有%s了，放完了（点了 %d 下，搬空 %d 格）",
+                    rangeName(), modeName(), stash.clicks(), stash.stacks());
+                phase = Phase.DONE;
+            }
+            case FULL -> {
+                allCleared = false;
+                containerFull = true;
+                ChatUtils.debug("容器装不下剩下的%s了（点了 %d 下，搬空 %d 格）",
+                    modeName(), stash.clicks(), stash.stacks());
+                phase = Phase.DONE;
+            }
+        }
     }
 
     /**
-     * 点完等一下：物品栏里这类东西有没有变少。
+     * 这一轮可以考虑的源格：要动的范围内、是「要放的东西」的那些。
      *
-     * <p>没变少就说明**这一格**服务端搬不动（容器里放不下这一叠），换别的格子接着试；
-     * 每一格都试过、都搬不动，才算容器满了。
+     * <p>每一轮重新看一遍（搬走一部分的格子会留在里面，下一轮接着点）。
      */
-    private void verifyMove(ClientPlayerEntity player) {
-        int after = countInInventory(player);
-        if (after < beforeCount) {
-            // 搬动了：容器还有地方，之前试不动的格子过会儿可以再试
-            triedNoMove.clear();
-            return;
-        }
+    private List<Slot> candidates() {
+        List<Slot> result = new ArrayList<>();
+        for (Slot slot : session.handler().slots) {
+            if (!(slot.inventory instanceof PlayerInventory)) continue;
+            int index = slot.getIndex();
+            if (index < rangeStart() || index >= rangeEnd()) continue;
 
-        triedNoMove.add(lastSourceId);
-        ChatUtils.debug("这一下 QuickMove 没搬走东西（" + beforeCount + " → " + after + "，slot="
-            + lastSourceId + "），换别的格子试");
+            ItemStack stack = slot.getStack();
+            if (stack.isEmpty() || !matches(stack)) continue;
+            result.add(slot);
+        }
+        return result;
     }
 
     // ------------------------------------------------------------------
@@ -356,20 +339,6 @@ public class ContainerPutAction extends Action {
             total += stack.getCount();
         }
         return total;
-    }
-
-    /** 要动的那几格里下一个（还没试过、或者试过但搬得动的）匹配格子。 */
-    @Nullable
-    private Slot findSource() {
-        for (Slot slot : session.handler().slots) {
-            if (!(slot.inventory instanceof PlayerInventory)) continue;
-            if (slot.getIndex() < rangeStart() || slot.getIndex() >= rangeEnd()) continue;
-            if (triedNoMove.contains(slot.id)) continue;
-            ItemStack stack = slot.getStack();
-            if (stack.isEmpty() || !matches(stack)) continue;
-            return slot;
-        }
-        return null;
     }
 
     /** 这一叠算不算「要放的东西」：潜影盒不算物品，everything 什么都算，wanted 只认 item_list。 */

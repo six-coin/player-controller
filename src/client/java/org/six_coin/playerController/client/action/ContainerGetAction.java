@@ -22,7 +22,9 @@ import org.six_coin.playerController.client.util.ItemRules;
 import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * {@code /pc container get from_target <item_list>} 的执行体。
@@ -47,10 +49,14 @@ import java.util.List;
  * <p><b>绝对不碰快捷栏</b>：不用 shift 点击（{@code QUICK_MOVE}，服务端会往快捷栏塞），
  * 所有往背包放的操作都只点主背包 27 格。
  *
- * <p>点击方式：一 tick 最多一次点击，点完等本地状态变成预期值再继续（客户端点击是本地预测的，
- * 正常情况下下一 tick 就能往下走；等太久就报错停下，日志里能看到卡在哪一步）。
+ * <p>点击方式：点击是**本地预测、立即生效**的，所以一个 tick 里可以把「拿起 → 放 → 放回」整串走完
+ * （一 tick 的点击上限见配置 {@code actions.items_per_tick}），不用一步一步等下一个 tick；
+ * 只有「本地预测还没变成预期值」时才停下来等，等太久就报错停下，日志里能看到卡在哪一步。
  * 整叠用「拿起整叠 → 左键点主背包格（同类半叠优先，其次空格）直到光标空」；
  * 只取一部分用「拿起整叠 → 右键往目标格放 N 个 → 剩下的放回原格」。
+ *
+ * <p>先拿哪一格（需求没要够的时候）：优先能**整叠取走**的（挑最大的那一叠，少跑几趟），
+ * 其次挑「最小的、够这次用的」那一叠（只取一部分的时候，把大叠留给以后整叠搬）。
  */
 public class ContainerGetAction extends Action {
 
@@ -109,12 +115,21 @@ public class ContainerGetAction extends Action {
     private PlayerInventory playerInventory;
     private List<Slot> containerSlots = List.of();
 
-    private int slotCursor;
+    /** 这一轮挑中的那一格（挑法见 {@link #pickChoice()}）。 */
+    private Slot source;
+    private ItemStack sourceStack;
+
     private int totalTicks;
     private int stepWaitTicks;
     private int extractions;
     private boolean pendingClick;
     private String stopReason;
+
+    /** 这一 tick 一共点了几下（一 tick 的点击上限用它数）。 */
+    private int clicks;
+
+    /** 跳过的格子的原因只报一次（每一轮都会重新看一遍所有格子，不然日志会刷屏）。 */
+    private final Set<Integer> explained = new HashSet<>();
 
     /** 整个容器的格子都看完了。 */
     private boolean scannedAll;
@@ -133,8 +148,6 @@ public class ContainerGetAction extends Action {
     private int boxSlotId = -1;
 
     // 当前这次提取
-    private Slot source;
-    private ItemStack sourceStack;
     private int sourceCount;
     private int take;
     private int placed;
@@ -237,6 +250,26 @@ public class ContainerGetAction extends Action {
             return;
         }
 
+        // 一个 tick 里能走几步就走几步：点击是本地预测、立即生效的，「拿起 → 放 → 放回」这一串
+        // 没必要一点一个 tick。走不动了（本地预测还没变成预期值、要等服务端）就停下，下一 tick 接着来。
+        // 一 tick 的点击上限还是 actions.items_per_tick。
+        int budget = PlayerControllerConfig.getItemsPerTick();
+        while (!isFinished() && budget > 0) {
+            Phase before = phase;
+            int clicksBefore = clicks;
+
+            dispatch();
+
+            if (isFinished()) return;
+            int used = clicks - clicksBefore;
+            if (used == 0 && phase == before) return;   // 这一步没往前走：在等结果
+
+            budget -= Math.max(used, 1);
+        }
+    }
+
+    private void dispatch() {
+        MinecraftClient mc = MinecraftClient.getInstance();
         switch (phase) {
             case OPENING -> tickOpening(mc);
             case SCAN -> tickScan();
@@ -244,7 +277,7 @@ public class ContainerGetAction extends Action {
             case PLACE -> tickPlace();
             case RETURN -> tickReturn();
             case DUMP -> tickDump();
-            case ONE_BOX -> tickOneBox(player);
+            case ONE_BOX -> tickOneBox();
         }
     }
 
@@ -308,7 +341,6 @@ public class ContainerGetAction extends Action {
             case READY -> {
                 playerInventory = mc.player.getInventory();
                 containerSlots = InventoryUtils.containerSlots(session.handler());
-                slotCursor = 0;
                 pendingClick = false;
                 stepWaitTicks = 0;
                 phase = mode == Mode.NORMAL || mode == Mode.ONLY_ITEM ? Phase.SCAN : Phase.ONE_BOX;
@@ -324,9 +356,9 @@ public class ContainerGetAction extends Action {
 
     /**
      * only_one_shulker 的流程：找一个「里面有 item_list 需要的东西」的潜影盒 → 拿走 →
-     * 放进快捷栏第三格（背包下标 2）。一 tick 一下点击，没有返回值。
+     * 放进快捷栏第三格（背包下标 2）。没有返回值。
      */
-    private void tickOneBox(ClientPlayerEntity player) {
+    private void tickOneBox() {
         switch (oneBoxStep) {
             case 0 -> {
                 boxSlotId = findShulkerWithNeeded();
@@ -434,75 +466,18 @@ public class ContainerGetAction extends Action {
             return;
         }
 
-        while (slotCursor < containerSlots.size()) {
-            Slot slot = containerSlots.get(slotCursor);
-            ItemStack stack = slot.getStack();
-            if (stack.isEmpty()) {
-                slotCursor++;
-                continue;
-            }
-
-            // ① 潜影盒：盒子里有要的东西就整个搬走。
-            //    潜影盒自己也是堆叠上限 1 的物品，所以它先走这条规则；
-            //    不过盒子要是改过名字，按「改过名字的一律无视」处理。
-            if (ShulkerUtils.isShulkerBox(stack)) {
-                if (mode == Mode.ONLY_ITEM) {
-                    ChatUtils.debug("第 %d 格是潜影盒，但这次是 only_item（只拿物品），跳过", slot.id);
-                    slotCursor++;
-                    continue;
-                }
-                String boxName = ItemRules.customNameOf(stack);
-                if (boxName != null) {
-                    ChatUtils.debug("第 %d 格是潜影盒但改过名字（%s），无视", slot.id, boxName);
-                    slotCursor++;
-                    continue;
-                }
-                if (!ShulkerUtils.containsWanted(stack, itemList)) {
-                    ChatUtils.debug("第 %d 格是潜影盒，里面没有 item_list 还要的东西，跳过（内容：%s）",
-                        slot.id, ShulkerUtils.describeContents(stack));
-                    slotCursor++;
-                    continue;
-                }
-                source = slot;
-                sourceStack = stack.copy();
-                sourceCount = stack.getCount();
-                take = stack.getCount();
-                ChatUtils.debug("第 %d 格是潜影盒 x%d，里面有要的东西（%s）→ 整个搬走",
-                    slot.id, sourceCount, ShulkerUtils.describeContents(stack));
-                break;
-            }
-
-            // ② 普通物品：堆叠上限 1 的、改过名字的都当没看见
-            if (ItemRules.isIgnored(stack)) {
-                ChatUtils.debug("第 %d 格 %s x%d 无视（%s）", slot.id,
-                    Registries.ITEM.getId(stack.getItem()), stack.getCount(),
-                    ItemRules.ignoreReason(stack));
-                slotCursor++;
-                continue;
-            }
-
-            int need = itemList.remaining(stack.getItem());
-            if (need <= 0) {
-                ChatUtils.debug("第 %d 格 %s x%d 不需要，跳过",
-                    slot.id, Registries.ITEM.getId(stack.getItem()), stack.getCount());
-                slotCursor++;
-                continue;
-            }
-            source = slot;
-            sourceStack = stack.copy();
-            sourceCount = stack.getCount();
-            take = Math.min(sourceCount, need);
-            ChatUtils.debug("第 %d 格 %s x%d，item_list 还要 %d → 提取 %d 个（%s）",
-                slot.id, Registries.ITEM.getId(stack.getItem()), sourceCount, need, take,
-                take == sourceCount ? "整叠" : "只取一部分");
-            break;
-        }
-
-        if (source == null) {
+        Choice choice = pickChoice();
+        if (choice == null) {
             scannedAll = true;
             stop("容器的格子都看完了，item_list 还差：" + itemList.describe());
             return;
         }
+
+        source = choice.slot;
+        sourceStack = choice.stack;
+        sourceCount = choice.stack.getCount();
+        take = choice.take;
+        ChatUtils.debug("第 %d 格 %s", source.id, choice.why);
 
         // 每次提取之前都检查一次主背包有没有空位
         Slot empty = InventoryUtils.firstEmptyMainSlot(session.handler(), playerInventory);
@@ -512,9 +487,10 @@ public class ContainerGetAction extends Action {
             return;
         }
 
+        placed = 0;
+        phase = Phase.PICKUP;
+
         if (take == sourceCount) {
-            placed = 0;
-            phase = Phase.PICKUP;
             ChatUtils.debug("搬法：整叠 %d 个 → 拿起后左键放进主背包"
                 + "（同类半叠优先，其次空格；不会碰快捷栏；空位检查通过，第一个空格是 #%d）",
                 take, empty.id);
@@ -530,10 +506,108 @@ public class ContainerGetAction extends Action {
                 + " 的格子，停止；item_list 还差：" + itemList.describe());
             return;
         }
-        placed = 0;
-        phase = Phase.PICKUP;
         ChatUtils.debug("搬法：拿起整叠 → 右键往 #%d（%s）放 %d 个 → 剩下的放回原格（不会碰快捷栏）",
             target.id, merge != null ? "同类半叠" : "空格", take);
+    }
+
+    /** 这一轮挑中的那一格。 */
+    private static final class Choice {
+        final Slot slot;
+        final ItemStack stack;
+        final int take;
+        /** 挑它的理由（日志用）。 */
+        final String why;
+
+        Choice(Slot slot, ItemStack stack, int take, String why) {
+            this.slot = slot;
+            this.stack = stack;
+            this.take = take;
+            this.why = why;
+        }
+    }
+
+    /**
+     * 从容器里挑这一轮要提取的那一格。
+     *
+     * <p>优先能**整叠取走**的（这一格的数量 ≤ item_list 还要的数量）：里面再挑最大的那一叠 ——
+     * 一趟搬走一整格，不用「取一部分再把剩下的放回去」。没有能整叠取走的，就挑「最小的、够这次用的」
+     * 那一叠（只取一部分的时候，把大叠留给以后整叠搬）。
+     *
+     * @return 没有能拿的返回 null
+     */
+    @Nullable
+    private Choice pickChoice() {
+        Choice whole = null;
+        Choice partial = null;
+
+        for (Slot slot : containerSlots) {
+            ItemStack stack = slot.getStack();
+            if (stack.isEmpty()) continue;
+
+            // ① 潜影盒：盒子里有要的东西就整个搬走。
+            //    潜影盒自己也是堆叠上限 1 的物品，所以它先走这条规则；
+            //    不过盒子要是改过名字，按「改过名字的一律无视」处理。
+            if (ShulkerUtils.isShulkerBox(stack)) {
+                if (mode == Mode.ONLY_ITEM) {
+                    explain(slot, "是潜影盒，但这次是 only_item（只拿物品），跳过");
+                    continue;
+                }
+                String boxName = ItemRules.customNameOf(stack);
+                if (boxName != null) {
+                    explain(slot, "是潜影盒但改过名字（%s），无视", boxName);
+                    continue;
+                }
+                if (!ShulkerUtils.containsWanted(stack, itemList)) {
+                    explain(slot, "是潜影盒，里面没有 item_list 还要的东西，跳过（内容：%s）",
+                        ShulkerUtils.describeContents(stack));
+                    continue;
+                }
+                if (whole == null || stack.getCount() > whole.stack.getCount()) {
+                    whole = new Choice(slot, stack.copy(), stack.getCount(),
+                        "是潜影盒 x" + stack.getCount() + "，里面有要的东西（"
+                            + ShulkerUtils.describeContents(stack) + "）→ 整个搬走");
+                }
+                continue;
+            }
+
+            // ② 普通物品：堆叠上限 1 的、改过名字的都当没看见
+            if (ItemRules.isIgnored(stack)) {
+                explain(slot, "%s x%d 无视（%s）", Registries.ITEM.getId(stack.getItem()),
+                    stack.getCount(), ItemRules.ignoreReason(stack));
+                continue;
+            }
+
+            int need = itemList.remaining(stack.getItem());
+            if (need <= 0) {
+                explain(slot, "%s x%d 不需要，跳过",
+                    Registries.ITEM.getId(stack.getItem()), stack.getCount());
+                continue;
+            }
+
+            if (stack.getCount() <= need) {
+                if (whole == null || stack.getCount() > whole.stack.getCount()) {
+                    whole = new Choice(slot, stack.copy(), stack.getCount(),
+                        Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount()
+                            + "，item_list 还要 " + need + " → 整叠取走");
+                }
+            } else if (partial == null || stack.getCount() < partial.stack.getCount()) {
+                partial = new Choice(slot, stack.copy(), need,
+                    Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount()
+                        + "，item_list 还要 " + need + " → 提取 " + need + " 个（只取一部分）");
+            }
+        }
+
+        return whole != null ? whole : partial;
+    }
+
+    /** 跳过的原因只报一次：每一轮都会把所有格子重新看一遍，不然日志会刷屏。 */
+    private void explain(Slot slot, String format, Object... args) {
+        if (!explained.add(slot.id)) return;
+
+        Object[] all = new Object[args.length + 1];
+        all[0] = slot.id;
+        System.arraycopy(args, 0, all, 1, args.length);
+        ChatUtils.debug("第 %d 格 " + format, all);
     }
 
     // ------------------------------------------------------------------
@@ -746,7 +820,6 @@ public class ContainerGetAction extends Action {
         extractions++;
         ChatUtils.debug("第 %d 次提取完成，现在 item_list = %s", extractions, itemList.toJson());
 
-        slotCursor++;
         source = null;
         sourceStack = null;
         target = null;
@@ -768,6 +841,7 @@ public class ContainerGetAction extends Action {
             fail("点不了格子（" + what + "）");
             return;
         }
+        clicks++;
         pendingClick = true;
         stepWaitTicks = 0;
     }
@@ -784,6 +858,7 @@ public class ContainerGetAction extends Action {
             fail("点不了格子（静默点击）");
             return;
         }
+        clicks++;
         pendingClick = true;
         stepWaitTicks = 0;
     }

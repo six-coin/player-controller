@@ -6,6 +6,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import org.six_coin.playerController.client.action.Action;
+import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerClicks;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
@@ -27,7 +28,9 @@ import java.util.List;
  * 只要此刻没有别的界面开着（服务端那边的 currentScreenHandler 就是它），
  * 直接对着这个 syncId 发点击就会被接受 —— 不需要真的把背包画出来。
  *
- * <p>点一下等这一格变空再点下一格；27 格塞不下（很少见）就把那几格记进 {@link #leftovers()}，
+ * <p>搬法：一轮把范围内还有东西的格子一起点一遍（点击是本地预测、立即生效的，一 tick 能连点好几下，
+ * 上限见配置 {@code actions.items_per_tick}），等两 tick 逐格核对。整格空了算挪进去了；
+ * 还剩着就是 27 格那边塞不下了（一次 QuickMove 会把能塞的都塞完），记进 {@link #leftovers()}，
  * 由调用方决定怎么办（一般是照旧存进 item_storage）。
  */
 public class HotbarQuickMoveAction extends Action {
@@ -45,8 +48,8 @@ public class HotbarQuickMoveAction extends Action {
 
     private static final int MAX_IDLE_WAIT_TICKS = 60;
 
-    /** 一下点击最多等这么多 tick 生效。 */
-    private static final int MAX_MOVE_WAIT_TICKS = 20;
+    /** 一轮点完之后等几 tick 再核对（服务端的同步要一个来回）。 */
+    private static final int ROUND_TICKS = 2;
 
     private static final int MAX_TOTAL_TICKS = 20 * 60;
 
@@ -54,14 +57,16 @@ public class HotbarQuickMoveAction extends Action {
     private final int hotbarTo;
 
     private Phase phase = Phase.WAIT_IDLE;
-    private int settleTicks;
-    private int idleWaitTicks;
-    private int moveWaitTicks;
+    private int idleTicks;
+    private int roundTicks;
     private int totalTicks;
-    private int moved;
+    /** 一共点了几下。 */
+    private int clicks;
+    /** 挪空了几格。 */
+    private int movedStacks;
 
-    /** 正在等结果的那一格（背包下标 0~8）；-1 = 没在等。 */
-    private int pendingIndex = -1;
+    /** 这一轮点了哪几格（背包下标）。 */
+    private final List<Integer> batch = new ArrayList<>();
 
     /** 塞不进 27 格、留在快捷栏里的格子（背包下标）。 */
     private final List<Integer> leftoverIndexes = new ArrayList<>();
@@ -95,7 +100,7 @@ public class HotbarQuickMoveAction extends Action {
 
     /** 挪了几格。 */
     public int moved() {
-        return moved;
+        return movedStacks;
     }
 
     @Override
@@ -118,7 +123,7 @@ public class HotbarQuickMoveAction extends Action {
             return;
         }
 
-        if (findNext(player) < 0) {
+        if (findAny(player) < 0) {
             allMoved = true;
             ChatUtils.debug("快捷栏第 %d~%d 格本来就是空的", hotbarFrom + 1, hotbarTo + 1);
             finish();
@@ -151,7 +156,7 @@ public class HotbarQuickMoveAction extends Action {
 
         switch (phase) {
             case WAIT_IDLE -> tickIdle(player);
-            case MOVE -> tickMove(mc, player);
+            case MOVE -> tickMove(player);
             case DONE -> finish();
         }
     }
@@ -160,8 +165,8 @@ public class HotbarQuickMoveAction extends Action {
     protected void onEnd() {
         ScreenSuppressor.release();
         if (failureReason() == null) {
-            ChatUtils.debug("快捷栏第 %d~%d 格挪进物品栏：挪了 %d 格%s",
-                hotbarFrom + 1, hotbarTo + 1, moved,
+            ChatUtils.debug("快捷栏第 %d~%d 格挪进物品栏：挪了 %d 格（点了 %d 下）%s",
+                hotbarFrom + 1, hotbarTo + 1, movedStacks, clicks,
                 leftoverIndexes.isEmpty() ? "" : "，剩下 " + leftovers() + " 没挪动");
         }
         allMoved = failureReason() == null && leftoverIndexes.isEmpty();
@@ -171,39 +176,22 @@ public class HotbarQuickMoveAction extends Action {
 
     private void tickIdle(ClientPlayerEntity player) {
         if (player.currentScreenHandler != player.playerScreenHandler) {
-            if (++idleWaitTicks > MAX_IDLE_WAIT_TICKS) {
+            if (++idleTicks > MAX_IDLE_WAIT_TICKS) {
                 fail("等了 " + MAX_IDLE_WAIT_TICKS + " tick，别的界面还没关掉");
             }
             return;
         }
-        if (++settleTicks < SETTLE_TICKS) return;
+        if (++idleTicks < SETTLE_TICKS) return;
         phase = Phase.MOVE;
     }
 
-    private void tickMove(MinecraftClient mc, ClientPlayerEntity player) {
+    private void tickMove(ClientPlayerEntity player) {
         ScreenHandler handler = player.playerScreenHandler;
 
-        // 等上一次点击生效
-        if (pendingIndex >= 0) {
-            if (hotbarStack(pendingIndex).isEmpty()) {
-                pendingIndex = -1;
-                moveWaitTicks = 0;
-                return;
-            }
-            if (++moveWaitTicks > MAX_MOVE_WAIT_TICKS) {
-                ChatUtils.debug("快捷栏第 %d 格的 %s 塞不进 27 格物品栏，先放着",
-                    pendingIndex + 1, InventoryUtils.describe(hotbarStack(pendingIndex)));
-                leftoverIndexes.add(pendingIndex);
-                pendingIndex = -1;
-                moveWaitTicks = 0;
-            }
-            return;
-        }
-
-        int index = findNext(player);
-        if (index < 0) {
-            ChatUtils.debug("快捷栏第 %d~%d 格该挪的都挪完了", hotbarFrom + 1, hotbarTo + 1);
-            phase = Phase.DONE;
+        // 上一轮还在等核对
+        if (roundTicks > 0) {
+            roundTicks--;
+            if (roundTicks == 0) verifyRound(player);
             return;
         }
 
@@ -212,24 +200,61 @@ public class HotbarQuickMoveAction extends Action {
             return;
         }
 
-        Slot slot = InventoryUtils.hotbarSlot(handler, index);
-        if (slot == null) {
-            leftoverIndexes.add(index);
+        // 一轮把范围内还有东西的格子一起点一遍
+        batch.clear();
+        int budget = PlayerControllerConfig.getItemsPerTick();
+        for (int i = hotbarFrom; i <= hotbarTo && batch.size() < budget; i++) {
+            if (leftoverIndexes.contains(i)) continue;
+            if (player.getInventory().getStack(i).isEmpty()) continue;
+
+            Slot slot = InventoryUtils.hotbarSlot(handler, i);
+            if (slot == null) {
+                leftoverIndexes.add(i);
+                continue;
+            }
+
+            batch.add(i);
+            ContainerClicks.quickMoveQuiet(handler, slot);
+            clicks++;
+        }
+
+        if (batch.isEmpty()) {
+            ChatUtils.debug("快捷栏第 %d~%d 格该挪的都挪完了", hotbarFrom + 1, hotbarTo + 1);
+            phase = Phase.DONE;
             return;
         }
 
-        if (!ContainerClicks.quickMove(handler, slot, "快捷栏第 " + (index + 1) + " 格的 "
-            + InventoryUtils.describe(slot.getStack()) + " → 27 格物品栏")) {
-            fail("点不出去（快捷栏第 " + (index + 1) + " 格）");
-            return;
-        }
-        moved++;
-        pendingIndex = index;
-        moveWaitTicks = 0;
+        if (batch.size() > 1) ChatUtils.debug("一轮 QuickMove %d 格", batch.size());
+        roundTicks = ROUND_TICKS;
     }
 
-    /** 范围内下一格还有东西、而且还没被记为「挪不动」的快捷栏格；没有返回 -1。 */
-    private int findNext(ClientPlayerEntity player) {
+    /**
+     * 核对上一轮：整格空了算挪进去了；还剩着就是 27 格那边塞不下了
+     * （一次 QuickMove 会把能塞的都塞完，所以剩下的不会再有地方放）。
+     */
+    private void verifyRound(ClientPlayerEntity player) {
+        int done = 0;
+
+        for (int index : batch) {
+            ItemStack rest = player.getInventory().getStack(index);
+            if (rest.isEmpty()) {
+                done++;
+                continue;
+            }
+            if (leftoverIndexes.contains(index)) continue;
+
+            leftoverIndexes.add(index);
+            ChatUtils.debug("快捷栏第 %d 格的 %s 塞不进 27 格物品栏，先放着（还剩 %d 个）",
+                index + 1, InventoryUtils.describe(rest), rest.getCount());
+        }
+
+        ChatUtils.debug("核对了 %d 格：挪进去 %d 格", batch.size(), done);
+        movedStacks += done;
+        batch.clear();
+    }
+
+    /** 范围内还有东西、而且还没被记为「挪不动」的快捷栏格；没有返回 -1。 */
+    private int findAny(ClientPlayerEntity player) {
         for (int i = hotbarFrom; i <= hotbarTo; i++) {
             if (leftoverIndexes.contains(i)) continue;
             if (!player.getInventory().getStack(i).isEmpty()) return i;

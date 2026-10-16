@@ -7,30 +7,33 @@ import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
-import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerSession;
+import org.six_coin.playerController.client.container.ContainerStash;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * 把**快捷栏某几格**里的整叠东西放进一个容器（{@link TakeItemAction} 的反向操作）。
+ * 把**快捷栏某几格**里的整叠东西搬进一个容器（{@link TakeItemAction} 的反向操作）。
  *
  * <p>两处用到它：
  * <ul>
  *   <li>备货第一部分阶段3：挖掉暂存处的潜影盒以后，捡到的盒子在快捷栏第二格，
  *       要把它塞进 item_final / item_storage（单格）；</li>
  *   <li>备货第二部分阶段3：{@code /pc recipe} 的成品会 QuickMove 到快捷栏 4~9 格，
- *       合成完要把这几格一起放进目标容器（一段）。
+ *       合成完要把这几格一起放进目标容器（一段）。</li>
  * </ul>
  *
- * <p>容器收不下就 {@link #allCleared()} = false、{@link #containerFull()} = true，
- * 由调用方决定换下一个容器（跟 {@link ContainerPutAction} 一个套路）。
- * 一 tick 最多一下点击，点完等光标状态变成预期值再继续。
+ * <p>搬法是整叠 {@code QUICK_MOVE}（shift 点击）：放哪儿、能放多少**由服务端决定**，
+ * 所以这里不猜容器还剩几格、也不自己挑格子 —— 一轮把这几格点一遍，等两 tick 逐格核对有没有真的搬走，
+ * 连着两轮一点都没搬动就是容器装不下了（见 {@link ContainerStash}）。搬不进去的部分就留在快捷栏那一格里
+ * （不会乱塞），由调用方决定换下一个容器。
  */
 public class PutHotbarItemAction extends Action {
 
@@ -38,22 +41,11 @@ public class PutHotbarItemAction extends Action {
         OPENING,
         /** 打开之后等几 tick，让槽位同步完。 */
         SETTLE,
-        CARRY,
+        PUT,
         DONE
     }
 
-    /** 上一次点击在干什么，用来判断点成功了没。 */
-    private enum Step {
-        PICK,
-        PLACE,
-        RETURN
-    }
-
-    private static final int MAX_STEP_WAIT_TICKS = 60;
     private static final int MAX_TOTAL_TICKS = 20 * 120;
-
-    /** 一次最多搬几叠（防止哪里出错时一直搬）。 */
-    private static final int MAX_STACKS = 64;
 
     private final BlockPos pos;
     private final int hotbarFrom;
@@ -61,18 +53,10 @@ public class PutHotbarItemAction extends Action {
     private final boolean wantDetail;
 
     private final ContainerSession session;
+    /** 搬运本身（一轮点一遍 → 核对 → 判定满没满）。 */
+    private final ContainerStash stash;
     private Phase phase = Phase.OPENING;
-
-    private int stepWaitTicks;
     private int totalTicks;
-    private int moved;
-    private int stacks;
-
-    private boolean pendingClick;
-    private Step pendingStep;
-    private int clickCursorCount;
-    /** 正在搬的那一格（背包下标 0~8）。 */
-    private int currentIndex = -1;
 
     private boolean allCleared;
     private boolean containerFull;
@@ -96,6 +80,7 @@ public class PutHotbarItemAction extends Action {
         this.hotbarTo = Math.max(hotbarFrom, hotbarTo);
         this.wantDetail = wantDetail;
         this.session = new ContainerSession(this.pos);
+        this.stash = new ContainerStash(this.session);
     }
 
     /** 快捷栏那几格空了（东西都进容器了）。 */
@@ -103,7 +88,7 @@ public class PutHotbarItemAction extends Action {
         return allCleared;
     }
 
-    /** 容器一格空位都没有 / 装不下这一叠了。 */
+    /** 容器装不下剩下的了。 */
     public boolean containerFull() {
         return containerFull;
     }
@@ -185,12 +170,9 @@ public class PutHotbarItemAction extends Action {
         switch (phase) {
             case OPENING -> tickOpening(mc);
             case SETTLE -> {
-                if (session.settled()) {
-                    phase = Phase.CARRY;
-                    stepWaitTicks = 0;
-                }
+                if (session.settled()) phase = Phase.PUT;
             }
-            case CARRY -> tickCarry();
+            case PUT -> tickPut();
             case DONE -> finish();
         }
     }
@@ -211,7 +193,8 @@ public class PutHotbarItemAction extends Action {
 
         JsonObject result = new JsonObject();
         result.addProperty("all_cleared", allCleared);
-        ChatUtils.debug("放物结果：all_cleared=%s，搬了 %d 次，free_slots=%d", allCleared, moved, freeSlots);
+        ChatUtils.debug("放物结果：all_cleared=%s，点了 %d 下（搬空 %d 格），free_slots=%d",
+            allCleared, stash.clicks(), stash.stacks(), freeSlots);
         output().rawCopyable(result.toString());
     }
 
@@ -226,108 +209,43 @@ public class PutHotbarItemAction extends Action {
         }
     }
 
-    private void tickCarry() {
-        ScreenHandler handler = session.handler();
-        ItemStack cursor = handler.getCursorStack();
-
-        // 上一次点击还没生效
-        if (pendingClick) {
-            switch (pendingStep) {
-                case PICK -> {
-                    if (!cursor.isEmpty()) {
-                        pendingClick = false;
-                        stepWaitTicks = 0;
-                        return;
-                    }
-                    if (++stepWaitTicks > MAX_STEP_WAIT_TICKS) {
-                        fail("拿起快捷栏里的东西失败");
-                    }
-                }
-                case PLACE -> {
-                    if (cursor.isEmpty()) {
-                        pendingClick = false;
-                        stepWaitTicks = 0;
-                        stacks++;
-                        if (stacks >= MAX_STACKS) {
-                            allCleared = false;
-                            fail("搬了 " + stacks + " 叠还没搬完，先停下看看");
-                            return;
-                        }
-                        return;   // 下一 tick 接着搬下一格
-                    }
-                    if (cursor.getCount() < clickCursorCount) {
-                        // 放进去一部分，还剩一些：下一 tick 继续找能收的格子
-                        pendingClick = false;
-                        stepWaitTicks = 0;
-                        return;
-                    }
-                    if (++stepWaitTicks > MAX_STEP_WAIT_TICKS) {
-                        fail("往容器里放物品失败（光标上还有 " + InventoryUtils.describe(cursor) + "）");
-                    }
-                }
-                case RETURN -> {
-                    if (cursor.isEmpty()) {
-                        pendingClick = false;
-                        containerFull = true;
-                        allCleared = false;
-                        ChatUtils.debug("容器装不下，剩下的已经放回快捷栏第 %d 格", currentIndex + 1);
-                        phase = Phase.DONE;
-                        return;
-                    }
-                    if (++stepWaitTicks > MAX_STEP_WAIT_TICKS) {
-                        fail("把剩下的放回快捷栏失败（光标上还有 " + InventoryUtils.describe(cursor) + "）");
-                    }
-                }
-            }
+    private void tickPut() {
+        ContainerStash.Result result = stash.tick(hotbarSlots());
+        if (stash.rejected()) {
+            fail("点不了格子（放进容器）");
             return;
         }
 
-        if (cursor.isEmpty()) {
-            // 找还没有搬走的格子（范围内第一个非空的）
-            Slot source = findSource();
-            if (source == null) {
+        switch (result) {
+            case WORKING -> {
+            }
+            case CLEARED -> {
                 allCleared = true;
-                ChatUtils.debug("快捷栏第 %d~%d 格都空了，放完了", hotbarFrom + 1, hotbarTo + 1);
+                ChatUtils.debug("快捷栏第 %d~%d 格都空了，放完了（点了 %d 下，搬空 %d 格）",
+                    hotbarFrom + 1, hotbarTo + 1, stash.clicks(), stash.stacks());
                 phase = Phase.DONE;
-                return;
             }
-            currentIndex = source.getIndex();
-
-            ItemStack stack = source.getStack();
-            if (InventoryUtils.acceptTarget(handler, stack) == null) {
-                containerFull = true;
+            case FULL -> {
                 allCleared = false;
-                ChatUtils.debug("容器收不下 " + InventoryUtils.describe(stack) + "，结束");
+                containerFull = true;
+                ChatUtils.debug("容器装不下快捷栏第 %d~%d 格里剩下的东西了（点了 %d 下，搬空 %d 格）",
+                    hotbarFrom + 1, hotbarTo + 1, stash.clicks(), stash.stacks());
                 phase = Phase.DONE;
-                return;
             }
-            click(source, 0, SlotActionType.PICKUP, "拿起 " + InventoryUtils.describe(stack), Step.PICK);
-            return;
         }
-
-        Slot current = InventoryUtils.hotbarSlot(handler, currentIndex);
-        if (current == null) {
-            fail("找不到快捷栏第 " + (currentIndex + 1) + " 格");
-            return;
-        }
-
-        Slot target = InventoryUtils.acceptTarget(handler, cursor);
-        if (target == null) {
-            // 容器装不下了：把光标上剩下的塞回快捷栏那一格
-            click(current, 0, SlotActionType.PICKUP, "把剩下的放回快捷栏", Step.RETURN);
-            return;
-        }
-        click(target, 0, SlotActionType.PICKUP, "放进 " + InventoryUtils.describe(target), Step.PLACE);
     }
 
-    /** 范围内第一个还有东西的快捷栏格；都空了返回 null。 */
-    @Nullable
-    private Slot findSource() {
+    /** 这一轮可以考虑的源格：快捷栏这几格里有东西的。 */
+    private List<Slot> hotbarSlots() {
+        ScreenHandler handler = session.handler();
+        List<Slot> result = new ArrayList<>();
+
         for (int i = hotbarFrom; i <= hotbarTo; i++) {
-            Slot slot = InventoryUtils.hotbarSlot(session.handler(), i);
-            if (slot != null && !slot.getStack().isEmpty()) return slot;
+            Slot slot = InventoryUtils.hotbarSlot(handler, i);
+            if (slot == null || slot.getStack().isEmpty()) continue;
+            result.add(slot);
         }
-        return null;
+        return result;
     }
 
     /** 快捷栏范围内第一叠东西（只给日志用）。 */
@@ -337,23 +255,5 @@ public class PutHotbarItemAction extends Action {
             if (!stack.isEmpty()) return stack;
         }
         return ItemStack.EMPTY;
-    }
-
-    /**
-     * 点一下（该等的结果交给 {@link Step}）。
-     *
-     * <p>光标上有多少个要**在点之前**记下来：点击是本地预测的，点完这一刻光标数字已经变了，
-     * 之后再读就把「点之后」当成「点之前」，判断不出这一下有没有放进去（尤其是往同类半叠上合并的那种）。
-     */
-    private void click(Slot slot, int button, SlotActionType type, String action, Step step) {
-        clickCursorCount = session.handler().getCursorStack().getCount();
-        if (!session.click(slot, button, type, action)) {
-            fail("点不了格子（" + action + "）");
-            return;
-        }
-        pendingClick = true;
-        pendingStep = step;
-        stepWaitTicks = 0;
-        moved++;
     }
 }

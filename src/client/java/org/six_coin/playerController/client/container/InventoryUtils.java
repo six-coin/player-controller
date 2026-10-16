@@ -60,11 +60,7 @@ public final class InventoryUtils {
     public static Slot mergeTarget(ScreenHandler handler, PlayerInventory inventory,
                                    ItemStack stack, int amount) {
         for (Slot slot : mainSlots(handler, inventory)) {
-            if (!slot.isEnabled()) continue;
-            ItemStack current = slot.getStack();
-            if (current.isEmpty()) continue;
-            if (!ItemStack.areItemsAndComponentsEqual(current, stack)) continue;
-            if (current.getMaxCount() - current.getCount() >= amount) return slot;
+            if (roomFor(slot, stack) >= amount) return slot;
         }
         return null;
     }
@@ -77,21 +73,46 @@ public final class InventoryUtils {
      * @return 找不到能放的格子返回 null
      */
     public static Slot dumpTarget(ScreenHandler handler, PlayerInventory inventory, ItemStack stack) {
-        Slot merge = null;
-        Slot empty = null;
-
-        for (Slot slot : mainSlots(handler, inventory)) {
-            if (!slot.isEnabled() || !slot.canInsert(stack)) continue;
-            ItemStack current = slot.getStack();
-            if (current.isEmpty()) {
-                if (empty == null) empty = slot;
-                continue;
-            }
-            if (!ItemStack.areItemsAndComponentsEqual(current, stack)) continue;
-            if (current.getCount() >= current.getMaxCount()) continue;
-            if (merge == null) merge = slot;
+        for (Slot slot : targetsIn(mainSlots(handler, inventory), stack)) {
+            return slot;
         }
-        return merge != null ? merge : empty;
+        return null;
+    }
+
+    /**
+     * 这一格还能再收下几个这种物品（不是同一种、装满了、格子用不了都是 0）。
+     *
+     * <p>上限取「这一格对这种物品的上限」和「这一叠自己的上限」里小的那个，跟原版合并时算的一样。
+     */
+    public static int roomFor(Slot slot, ItemStack stack) {
+        if (stack.isEmpty() || !slot.isEnabled() || !slot.canInsert(stack)) return 0;
+
+        int cap = Math.min(slot.getMaxItemCount(stack), stack.getMaxCount());
+        ItemStack current = slot.getStack();
+        if (current.isEmpty()) return cap;
+        if (!ItemStack.areItemsAndComponentsEqual(current, stack)) return 0;
+        return Math.max(0, cap - current.getCount());
+    }
+
+    /**
+     * 从这些格子里挑「放这一叠」的目标，顺序是：**先同类半叠**（继续往里合，省得把同一种东西摊成好几格），
+     * 再空格（按界面里的先后顺序）。
+     */
+    public static List<Slot> targetsIn(List<Slot> slots, ItemStack stack) {
+        List<Slot> merge = new ArrayList<>();
+        List<Slot> empty = new ArrayList<>();
+
+        for (Slot slot : slots) {
+            if (!slot.isEnabled() || !slot.canInsert(stack)) continue;
+            if (slot.getStack().isEmpty()) {
+                empty.add(slot);
+            } else if (roomFor(slot, stack) > 0) {
+                merge.add(slot);
+            }
+        }
+
+        merge.addAll(empty);
+        return merge;
     }
 
     /** 容器自己的格子（不是玩家背包的那些）。 */
@@ -102,28 +123,6 @@ public final class InventoryUtils {
             result.add(slot);
         }
         return result;
-    }
-
-    /**
-     * 容器里能收下这一叠的格子：空格，或者装着同样东西、还没满的格子。
-     *
-     * <p>这是「看着像能放」的判断，只有**界面里的格子数据**做依据 —— 真放得下多少，
-     * 得由服务端点一下（Shift 点击）才算数。
-     *
-     * @return 找不到返回 null
-     */
-    public static Slot acceptTarget(ScreenHandler handler, ItemStack stack) {
-        for (Slot slot : containerSlots(handler)) {
-            if (!slot.canInsert(stack)) continue;
-
-            ItemStack existing = slot.getStack();
-            if (existing.isEmpty()) return slot;
-            if (ItemStack.areItemsAndComponentsEqual(existing, stack)
-                && existing.getCount() < Math.min(slot.getMaxItemCount(stack), stack.getMaxCount())) {
-                return slot;
-            }
-        }
-        return null;
     }
 
     /** 玩家快捷栏某一格（0~8，也就是背包下标）在这套界面里的槽位。 */

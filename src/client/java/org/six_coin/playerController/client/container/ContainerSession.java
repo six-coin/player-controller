@@ -149,6 +149,11 @@ public final class ContainerSession {
         return ContainerClicks.quickMove(handler, slot, action);
     }
 
+    /** Shift 点击，但不打日志（一轮点很多下时用）。 */
+    public boolean quickMoveQuiet(Slot slot) {
+        return ContainerClicks.quickMoveQuiet(handler, slot);
+    }
+
     /** 容器还剩几个空格（界面开着时才算得出来；没开就是 -1）。 */
     public int freeSlots() {
         if (handler == null) return -1;

@@ -174,7 +174,7 @@ public final class ConfigCommand {
                         int count = IntegerArgumentType.getInteger(context, "count");
                         PlayerControllerConfig.setItemsPerTick(count);
                         context.getSource().sendFeedback(Text.literal(
-                            "一个 tick 里最多往一个格子放 " + PlayerControllerConfig.getItemsPerTick() + " 个"));
+                            "一个 tick 里最多点 " + PlayerControllerConfig.getItemsPerTick() + " 下"));
                         return 1;
                     })))
             .then(ClientCommandManager.literal("wait_ticks_after_dimension_teleport")
@@ -261,7 +261,7 @@ public final class ConfigCommand {
     private static void showItemsPerTick(FabricClientCommandSource source) {
         source.sendFeedback(Text.literal("  items_per_tick = "
             + PlayerControllerConfig.getItemsPerTick()
-            + "（一个 tick 里最多往一个格子放几个，" 
+            + "（一个 tick 里最多点几下：搬容器、往背包格放东西这种连点批次的上限，"
             + PlayerControllerConfig.MIN_ITEMS_PER_TICK + "~"
             + PlayerControllerConfig.MAX_ITEMS_PER_TICK + "）"));
     }

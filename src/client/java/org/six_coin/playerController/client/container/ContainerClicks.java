@@ -11,6 +11,10 @@ import org.six_coin.playerController.client.util.ChatUtils;
  * 点格子的那一下：查一下能不能点、说一句日志、然后 {@code clickSlot}。
  *
  * <p>所有跟容器 / 背包打交道的动作都从这里点，别再各自写一遍（连日志格式都不一样）。
+ *
+ * <p><b>点击是本地预测、立即生效的</b>：{@code clickSlot} 回来的那一刻，界面里的数量和光标就已经变了。
+ * 所以「点之前是多少」这种数字**必须在调用这里之前读**，点完再读读到的是点之后的值，
+ * 拿它当「点之前」用会判断不出这一下到底有没有搬动东西。
  */
 public final class ContainerClicks {
 
@@ -47,14 +51,19 @@ public final class ContainerClicks {
         return doClick(handler, slot, 0, SlotActionType.QUICK_MOVE, action);
     }
 
+    /** 跟 {@link #quickMove} 一样，但**不打日志**（一轮点很多下时用，点完有汇总）。 */
+    public static boolean quickMoveQuiet(@Nullable ScreenHandler handler, @Nullable Slot slot) {
+        return doClick(handler, slot, 0, SlotActionType.QUICK_MOVE, null);
+    }
+
     private static boolean doClick(@Nullable ScreenHandler handler, @Nullable Slot slot, int button,
                                    SlotActionType type, @Nullable String action) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (handler == null || slot == null || mc.player == null || mc.interactionManager == null) {
-            if (action != null) {
-                ChatUtils.debug("点不了「%s」：%s", action, handler == null ? "现在没有打开的界面"
-                    : slot == null ? "找不到要点的格子" : "拿不到玩家或 interactionManager");
-            }
+            String why = handler == null ? "现在没有打开的界面"
+                : slot == null ? "找不到要点的格子" : "拿不到玩家或 interactionManager";
+            // 点不出去是异常情况（跟「一格一格点很多下」不一样），不打日志的话调用方会把它当成「搬不动」
+            ChatUtils.debug("点不了格子%s：%s", action == null ? "" : "（" + action + "）", why);
             return false;
         }
 

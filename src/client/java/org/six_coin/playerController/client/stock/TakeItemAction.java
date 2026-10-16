@@ -9,6 +9,7 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
+import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -63,6 +64,9 @@ public class TakeItemAction extends Action {
 
     private int stepWaitTicks;
     private int totalTicks;
+
+    /** 这一 tick 一共点了几下（一 tick 的点击上限用它数）。 */
+    private int clicks;
 
     private Slot source;
     private ItemStack expected = ItemStack.EMPTY;
@@ -177,12 +181,26 @@ public class TakeItemAction extends Action {
             return;
         }
 
-        switch (phase) {
-            case OPENING -> tickOpening(mc);
-            case FIND -> tickFind();
-            case PICK -> tickPick();
-            case DROP -> tickDrop();
-            case DONE -> finish();
+        // 点击是本地预测、立即生效的：「拿起 → 放进快捷栏」这一串在一个 tick 里就能走完，
+        // 只有本地预测还没变成预期值时才停下来等下一个 tick。
+        int budget = PlayerControllerConfig.getItemsPerTick();
+        while (!isFinished() && budget > 0) {
+            Phase before = phase;
+            int clicksBefore = clicks;
+
+            switch (phase) {
+                case OPENING -> tickOpening(mc);
+                case FIND -> tickFind();
+                case PICK -> tickPick();
+                case DROP -> tickDrop();
+                case DONE -> finish();
+            }
+
+            if (isFinished()) return;
+            int used = clicks - clicksBefore;
+            if (used == 0 && phase == before) return;
+
+            budget -= Math.max(used, 1);
         }
     }
 
@@ -320,6 +338,7 @@ public class TakeItemAction extends Action {
             fail("点不了格子（" + action + "）");
             return;
         }
+        clicks++;
         pendingClick = true;
         stepWaitTicks = 0;
     }
