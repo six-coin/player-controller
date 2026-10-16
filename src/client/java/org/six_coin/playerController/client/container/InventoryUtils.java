@@ -80,6 +80,28 @@ public final class InventoryUtils {
     }
 
     /**
+     * 能把**这一整叠**一次放下的主背包格子：优先同类半叠（剩下的空位够放下整叠），其次空格。
+     *
+     * <p>「一次放下」是左键一下点完的意思：半叠空位不够的话点下去只会放进去一部分，
+     * 剩下的还留在光标上，所以这里要求空位 ≥ 这一叠的数量。
+     *
+     * @return 找不到返回 null
+     */
+    public static Slot wholeTarget(ScreenHandler handler, PlayerInventory inventory, ItemStack stack) {
+        Slot empty = null;
+
+        for (Slot slot : mainSlots(handler, inventory)) {
+            if (!slot.isEnabled() || !slot.canInsert(stack)) continue;
+            if (slot.getStack().isEmpty()) {
+                if (empty == null) empty = slot;
+                continue;
+            }
+            if (roomFor(slot, stack) >= stack.getCount()) return slot;
+        }
+        return empty;
+    }
+
+    /**
      * 这一格还能再收下几个这种物品（不是同一种、装满了、格子用不了都是 0）。
      *
      * <p>上限取「这一格对这种物品的上限」和「这一叠自己的上限」里小的那个，跟原版合并时算的一样。
