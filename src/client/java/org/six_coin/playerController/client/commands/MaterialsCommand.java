@@ -128,7 +128,8 @@ public final class MaterialsCommand {
         for (MaterialTreeBuilder.Issue issue : result.issues()) {
             MutableText line = Text.literal(" ");
             line.append(button("[处理]", commandFor(issue)));
-            line.append(Text.literal(" " + describeIssue(issue)));
+            line.append(Text.literal(" "));
+            line.append(describeIssue(issue));
             source.sendFeedback(line);
         }
         source.sendFeedback(Text.literal("§7改完配置再跑一次 §f/pc stock task " + task
@@ -339,8 +340,8 @@ public final class MaterialsCommand {
             String key = used == null ? "choice:" + slotKey : "item:" + MaterialsConfig.itemId(used);
             counts.merge(key, 1, Integer::sum);
             descriptions.putIfAbsent(key, used == null
-                ? Text.literal(slotKey + "：" + namesOf(slot.items()) + "（还没定用哪个）")
-                    .formatted(Formatting.GRAY)
+                ? Text.literal(slotKey + "：").append(namesOf(slot.items()))
+                    .append(Text.literal("（还没定用哪个）")).formatted(Formatting.GRAY)
                 : itemLabel(used).append(Text.literal(" 来自 " + slotKey).formatted(Formatting.GRAY)));
         }
 
