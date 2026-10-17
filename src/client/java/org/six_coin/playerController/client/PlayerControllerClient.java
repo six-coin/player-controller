@@ -75,7 +75,7 @@ public class PlayerControllerClient implements ClientModInitializer {
         // 每次进世界都把「不显示容器界面」的计数清零：上次要是非正常退出（崩了 / 被强杀），
         // 计数会一直挂着，那之后所有容器界面都被挡住，箱子永远打不开。
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            if (ScreenSuppressor.resetAll()) {
+            if (ScreenSuppressor.reset()) {
                 ChatUtils.debug("进世界：已解除容器界面抑制（上次没正常收尾留下的计数）");
             }
 

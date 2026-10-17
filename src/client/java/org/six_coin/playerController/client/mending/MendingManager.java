@@ -17,19 +17,17 @@ import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.action.PathMoveAction;
+import org.six_coin.playerController.client.action.ResultOutput;
 import org.six_coin.playerController.client.attack.AttackConfig;
 import org.six_coin.playerController.client.attack.AttackManager;
 import org.six_coin.playerController.client.attack.AttackProfile;
 import org.six_coin.playerController.client.attack.AttackProfiles;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerClicks;
-import org.six_coin.playerController.client.container.ContainerOpener;
 import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.container.InventoryUtils;
-import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.owner.Owner;
-import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
@@ -52,7 +50,6 @@ import java.util.List;
  *   <li>手上切成第一位那把剑，记下出发的位置和 attack 的开关 / profile（收尾时还原）；</li>
  *   <li>走 {@link PathPlanner} 算出来的路到站立点；</li>
  *   <li>attack 换成 {@link #PROFILE} 并打开；</li>
- *   <li>设了末影箱就打开它（界面一直开着：末影箱里的东西只有界面开着才看得到）；</li>
  *   <li>每隔 {@code actions.mending_detect_interval_ticks} 检测一次。</li>
  * </ol>
  *
@@ -61,13 +58,17 @@ import java.util.List;
  * <ol>
  *   <li>站立点半径 {@value #ORB_RADIUS} 格（球）里经验球超过 {@value #ORB_LIMIT} 个就把攻击关掉，
  *       否则打开；</li>
- *   <li>物品栏（快捷栏、背包、盔甲、副手）和末影箱里还有没有「耐久不满 + 有经验修补」的东西，
+ *   <li>物品栏（快捷栏、背包、盔甲、副手）里还有没有「耐久不满 + 有经验修补」的东西，
  *       一件都没有就退出检测；潜影盒里的东西不处理；</li>
  *   <li>副手空着或者已经修满了，就把副手和临时物品格换回来（有的话），再挑下一件要修的
  *       换到副手（第一位那把剑、盔甲都不挪：它们在装备栏里本来就会被修）。</li>
  * </ol>
  *
- * <p>退出检测以后：换回副手 → 关末影箱 → 还原 attack → 走回出发的位置。
+ * <p><b>末影箱只在换物品的时候开一趟</b>（{@link MendingSwapAction}）：界面开着的时候服务端只同步
+ * 那个界面里的格子，末影箱界面里没有副手格，副手的耐久在客户端就一直是旧的 ——
+ * 检测会以为东西没修好。所以平时箱子是关着的，要换东西才开，换完立刻关。
+ *
+ * <p>退出检测以后：换回副手 → 还原 attack → 走回出发的位置。
  *
  * <p>连续 {@code actions.mending_max_wait_exp_seconds} 秒没有任何东西被修好，就当作附近没有经验来源，
  * 主动退出检测（免得一直干等）。
@@ -96,9 +97,6 @@ public final class MendingManager {
      */
     public static final int FIRST_SLOT = 0;
 
-    /** 等末影箱界面出来最多等这么多 tick。 */
-    private static final int MAX_OPEN_WAIT_TICKS = 60;
-
     /** 原版「和副手交换」那一下：{@code SWAP} + 这个按钮号（F 键）。 */
     private static final int SWAP_OFFHAND_BUTTON = 40;
 
@@ -109,9 +107,8 @@ public final class MendingManager {
 
         IDLE("没在跑"),
         MOVE_OUT("走去站立点"),
-        OPEN_CHEST("打开末影箱"),
         LOOP("检测中"),
-        EXIT("收尾"),
+        SWAP("换物品"),
         MOVE_BACK("回出发的位置");
 
         private final String text;
@@ -137,8 +134,9 @@ public final class MendingManager {
     private record Swap(SlotKey slot, boolean restore) {
     }
 
-    /** 一次检测的结果。 */
-    private record Scan(boolean needsRepair, int damageSum, int repairable, @Nullable SlotKey candidate) {
+    /** 一次扫描的结果。 */
+    private record Scan(boolean needsRepair, int damageSum, int repairable,
+                        int chestRepairable, @Nullable SlotKey candidate) {
     }
 
     private Stage stage = Stage.IDLE;
@@ -162,19 +160,29 @@ public final class MendingManager {
     @Nullable
     private SlotKey tempSlot;
 
-    /** 排队等着点的交换（一 tick 一下）。 */
+    /**
+     * 末影箱里没有要修的东西了。
+     *
+     * <p>只有真的开箱看过才知道（{@link MendingSwapAction} 那一趟里扫一次）；
+     * 没设末影箱就是 true。箱子里只会因为我们的交换变少，所以一旦是 true 就不用再看了。
+     */
+    private boolean chestKnownEmpty = true;
+
+    /** 这一趟只是收尾（把副手换回临时格），不再换新的。 */
+    private boolean exiting;
+
+    /** 一趟交换里排着队要点的格子（一 tick 一下）。 */
     private final Deque<Swap> swaps = new ArrayDeque<>();
+    /** 这一趟的「计划」算过没有（算过就只看排队里的点了）。 */
+    private boolean swapPlanned;
+
+    /** 正在跑的那一趟交换。 */
+    @Nullable
+    private MendingSwapAction swapAction;
 
     /** 正在跑的移动任务。 */
     @Nullable
     private Action moveAction;
-
-    /** 末影箱界面（开着的时候才有）。 */
-    @Nullable
-    private ScreenHandler chestHandler;
-    private boolean suppressorHeld;
-    private int openWaitTicks;
-    private int settleLeft;
 
     /** 距离下一次检测还有多少 tick。 */
     private int waitTicks;
@@ -337,15 +345,13 @@ public final class MendingManager {
         return null;
     }
 
-    /** 进世界 / 断线：静默清掉（不走回去，也不发交换包）。 */
+    /** 进世界 / 断线：静默清掉（不走回去，也不发包）。 */
     public void reset() {
         if (stage == Stage.IDLE) {
             clearRuntime();
             return;
         }
         ChatUtils.debug("进世界：mending 已重置（原来在：" + stage.text() + "）");
-        closeChest(MinecraftClient.getInstance());
-        RotateManager.get().release(Owner.MENDING);
         restoreAttack();
         lastResult = "被重置（进世界 / 断线）";
         clearRuntime();
@@ -369,8 +375,6 @@ public final class MendingManager {
             }
         }
 
-        closeChest(mc);
-        RotateManager.get().release(Owner.MENDING);
         restoreAttack();
         lastResult = "中止：" + reason;
         clearRuntime();
@@ -394,9 +398,8 @@ public final class MendingManager {
 
         switch (stage) {
             case MOVE_OUT -> tickMoveOut();
-            case OPEN_CHEST -> tickOpenChest(mc, player);
             case LOOP -> tickLoop(mc, player);
-            case EXIT -> tickExit(mc, player);
+            case SWAP -> tickSwap(mc, player);
             case MOVE_BACK -> tickMoveBack();
             case IDLE -> {
             }
@@ -425,38 +428,6 @@ public final class MendingManager {
         ChatUtils.info("mending：到站立点了");
     }
 
-    private void tickOpenChest(MinecraftClient mc, ClientPlayerEntity player) {
-        MendingPos chest = MendingConfig.get().enderChest();
-        if (chest == null) {
-            stage = Stage.LOOP;
-            return;
-        }
-
-        if (chestHandler == null) {
-            ScreenHandler current = player.currentScreenHandler;
-            if (current != null && current != player.playerScreenHandler) {
-                chestHandler = current;
-                settleLeft = PlayerControllerConfig.getNetworkDelayTicks();
-                ChatUtils.debug("mending：末影箱界面已打开（%d 格），等格子内容同步过来", current.slots.size());
-                return;
-            }
-            if (++openWaitTicks > MAX_OPEN_WAIT_TICKS) {
-                fail("等末影箱界面超时（" + chest.describe() + "）：确认那里是末影箱、而且够得着");
-            }
-            return;
-        }
-
-        if (chestHandler.getRevision() != 0) settleLeft = 0;
-        if (settleLeft > 0) {
-            settleLeft--;
-            return;
-        }
-
-        ChatUtils.debug("mending：末影箱界面内容已同步，开始检测");
-        stage = Stage.LOOP;
-        waitTicks = 0;
-    }
-
     private void tickLoop(MinecraftClient mc, ClientPlayerEntity player) {
         MendingPos stand = MendingConfig.get().standPoint();
         if (stand == null) {
@@ -468,39 +439,51 @@ public final class MendingManager {
             return;
         }
 
-        // 末影箱界面掉了就重新开：里面的东西只有界面开着才看得到，临时格也可能就在里面
-        MendingPos chest = MendingConfig.get().enderChest();
-        if (chest != null && (chestHandler == null || player.currentScreenHandler != chestHandler)) {
-            ChatUtils.debug("mending：末影箱界面没了，重新打开");
-            stage = Stage.OPEN_CHEST;
-            openChest(mc, player, chest.pos());
-            return;
-        }
-
         if (settleTicks > 0) {
             settleTicks--;
             return;
         }
-
-        if (!swaps.isEmpty()) {
-            performSwap(player);
-            settleTicks = PlayerControllerConfig.getNetworkDelayTicks();
-            return;
-        }
-
         if (waitTicks++ < PlayerControllerConfig.getMendingDetectIntervalTicks()) return;
         waitTicks = 0;
         detect(mc, player, stand);
     }
 
+    /** 一趟交换跑完了没有。 */
+    private void tickSwap(MinecraftClient mc, ClientPlayerEntity player) {
+        if (swapAction == null) {
+            stage = Stage.LOOP;
+            return;
+        }
+        if (!swapAction.isFinished()) return;
+
+        String failure = swapAction.failureReason();
+        swapAction = null;
+        if (failure != null) {
+            fail("换物品失败：" + failure);
+            return;
+        }
+
+        if (exiting) {
+            beginMoveBack(mc);
+            return;
+        }
+
+        stage = Stage.LOOP;
+        waitTicks = 0;
+        settleTicks = PlayerControllerConfig.getNetworkDelayTicks();
+    }
+
     // ------------------------------------------------------------------
-    // 一次检测
+    // 一次检测（末影箱这时候是关着的）
     // ------------------------------------------------------------------
 
     /**
      * 一次检测。
      *
-     * <p>第 3 步里「副手已经修满了」是按 {@link MendingItems#needsRepair} 判断的：
+     * <p>副手的耐久只有「没有容器界面开着」的时候才是准的，所以这里能直接看副手修好没有；
+     * 末影箱里的东西要等真的开箱那一趟才看（{@link #swapStep}）。
+     *
+     * <p>「副手已经修满了」是按 {@link MendingItems#needsRepair} 判断的：
      * 副手里要是坏了一把**没有经验修补**的剑，它永远修不满，但也修不了 ——
      * 那种也算「让出来了」（换出去），不然整轮会卡在它身上。
      */
@@ -509,15 +492,11 @@ public final class MendingManager {
         int orbs = countOrbs(mc, stand);
         setAttack(orbs <= ORB_LIMIT, "站立点周围 " + orbs + " 个经验球");
 
-        // 2) 还有没有要修的东西
-        Scan scan = scan(player);
+        // 2) 物品栏里还有多少要修的
+        Scan scan = scan(player, null);
         ChatUtils.debug("mending：还要修 %d 件，合计缺口 %d，经验球 %d 个，副手 %s",
             scan.repairable(), scan.damageSum(), orbs,
             InventoryUtils.describe(player.getOffHandStack()));
-        if (!scan.needsRepair()) {
-            exitLoop("没有需要修的物品了");
-            return;
-        }
 
         // 「有进展」= 所有要修的东西加起来，耐久缺口变小了
         if (lastDamageSum >= 0 && scan.damageSum() < lastDamageSum) {
@@ -531,19 +510,25 @@ public final class MendingManager {
             return;
         }
 
-        // 3) 副手：还在修就等；空着 / 已经修满了就换下一件
+        // 3) 副手还在修就等（末影箱保持关着，副手的耐久才准）
         if (MendingItems.needsRepair(player.getOffHandStack())) return;
 
-        if (tempSlot != null) {
-            swaps.add(new Swap(tempSlot, true));
-            tempSlot = null;
+        // 末影箱被删掉 / 改成没设了：里面当然没东西要修
+        if (MendingConfig.get().enderChest() == null) chestKnownEmpty = true;
+
+        // 4) 一件都不剩了（物品栏没有了，末影箱也确定没有了）就收尾
+        if (!scan.needsRepair() && chestKnownEmpty) {
+            exitLoop("没有需要修的物品了");
+            return;
         }
 
-        SlotKey candidate = scan.candidate();
-        if (candidate == null) return;
+        // 5) 要换东西、要还原临时格、或者还没看过末影箱里有什么 → 开一趟
+        boolean needRestore = tempSlot != null;
+        boolean candidate = scan.candidate() != null;
+        boolean needChest = needsChest();
+        if (!needRestore && !candidate && !needChest) return;
 
-        // 临时物品格在这一下真的点出去了之后才算数（见 performSwap）
-        swaps.add(new Swap(candidate, false));
+        startSwap(mc, needChest);
     }
 
     /** 数站立点周围（半径 {@value #ORB_RADIUS} 的球）里的经验球。 */
@@ -564,7 +549,7 @@ public final class MendingManager {
     }
 
     /**
-     * 扫一遍：物品栏（快捷栏、背包、盔甲、副手）+ 末影箱（界面开着的时候）。
+     * 扫一遍物品栏（快捷栏、背包、盔甲、副手），界面开着的时候带上那个界面里容器的格子。
      *
      * <p>物品栏直接读 {@link PlayerInventory}：开没开容器界面、开的是哪个界面都不影响
      * （末影箱界面里是没有盔甲格和副手格的，按界面上的格子扫会漏掉它们）。
@@ -572,13 +557,16 @@ public final class MendingManager {
      * <p>「能换到副手的」只有快捷栏第 2 格起的 8 格和背包 27 格
      * （第一位那把剑、盔甲、副手都不挪）；但是判断「还没修完」要连它们一起算 ——
      * 第一位和盔甲在装备栏里一样会被修，修完之前不该退出去。
+     *
+     * @param chestHandler 界面开着的时候传那个界面（末影箱的格子从里面读）；关着传 null
      */
-    private Scan scan(ClientPlayerEntity player) {
+    private Scan scan(ClientPlayerEntity player, @Nullable ScreenHandler chestHandler) {
         PlayerInventory inventory = player.getInventory();
 
         boolean needsRepair = false;
         int damageSum = 0;
         int repairable = 0;
+        int chestRepairable = 0;
         SlotKey candidate = null;
 
         for (int index = 0; index <= PlayerInventory.OFF_HAND_SLOT; index++) {
@@ -603,24 +591,93 @@ public final class MendingManager {
 
                 needsRepair = true;
                 repairable++;
+                chestRepairable++;
                 damageSum += MendingItems.damage(stack);
                 if (candidate == null) candidate = new SlotKey(Side.CONTAINER, index);
             }
         }
 
-        return new Scan(needsRepair, damageSum, repairable, candidate);
+        return new Scan(needsRepair, damageSum, repairable, chestRepairable, candidate);
+    }
+
+    // ------------------------------------------------------------------
+    // 换物品的那一趟
+    // ------------------------------------------------------------------
+
+    /** 这一趟要不要开末影箱：设了、而且（还没看过里面 / 临时格就在里面）。 */
+    private boolean needsChest() {
+        if (MendingConfig.get().enderChest() == null) return false;
+        if (tempSlot != null && tempSlot.side() == Side.CONTAINER) return true;
+        return !chestKnownEmpty;
+    }
+
+    private void startSwap(MinecraftClient mc, boolean openChest) {
+        MendingPos chest = MendingConfig.get().enderChest();
+        BlockPos pos = openChest && chest != null ? chest.pos() : null;
+
+        swaps.clear();
+        swapPlanned = false;
+        settleTicks = 0;
+
+        MendingSwapAction action = new MendingSwapAction(pos);
+        swapAction = action;
+        stage = Stage.SWAP;
+        ActionManager.get().submit(action);
+        // 结果由 mending 自己报（不然失败时动作和 mending 各打一行）
+        action.setOutput(ResultOutput.SUBTASK);
+
+        ChatUtils.debug("mending：开一趟交换（%s）", pos == null ? "只点物品栏" : "末影箱 " + pos.toShortString());
+    }
+
+    /**
+     * 一趟交换里的一步（由 {@link MendingSwapAction} 每 tick 调一次）。
+     *
+     * @param chestOpen 这一趟是不是开着末影箱（开着才能看箱子里的东西）
+     * @return {@code true} = 这一趟还没跑完；{@code false} = 可以关界面了
+     */
+    boolean swapStep(ClientPlayerEntity player, ScreenHandler handler, boolean chestOpen) {
+        // mending 已经被中止 / 重置了：别再点了，让动作自己收尾关界面
+        if (stage == Stage.IDLE) return false;
+
+        if (settleTicks > 0) {
+            settleTicks--;
+            return true;
+        }
+        if (!swaps.isEmpty()) {
+            performSwap(player, handler);
+            settleTicks = PlayerControllerConfig.getNetworkDelayTicks();
+            return true;
+        }
+        if (swapPlanned) return false;
+        swapPlanned = true;
+
+        // 1) 先把副手换回临时物品格
+        if (tempSlot != null) {
+            swaps.add(new Swap(tempSlot, true));
+            tempSlot = null;
+        }
+
+        // 2) 开着箱子的话顺便看一眼里面还有多少要修的
+        Scan scan = scan(player, chestOpen ? handler : null);
+        if (chestOpen) {
+            chestKnownEmpty = scan.chestRepairable() == 0;
+            ChatUtils.debug("mending：末影箱里%s", chestKnownEmpty
+                ? "没有要修的了"
+                : "还有 " + scan.chestRepairable() + " 件要修");
+        }
+
+        // 3) 有下一件就换进来（收尾那一趟不换）
+        if (!exiting && scan.candidate() != null) {
+            swaps.add(new Swap(scan.candidate(), false));
+        }
+
+        return !swaps.isEmpty();
     }
 
     /** 点一下「和副手交换」。 */
-    private void performSwap(ClientPlayerEntity player) {
+    private void performSwap(ClientPlayerEntity player, ScreenHandler handler) {
         Swap swap = swaps.poll();
         if (swap == null) return;
-
-        ScreenHandler handler = player.currentScreenHandler;
-        if (handler == null) {
-            fail("界面没了，没法交换");
-            return;
-        }
 
         Slot slot = resolve(handler, player, swap.slot());
         if (slot == null) {
@@ -650,27 +707,17 @@ public final class MendingManager {
     private void exitLoop(String reason) {
         ChatUtils.info("mending：停止检测（" + reason + "）");
         lastResult = "收尾：" + reason;
+        exiting = true;
+
+        // 副手还是那件东西的话，先把临时格换回来再走
         if (tempSlot != null) {
-            swaps.add(new Swap(tempSlot, true));
-            tempSlot = null;
+            startSwap(MinecraftClient.getInstance(), tempSlot.side() == Side.CONTAINER);
+            return;
         }
-        stage = Stage.EXIT;
-        settleTicks = 0;
+        beginMoveBack(MinecraftClient.getInstance());
     }
 
-    private void tickExit(MinecraftClient mc, ClientPlayerEntity player) {
-        if (settleTicks > 0) {
-            settleTicks--;
-            return;
-        }
-        if (!swaps.isEmpty()) {
-            performSwap(player);
-            settleTicks = PlayerControllerConfig.getNetworkDelayTicks();
-            return;
-        }
-
-        closeChest(mc);
-        RotateManager.get().release(Owner.MENDING);
+    private void beginMoveBack(MinecraftClient mc) {
         restoreAttack();
 
         BlockPos target = returnPos;
@@ -717,7 +764,6 @@ public final class MendingManager {
 
     /** 开了但还没真正开始（出发前就出错了）：静默收尾。 */
     private void finishSilently() {
-        closeChest(MinecraftClient.getInstance());
         restoreAttack();
         clearRuntime();
     }
@@ -745,12 +791,14 @@ public final class MendingManager {
 
         PathMoveAction action = new PathMoveAction(plan.path());
         ActionManager.get().submit(action);
+        // 结果由 mending 自己报（不然失败时动作和 mending 各打一行）
+        action.setOutput(ResultOutput.SUBTASK);
         moveAction = action;
         stage = movingStage;
         return null;
     }
 
-    /** 到站立点了：开攻击、（设了的话）打开末影箱，开始检测。 */
+    /** 到站立点了：开攻击，（末影箱里有没有东西）等检测那一趟再看。 */
     @Nullable
     private String arriveAtStand() {
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -788,40 +836,13 @@ public final class MendingManager {
         settleTicks = 0;
         lastDamageSum = -1;
         lastProgressTick = tickCount;
+        // 没设末影箱 = 箱子里肯定没有要修的；设了就等第一趟开箱去看
+        chestKnownEmpty = chest == null;
 
-        if (chest == null) {
-            stage = Stage.LOOP;
-            ChatUtils.debug("mending：没设末影箱，直接开始检测");
-            return null;
-        }
-
-        stage = Stage.OPEN_CHEST;
-        openChest(mc, player, chest.pos());
+        stage = Stage.LOOP;
+        ChatUtils.debug("mending：到站立点，开始检测（末影箱 %s）",
+            chest == null ? "没设" : "还没看过里面");
         return null;
-    }
-
-    private void openChest(MinecraftClient mc, ClientPlayerEntity player, BlockPos pos) {
-        if (!suppressorHeld) {
-            ScreenSuppressor.hold();
-            suppressorHeld = true;
-        }
-        chestHandler = null;
-        openWaitTicks = 0;
-        ContainerOpener.open(mc, player, pos, Owner.MENDING);
-        // 右键完了就把朝向还回去：不然 mending 一直占着「谁在转头」，攻击那边每 tick 都会被拒绝
-        RotateManager.get().release(Owner.MENDING);
-        ChatUtils.debug("mending：右键末影箱 %s，等界面", pos.toShortString());
-    }
-
-    private void closeChest(MinecraftClient mc) {
-        if (chestHandler != null && mc.player != null && mc.player.currentScreenHandler == chestHandler) {
-            mc.player.closeHandledScreen();
-        }
-        chestHandler = null;
-        if (suppressorHeld) {
-            ScreenSuppressor.unhold();
-            suppressorHeld = false;
-        }
     }
 
     /** 攻击开关（只在真的要变的时候才写盘）。 */
@@ -851,23 +872,20 @@ public final class MendingManager {
     private void clearRuntime() {
         stage = Stage.IDLE;
         tempSlot = null;
+        exiting = false;
+        chestKnownEmpty = true;
         swaps.clear();
+        swapPlanned = false;
+        swapAction = null;
         moveAction = null;
-        chestHandler = null;
-        openWaitTicks = 0;
-        settleLeft = 0;
-        settleTicks = 0;
         waitTicks = 0;
+        settleTicks = 0;
         lastDamageSum = -1;
         returnPos = null;
         returnDimension = null;
-        if (suppressorHeld) {
-            ScreenSuppressor.unhold();
-            suppressorHeld = false;
-        }
     }
 
-    /** 把「哪边第几格」解析成现在这个界面里的槽位。 */
+    /** 把「哪边第几格」解析成这个界面里的槽位。 */
     @Nullable
     private static Slot resolve(ScreenHandler handler, ClientPlayerEntity player, SlotKey key) {
         if (key.side() == Side.PLAYER) {
