@@ -29,10 +29,11 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * 材料清单生成要用的那五份配置，放在 {@code config/player-controller/materials/}：
+ * 材料清单生成要用的那六份配置，放在 {@code config/player-controller/materials/}：
  *
  * <pre>
  * terminal_items.json        ["minecraft:iron_block", ...]        到此为止，不再往里追溯的物品
+ * blacklist.json             ["minecraft:water_bucket", ...]      不要出现在清单里的**最终产物**
  * recipe_preferences.json    {"minecraft:mossy_cobblestone": "minecraft:mossy_cobblestone_from_moss_block"}
  *                                                                 一种产物有多种合成方式时用哪一条配方
  * tag_preferences.json       {"#minecraft:planks": "minecraft:oak_planks"}
@@ -42,6 +43,9 @@ import java.util.TreeSet;
  * replace_materials.json     {"minecraft:stripped_oak_log": "minecraft:oak_log"}
  *                                                                 能用什么替代什么（只作用于投影导出那一层）
  * </pre>
+ *
+ * <p>{@code blacklist.json} 只管**最外层**（投影要的那些最终产物）：里面有的就直接从清单里去掉；
+ * 如果它只是合成过程中要用的中间材料（别的产物配方里用到了它），照样会追溯、照样出现在清单里。
  *
  * <p>配方名一律写成**完整的配方 id**（{@code minecraft:mossy_cobblestone_from_moss_block}）；
  * 手写的时候带不带 {@code minecraft:}、带不带 {@code .json} 都认，写回去的时候统一成完整 id。
@@ -56,10 +60,11 @@ import java.util.TreeSet;
  */
 public final class MaterialsConfig {
 
-    /** 这五份配置所在的文件夹：{@code config/player-controller/materials/}。 */
+    /** 这六份配置所在的文件夹：{@code config/player-controller/materials/}。 */
     public static final String FOLDER_NAME = "materials";
 
     private static final String TERMINAL_FILE = "terminal_items.json";
+    private static final String BLACKLIST_FILE = "blacklist.json";
     private static final String RECIPE_FILE = "recipe_preferences.json";
     private static final String TAG_FILE = "tag_preferences.json";
     private static final String INGREDIENT_FILE = "ingredient_preferences.json";
@@ -72,6 +77,9 @@ public final class MaterialsConfig {
 
     /** 「到此为止」的物品（规范化过的 id）。 */
     private final Set<String> terminalItems = new LinkedHashSet<>();
+
+    /** 不要出现在清单里的最终产物（规范化过的 id）。 */
+    private final Set<String> blacklist = new LinkedHashSet<>();
 
     /** 产物 id -> 用哪条配方。 */
     private final Map<String, String> recipePreferences = new LinkedHashMap<>();
@@ -98,6 +106,10 @@ public final class MaterialsConfig {
 
     public static Path terminalFile() {
         return dir().resolve(TERMINAL_FILE);
+    }
+
+    public static Path blacklistFile() {
+        return dir().resolve(BLACKLIST_FILE);
     }
 
     public static Path recipeFile() {
@@ -131,6 +143,15 @@ public final class MaterialsConfig {
                 continue;
             }
             config.terminalItems.add(canonical);
+        }
+
+        for (String id : readArray(blacklistFile())) {
+            String canonical = canonicalItem(id);
+            if (canonical == null) {
+                ChatUtils.error("blacklist.json 里认不出的物品 id：" + id);
+                continue;
+            }
+            config.blacklist.add(canonical);
         }
 
         readMap(recipeFile(), (key, value) -> {
@@ -177,9 +198,10 @@ public final class MaterialsConfig {
         return config;
     }
 
-    /** 五份配置全写一遍（目录不存在会自动创建）。 */
+    /** 六份配置全写一遍（目录不存在会自动创建）。 */
     public void save() {
         writeArray(terminalFile(), terminalItems);
+        writeArray(blacklistFile(), blacklist);
         writeMap(recipeFile(), recipePreferences);
         writeMap(tagFile(), tagPreferences);
         writeMap(ingredientFile(), ingredientPreferences);
@@ -190,6 +212,9 @@ public final class MaterialsConfig {
     private void warnUnknown() {
         Set<String> unknown = new TreeSet<>();
         for (String id : terminalItems) {
+            if (itemOf(id) == null) unknown.add(id);
+        }
+        for (String id : blacklist) {
             if (itemOf(id) == null) unknown.add(id);
         }
         for (Map.Entry<String, String> entry : recipePreferences.entrySet()) {
@@ -222,6 +247,19 @@ public final class MaterialsConfig {
 
     public Set<String> terminalItems() {
         return Collections.unmodifiableSet(new LinkedHashSet<>(terminalItems));
+    }
+
+    /**
+     * 这个物品是不是「不要出现在清单里的最终产物」。
+     *
+     * <p>只看最外层：它要是合成过程里的中间材料，照样追溯。
+     */
+    public boolean isBlacklisted(Item item) {
+        return blacklist.contains(itemId(item));
+    }
+
+    public Set<String> blacklist() {
+        return Collections.unmodifiableSet(new LinkedHashSet<>(blacklist));
     }
 
     /** 这个产物偏好用哪条配方（配方 id）；没设过返回 null。 */
@@ -275,6 +313,14 @@ public final class MaterialsConfig {
 
     public boolean delTerminal(Item item) {
         return terminalItems.remove(itemId(item));
+    }
+
+    public boolean addBlacklist(Item item) {
+        return blacklist.add(itemId(item));
+    }
+
+    public boolean delBlacklist(Item item) {
+        return blacklist.remove(itemId(item));
     }
 
     public boolean addRecipePreference(Item result, Identifier recipe) {

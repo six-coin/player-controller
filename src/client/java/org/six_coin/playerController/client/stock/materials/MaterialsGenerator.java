@@ -14,6 +14,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,7 @@ import java.util.Map;
  * <ol>
  *   <li>读 {@code world_<n>/stock/tasks/<名字>/original.json}；</li>
  *   <li>按 {@code replace_materials.json} 把**最外层**的物品替换掉（重复的合并、数量相加）；</li>
+ *   <li>把 {@code blacklist.json} 里那些最终产物去掉（只去最外层，中间材料不受影响）；</li>
  *   <li>拿本地完整配方表递归追溯（见 {@link MaterialTreeBuilder}）；</li>
  *   <li>一个问题都没有才写 {@code materials.json} —— 有任何一处没定下来就整份都不写，
  *       把问题汇总出来让用户去改配置。</li>
@@ -40,11 +42,12 @@ public final class MaterialsGenerator {
     /**
      * 结果。
      *
-     * @param file 写出来的文件名；有 {@code issues} 时是 null（没写）
+     * @param skipped 被 {@code blacklist.json} 滤掉的最终产物（只滤最外层）
+     * @param file    写出来的文件名；有 {@code issues} 时是 null（没写）
      */
     public record Result(List<MaterialTreeNode> roots, List<MaterialTreeBuilder.Issue> issues,
                          int originalKinds, int originalTotal, int replacedKinds,
-                         @Nullable Path file) {
+                         List<Item> skipped, @Nullable Path file) {
 
         public boolean ok() {
             return issues.isEmpty() && file != null;
@@ -86,21 +89,56 @@ public final class MaterialsGenerator {
             throw new IOException("本地配方表是空的（没连上服务器 / 还没进世界？）");
         }
 
+        // 先把能替换的替换掉，再看黑名单（黑名单认的是替换之后的物品）
         Replaced wanted = replace(original.items(), config);
+        Blacklisted filtered = blacklist(wanted.items(), config);
 
-        MaterialTreeBuilder.Result built = MaterialTreeBuilder.build(wanted.items(), index, config);
+        MaterialTreeBuilder.Result built = MaterialTreeBuilder.build(filtered.kept(), index, config);
         if (!built.issues().isEmpty()) {
             return new Result(built.roots(), built.issues(), original.items().size(),
-                original.total(), wanted.kinds(), null);
+                original.total(), wanted.kinds(), filtered.skipped(), null);
         }
 
         Path file = manager.currentMaterialFile(task);
         write(file, built.roots());
 
-        ChatUtils.debug("materials.json：" + file + "（" + wanted.items().size() + " 个最终产物，"
+        ChatUtils.debug("materials.json：" + file + "（" + filtered.kept().size() + " 个最终产物，"
             + nodeCount(built.roots()) + " 个节点）");
         return new Result(built.roots(), List.of(), original.items().size(), original.total(),
-            wanted.kinds(), file);
+            wanted.kinds(), filtered.skipped(), file);
+    }
+
+    /** 滤黑名单之后的结果。 */
+    private record Blacklisted(Map<Item, Integer> kept, List<Item> skipped) {
+    }
+
+    /**
+     * 把 {@code blacklist.json} 里的最终产物去掉。
+     *
+     * <p>只管最外层：黑名单里的东西要是成了别的产物的材料，照样会被追溯、照样进清单。
+     */
+    private static Blacklisted blacklist(Map<Item, Integer> from, MaterialsConfig config)
+        throws IOException {
+        Map<Item, Integer> kept = new LinkedHashMap<>();
+        List<Item> skipped = new ArrayList<>();
+
+        for (Map.Entry<Item, Integer> entry : from.entrySet()) {
+            if (config.isBlacklisted(entry.getKey())) {
+                skipped.add(entry.getKey());
+                continue;
+            }
+            kept.put(entry.getKey(), entry.getValue());
+        }
+
+        if (!skipped.isEmpty()) {
+            ChatUtils.debug("黑名单：跳过 " + skipped.size() + " 种最终产物："
+                + skipped.stream().map(MaterialsConfig::itemId).toList());
+        }
+        if (kept.isEmpty()) {
+            throw new IOException("黑名单把 " + skipped.size()
+                + " 种最终产物全滤掉了，没有东西要备货（/pc materials blacklist 看看是不是写多了）");
+        }
+        return new Blacklisted(kept, skipped);
     }
 
     /** 替换结果：替换完的清单 + 换了多少种 + 合并掉了多少种。 */

@@ -32,9 +32,11 @@ import java.util.Map;
  * {@code /pc materials ...} —— 材料清单的配置，以及生成材料清单。
  *
  * <pre>
- * /pc materials                                                  看这五份配置在哪、各有多少条
+ * /pc materials                                                  看这几份配置在哪、各有多少条
  * /pc materials terminal_items                                   列出「到此为止」的物品
  * /pc materials terminal_items add|del &lt;item&gt;
+ * /pc materials blacklist                                        列出不要的最终产物（只滤最外层）
+ * /pc materials blacklist add|del &lt;item&gt;
  * /pc materials recipe_preferences                               列出所有配方偏好
  * /pc materials recipe_preferences show &lt;result_item&gt;            看这个产物有哪些做法可以选
  * /pc materials recipe_preferences add &lt;result_item&gt; &lt;recipe&gt;
@@ -70,6 +72,7 @@ public final class MaterialsCommand {
         return ClientCommandManager.literal("materials")
             .executes(MaterialsCommand::status)
             .then(terminalItems())
+            .then(blacklist())
             .then(recipePreferences())
             .then(tagPreferences())
             .then(ingredientPreferences())
@@ -119,6 +122,12 @@ public final class MaterialsCommand {
             + (result.replacedKinds() > 0 ? "（替换了 " + result.replacedKinds() + " 种）" : "")
             + " -> " + result.roots().size() + " 棵材料树、"
             + result.nodeCount() + " 个节点、最深 " + result.deepest() + " 层"));
+        if (!result.skipped().isEmpty()) {
+            MutableText line = Text.literal("  黑名单跳过 " + result.skipped().size() + " 种最终产物：")
+                .formatted(Formatting.GRAY);
+            line.append(joinedItems(result.skipped()));
+            source.sendFeedback(line);
+        }
         return 1;
     }
 
@@ -225,6 +234,56 @@ public final class MaterialsCommand {
                             return 0;
                         }
                         context.getSource().sendFeedback(Text.literal("已移出："
+                            + MaterialsConfig.itemId(item)));
+                        return 1;
+                    })));
+    }
+
+    // ------------------------------------------------------------------
+    // blacklist
+    // ------------------------------------------------------------------
+
+    private static LiteralArgumentBuilder<FabricClientCommandSource> blacklist() {
+        return ClientCommandManager.literal("blacklist")
+            .executes(context -> {
+                MaterialsConfig config = MaterialsConfig.load();
+                FabricClientCommandSource source = context.getSource();
+                source.sendFeedback(Text.literal("不要出现在清单里的最终产物："
+                    + config.blacklist().size() + " 种"));
+                int shown = 0;
+                for (String id : config.blacklist()) {
+                    if (shown++ >= MAX_LINES) break;
+                    source.sendFeedback(Text.literal("  ").append(idLabel(id)));
+                }
+                source.sendFeedback(Text.literal("§7  只管最外层：它要是别的产物的材料，照样会追溯"));
+                source.sendFeedback(pathLine(MaterialsConfig.blacklistFile()));
+                return 1;
+            })
+            .then(ClientCommandManager.literal("add")
+                .then(ClientCommandManager.argument("item_id", ItemIdArgumentType.itemId())
+                    .executes(context -> {
+                        Item item = ItemIdArgumentType.getItem(context, "item_id");
+                        MaterialsConfig config = MaterialsConfig.load();
+                        boolean added = config.addBlacklist(item);
+                        config.save();
+                        context.getSource().sendFeedback(Text.literal(added
+                            ? "已加入黑名单：" + MaterialsConfig.itemId(item)
+                            : "本来就在黑名单里：" + MaterialsConfig.itemId(item)));
+                        return 1;
+                    })))
+            .then(ClientCommandManager.literal("del")
+                .then(ClientCommandManager.argument("item_id", ItemIdArgumentType.itemId())
+                    .executes(context -> {
+                        Item item = ItemIdArgumentType.getItem(context, "item_id");
+                        MaterialsConfig config = MaterialsConfig.load();
+                        boolean removed = config.delBlacklist(item);
+                        config.save();
+                        if (!removed) {
+                            context.getSource().sendError(Text.literal("黑名单里没有 "
+                                + MaterialsConfig.itemId(item)));
+                            return 0;
+                        }
+                        context.getSource().sendFeedback(Text.literal("已移出黑名单："
                             + MaterialsConfig.itemId(item)));
                         return 1;
                     })));
@@ -685,6 +744,8 @@ public final class MaterialsCommand {
         source.sendFeedback(Text.literal("§8[§bPC§8]§r §7材料清单配置（" + MaterialsConfig.dir() + "）："));
         source.sendFeedback(Text.literal("  terminal_items         " + config.terminalItems().size()
             + " 种（到此为止的物品）"));
+        source.sendFeedback(Text.literal("  blacklist              " + config.blacklist().size()
+            + " 种（不要的最终产物，只滤最外层）"));
         source.sendFeedback(Text.literal("  recipe_preferences     " + config.recipePreferences().size()
             + " 条（一种产物多种做法时用哪条）"));
         source.sendFeedback(Text.literal("  tag_preferences        " + config.tagPreferences().size()
@@ -745,6 +806,18 @@ public final class MaterialsCommand {
             if (i > 0) text.append(Text.literal(" / "));
             text.append(Text.literal(items.get(i).getName().getString()));
         }
+        return text;
+    }
+
+    /** 「名字 (id)、名字 (id)…」；太多就只列前几个。 */
+    private static MutableText joinedItems(List<Item> items) {
+        MutableText text = Text.empty();
+        int max = 8;
+        for (int i = 0; i < items.size() && i < max; i++) {
+            if (i > 0) text.append(Text.literal("§7、"));
+            text.append(itemLabel(items.get(i)));
+        }
+        if (items.size() > max) text.append(Text.literal("§7 等 " + items.size() + " 种"));
         return text;
     }
 
