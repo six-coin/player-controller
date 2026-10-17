@@ -32,7 +32,9 @@ import java.nio.file.Path;
  *     "anti_kick_delay": 40,
  *     "anti_kick_off_time": 1,
  *     "network_delay_ticks": 2,
- *     "wait_ticks_after_dimension_teleport": 40
+ *     "wait_ticks_after_dimension_teleport": 40,
+ *     "mending_max_wait_exp_seconds": 30,
+ *     "mending_detect_interval_ticks": 20
  *   }
  * }
  * </pre>
@@ -112,6 +114,21 @@ public final class PlayerControllerConfig {
     public static final int DEFAULT_WAIT_TICKS_AFTER_DIMENSION_TELEPORT = 40;
     public static final int MIN_WAIT_TICKS_AFTER_DIMENSION_TELEPORT = 0;
     public static final int MAX_WAIT_TICKS_AFTER_DIMENSION_TELEPORT = 400;
+
+    /**
+     * mending：多久没有任何东西被修好就放弃，单位：秒（默认 {@value #DEFAULT_MENDING_MAX_WAIT_EXP_SECONDS}）。
+     *
+     * <p>经验修补是「捡到经验球才修」，所以这里等的其实是经验：连续这么多秒一件装备的耐久都没涨过，
+     * 就不再干等（附近可能根本没有经验来源），退出检测走回原位。
+     */
+    public static final int DEFAULT_MENDING_MAX_WAIT_EXP_SECONDS = 30;
+    public static final int MIN_MENDING_MAX_WAIT_EXP_SECONDS = 1;
+    public static final int MAX_MENDING_MAX_WAIT_EXP_SECONDS = 600;
+
+    /** mending：多久检测一次，单位：tick（默认 {@value #DEFAULT_MENDING_DETECT_INTERVAL_TICKS} = 1 秒）。 */
+    public static final int DEFAULT_MENDING_DETECT_INTERVAL_TICKS = 20;
+    public static final int MIN_MENDING_DETECT_INTERVAL_TICKS = 1;
+    public static final int MAX_MENDING_DETECT_INTERVAL_TICKS = 1200;
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -214,6 +231,19 @@ public final class PlayerControllerConfig {
         @SerializedName("wait_ticks_after_dimension_teleport")
         private int waitTicksAfterDimensionTeleport = DEFAULT_WAIT_TICKS_AFTER_DIMENSION_TELEPORT;
 
+        /**
+         * mending：多久没有任何东西被修好就放弃，单位：秒。
+         *
+         * <p>见 {@code mending/MendingManager}：检测循环里连续这么多秒所有装备的耐久都没涨过，
+         * 就判定「附近没有经验来源」，退出检测走回原位。
+         */
+        @SerializedName("mending_max_wait_exp_seconds")
+        private int mendingMaxWaitExpSeconds = DEFAULT_MENDING_MAX_WAIT_EXP_SECONDS;
+
+        /** mending：多久检测一次，单位：tick。 */
+        @SerializedName("mending_detect_interval_ticks")
+        private int mendingDetectIntervalTicks = DEFAULT_MENDING_DETECT_INTERVAL_TICKS;
+
         public double moveSpeed() {
             return moveSpeed;
         }
@@ -289,6 +319,24 @@ public final class PlayerControllerConfig {
         public void waitTicksAfterDimensionTeleport(int value) {
             waitTicksAfterDimensionTeleport = Math.min(MAX_WAIT_TICKS_AFTER_DIMENSION_TELEPORT,
                 Math.max(MIN_WAIT_TICKS_AFTER_DIMENSION_TELEPORT, value));
+        }
+
+        public int mendingMaxWaitExpSeconds() {
+            return mendingMaxWaitExpSeconds;
+        }
+
+        public void mendingMaxWaitExpSeconds(int value) {
+            mendingMaxWaitExpSeconds = Math.min(MAX_MENDING_MAX_WAIT_EXP_SECONDS,
+                Math.max(MIN_MENDING_MAX_WAIT_EXP_SECONDS, value));
+        }
+
+        public int mendingDetectIntervalTicks() {
+            return mendingDetectIntervalTicks;
+        }
+
+        public void mendingDetectIntervalTicks(int value) {
+            mendingDetectIntervalTicks = Math.min(MAX_MENDING_DETECT_INTERVAL_TICKS,
+                Math.max(MIN_MENDING_DETECT_INTERVAL_TICKS, value));
         }
     }
 
@@ -406,6 +454,26 @@ public final class PlayerControllerConfig {
         instance.save();
     }
 
+    /** mending：多久没有任何东西被修好就退出（秒）。 */
+    public static int getMendingMaxWaitExpSeconds() {
+        return instance.actions.mendingMaxWaitExpSeconds();
+    }
+
+    public static void setMendingMaxWaitExpSeconds(int value) {
+        instance.actions.mendingMaxWaitExpSeconds(value);
+        instance.save();
+    }
+
+    /** mending：检测间隔（tick）。 */
+    public static int getMendingDetectIntervalTicks() {
+        return instance.actions.mendingDetectIntervalTicks();
+    }
+
+    public static void setMendingDetectIntervalTicks(int value) {
+        instance.actions.mendingDetectIntervalTicks(value);
+        instance.save();
+    }
+
     /** 配置目录：config/player-controller/ */
     public static Path configDir() {
         return FabricLoader.getInstance()
@@ -451,7 +519,9 @@ public final class PlayerControllerConfig {
                 + ", anti_kick_off_time=" + instance.actions.antiKickOffTime()
                 + ", network_delay_ticks=" + instance.actions.networkDelayTicks()
                 + ", wait_ticks_after_dimension_teleport="
-                + instance.actions.waitTicksAfterDimensionTeleport() + ")");
+                + instance.actions.waitTicksAfterDimensionTeleport()
+                + ", mending_max_wait_exp_seconds=" + instance.actions.mendingMaxWaitExpSeconds()
+                + ", mending_detect_interval_ticks=" + instance.actions.mendingDetectIntervalTicks() + ")");
         } catch (Exception e) {
             instance = new PlayerControllerConfig();
             ChatUtils.error("读取配置文件失败，已使用默认值: " + e.getMessage());

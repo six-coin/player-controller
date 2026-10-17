@@ -10,6 +10,7 @@ import net.minecraft.text.Text;
 import org.six_coin.playerController.client.attack.AttackConfig;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
+import org.six_coin.playerController.client.mending.MendingConfig;
 import org.six_coin.playerController.client.stock.station.StationManager;
 import org.six_coin.playerController.client.stock.StockManager;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
@@ -29,6 +30,8 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * /pc config actions anti_kick_off_time [tick]
  * /pc config actions network_delay_ticks [1~40]
  * /pc config actions wait_ticks_after_dimension_teleport [tick]
+ * /pc config actions mending_max_wait_exp_seconds [second]
+ * /pc config actions mending_detect_interval_ticks [tick]
  * </pre>
  */
 public final class ConfigCommand {
@@ -78,6 +81,7 @@ public final class ConfigCommand {
                     StationManager.get().switchWorld(num);
                     StockManager.get().switchWorld(num);
                     AttackConfig.get().switchWorld(num);
+                    MendingConfig.get().switchWorld(num);
                     context.getSource().sendFeedback(Text.literal("已切换到世界配置 world_" + num));
                     return 1;
                 }));
@@ -227,6 +231,40 @@ public final class ConfigCommand {
                             "换维度后的等待已设为 " + PlayerControllerConfig.getWaitTicksAfterDimensionTeleport()
                                 + " tick"));
                         return 1;
+                    })))
+            .then(ClientCommandManager.literal("mending_max_wait_exp_seconds")
+                .executes(context -> {
+                    showMendingMaxWait(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("seconds",
+                        IntegerArgumentType.integer(
+                            PlayerControllerConfig.MIN_MENDING_MAX_WAIT_EXP_SECONDS,
+                            PlayerControllerConfig.MAX_MENDING_MAX_WAIT_EXP_SECONDS))
+                    .executes(context -> {
+                        int seconds = IntegerArgumentType.getInteger(context, "seconds");
+                        PlayerControllerConfig.setMendingMaxWaitExpSeconds(seconds);
+                        context.getSource().sendFeedback(Text.literal(
+                            "mending 等经验的超时已设为 "
+                                + PlayerControllerConfig.getMendingMaxWaitExpSeconds() + " 秒"));
+                        return 1;
+                    })))
+            .then(ClientCommandManager.literal("mending_detect_interval_ticks")
+                .executes(context -> {
+                    showMendingDetectInterval(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("ticks",
+                        IntegerArgumentType.integer(
+                            PlayerControllerConfig.MIN_MENDING_DETECT_INTERVAL_TICKS,
+                            PlayerControllerConfig.MAX_MENDING_DETECT_INTERVAL_TICKS))
+                    .executes(context -> {
+                        int ticks = IntegerArgumentType.getInteger(context, "ticks");
+                        PlayerControllerConfig.setMendingDetectIntervalTicks(ticks);
+                        context.getSource().sendFeedback(Text.literal(
+                            "mending 的检测间隔已设为 "
+                                + PlayerControllerConfig.getMendingDetectIntervalTicks() + " tick"));
+                        return 1;
                     })));
     }
 
@@ -253,6 +291,10 @@ public final class ConfigCommand {
             + PlayerControllerConfig.getNetworkDelayTicks() + " tick（等服务器同步：开界面之后、连点之后）"));
         source.sendFeedback(Text.literal("  actions.wait_ticks_after_dimension_teleport = "
             + PlayerControllerConfig.getWaitTicksAfterDimensionTeleport() + " tick"));
+        source.sendFeedback(Text.literal("  actions.mending_max_wait_exp_seconds = "
+            + PlayerControllerConfig.getMendingMaxWaitExpSeconds() + " 秒（没有进展就退出检测）"));
+        source.sendFeedback(Text.literal("  actions.mending_detect_interval_ticks = "
+            + PlayerControllerConfig.getMendingDetectIntervalTicks() + " tick（多久检测一次）"));
         source.sendFeedback(Text.literal("  文件: " + PlayerControllerConfig.configFile()));
         return 1;
     }
@@ -269,6 +311,8 @@ public final class ConfigCommand {
         showAntiKickOffTime(source);
         showNetworkDelayTicks(source);
         showWaitAfterTeleport(source);
+        showMendingMaxWait(source);
+        showMendingDetectInterval(source);
         return 1;
     }
 
@@ -320,6 +364,20 @@ public final class ConfigCommand {
         source.sendFeedback(Text.literal("  wait_ticks_after_dimension_teleport = "
             + PlayerControllerConfig.getWaitTicksAfterDimensionTeleport()
             + " tick（换维度之后先等这么久再移动，免得被服务端拉回去）"));
+    }
+
+    private static void showMendingMaxWait(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  mending_max_wait_exp_seconds = "
+            + PlayerControllerConfig.getMendingMaxWaitExpSeconds()
+            + " 秒（mending：连续这么久没有任何东西被修好就退出检测，"
+            + PlayerControllerConfig.MIN_MENDING_MAX_WAIT_EXP_SECONDS + "~"
+            + PlayerControllerConfig.MAX_MENDING_MAX_WAIT_EXP_SECONDS + "）"));
+    }
+
+    private static void showMendingDetectInterval(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  mending_detect_interval_ticks = "
+            + PlayerControllerConfig.getMendingDetectIntervalTicks()
+            + " tick（mending：多久检测一次，20 tick = 1 秒）"));
     }
 
     private static int setDebug(CommandContext<FabricClientCommandSource> context, boolean value) {

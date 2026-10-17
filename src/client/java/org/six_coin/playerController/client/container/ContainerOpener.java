@@ -26,7 +26,14 @@ public final class ContainerOpener {
      * <p>客户端界面要不要挡住由 {@code ScreenSuppressor} 决定（调用方自己 acquire / release）。
      */
     public static void open(MinecraftClient mc, ClientPlayerEntity player, BlockPos pos) {
-        RotateManager.get().rotateTo(Owner.STOCK, pos);
+        open(mc, player, pos, Owner.STOCK);
+    }
+
+    /**
+     * 同上，但转头记在 {@code requester} 名下（{@link Owner#priority()} 决定谁抢得过谁）。
+     */
+    public static void open(MinecraftClient mc, ClientPlayerEntity player, BlockPos pos, Owner requester) {
+        RotateManager.get().rotateTo(requester, pos);
 
         Direction side = PlayerUtils.facingSide(pos);
         Vec3d hitPos = Vec3d.ofCenter(pos).add(

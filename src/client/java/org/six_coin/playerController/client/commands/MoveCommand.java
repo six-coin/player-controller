@@ -20,6 +20,7 @@ import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
+import org.six_coin.playerController.client.waypoint.PathPlanner;
 import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointGraph;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
@@ -238,71 +239,41 @@ public final class MoveCommand {
      * <p>{@code dimension} 是终点所在的维度（不写就是当前维度）；跨维度的话路径会自动经过传送门边。
      */
     private static int moveToPosition(FabricClientCommandSource source, BlockPos target, String dimension) {
-        WaypointGraph graph = WaypointManager.get().graph();
-
-        Waypoint to = graph.at(dimension, target);
-        if (to != null) {
+        PathPlanner.Plan plan = PathPlanner.toPosition(target, dimension);
+        if (plan.ok()) {
             ChatUtils.debug("to_position：" + DimensionUtils.display(dimension) + " " + target.toShortString()
-                + " 已经是路径点 #" + to.id() + "，直接走");
-            return startPath(source, to);
+                + (plan.alreadyThere() ? " 已经是路径点，直接走" : " 已算好路"));
         }
-
-        WaypointGraph.EdgeEntry edge = graph.edgeAt(dimension, target);
-        if (edge == null) {
-            source.sendError(Text.literal(DimensionUtils.display(dimension) + " 的 "
-                + target.toShortString() + " 既不是路径点，也不在任何边上"));
-            return 0;
-        }
-
-        to = WaypointManager.get().createWaypoint(dimension, target);
-        ChatUtils.debug("to_position：" + target.toShortString() + " 在边 #" + edge.id()
-            + " 上，已新建路径点 #" + to.id());
-        source.sendFeedback(Text.literal("目标 " + DimensionUtils.display(dimension) + " "
-            + target.toShortString() + " 在边 #" + edge.id() + " 上，已在那边新建路径点 #" + to.id()));
-        return startPath(source, to);
+        return start(source, plan);
     }
 
     private static int startPath(FabricClientCommandSource source, Waypoint target) {
-        if (source.getPlayer() == null) {
-            source.sendError(Text.literal("没有玩家"));
+        return start(source, PathPlanner.toWaypoint(target));
+    }
+
+    /** 把算好的路交出去（出错就报错、已经在那儿就说一声、否则提交任务）。 */
+    private static int start(FabricClientCommandSource source, PathPlanner.Plan plan) {
+        if (!plan.ok()) {
+            source.sendError(Text.literal(plan.error()));
             return 0;
         }
-
-        WaypointGraph graph = WaypointManager.get().graph();
-        String dimension = DimensionUtils.current();
-
-        BlockPos here = PlayerUtils.currentBlockPos();
-        if (here == null) {
-            source.sendError(Text.literal("拿不到玩家位置"));
-            return 0;
+        if (plan.info() != null) {
+            source.sendFeedback(Text.literal(plan.info()));
         }
-
-        // 起点：站在路径点上就直接用；站在某条边中间，就先在脚下新建一个路径点（边会被切开）
-        Waypoint from = WaypointManager.get().playerStartWaypoint();
-        if (from == null) {
-            source.sendError(Text.literal("你现在所在的 " + here.toShortString()
-                + " 既不是路径点，也不在任何边上，先用 /pc waypoints add_waypoint here 加一个"));
-            return 0;
-        }
-
-        if (from.id() == target.id()) {
-            source.sendFeedback(Text.literal("你已经站在 " + target.pos().toShortString() + " 了"));
+        if (plan.alreadyThere()) {
+            source.sendFeedback(Text.literal("你已经站在 " + plan.target().pos().toShortString() + " 了"));
             return 1;
         }
 
-        // 必须找得到路
-        List<Waypoint> path = graph.shortestPath(from.id(), target.id());
-        if (path == null || path.size() < 2) {
-            source.sendError(Text.literal("从 " + DimensionUtils.display(dimension) + " " + here.toShortString()
-                + " 到 " + DimensionUtils.display(target.dimension()) + " " + target.pos().toShortString()
-                + " 找不到路径"));
-            return 0;
-        }
+        List<Waypoint> path = plan.path();
+        BlockPos here = PlayerUtils.currentBlockPos();
+        Waypoint last = path.get(path.size() - 1);
 
         ActionManager.get().submit(new PathMoveAction(path));
-        source.sendFeedback(Text.literal("已提交任务：从 " + DimensionUtils.display(dimension) + " "
-            + here.toShortString() + " 走到 " + DimensionUtils.display(target.dimension()) + " "
-            + target.pos().toShortString() + "（" + (path.size() - 1) + " 段）"));
+        source.sendFeedback(Text.literal("已提交任务：从 " + DimensionUtils.display(DimensionUtils.current())
+            + " " + (here == null ? "?" : here.toShortString()) + " 走到 "
+            + DimensionUtils.display(last.dimension()) + " " + last.pos().toShortString()
+            + "（" + (path.size() - 1) + " 段）"));
         return 1;
     }
 

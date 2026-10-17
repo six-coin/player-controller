@@ -155,6 +155,20 @@ public final class InventoryUtils {
         return null;
     }
 
+    /**
+     * 玩家物品栏里第 {@code index} 格在这套界面里的槽位。
+     *
+     * <p>下标和 {@link PlayerInventory#getStack(int)} 一致：0~8 快捷栏、9~35 主背包、
+     * 36~39 盔甲、{@link PlayerInventory#OFF_HAND_SLOT} 副手。
+     * 末影箱 / 箱子那类界面里没有盔甲和副手格，那就返回 null。
+     */
+    public static Slot inventorySlot(ScreenHandler handler, PlayerInventory inventory, int index) {
+        for (Slot slot : handler.slots) {
+            if (slot.inventory == inventory && slot.getIndex() == index) return slot;
+        }
+        return null;
+    }
+
     /** 日志用：一个槽位的简单描述。 */
     public static String describe(Slot slot) {
         ItemStack stack = slot.getStack();

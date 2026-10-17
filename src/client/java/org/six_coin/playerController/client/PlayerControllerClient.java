@@ -17,6 +17,8 @@ import org.six_coin.playerController.client.feature.DimensionWait;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.feature.ServerTickRate;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
+import org.six_coin.playerController.client.mending.MendingConfig;
+import org.six_coin.playerController.client.mending.MendingManager;
 import org.six_coin.playerController.client.recipe.LocalRecipes;
 import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.stock.station.StationManager;
@@ -37,6 +39,7 @@ public class PlayerControllerClient implements ClientModInitializer {
         StationManager.get().load();
         StockManager.get().load();
         AttackConfig.get().load();
+        MendingConfig.get().load();
         PcCommand.register();
         WaypointRenderer.register();
         ContainerCacheRenderer.register();
@@ -58,6 +61,10 @@ public class PlayerControllerClient implements ClientModInitializer {
         // 这时候这一 tick 的位置 / 朝向都已经定下来了，攻击包发出去不会和移动包打架。
         ClientTickEvents.END_CLIENT_TICK.register(client -> AttackManager.get().tick());
 
+        // mending：自己一套「走过去 → 开着末影箱 → 定时检测」的流程（见 MendingManager）。
+        // 放在攻击后面：它每一轮会按经验球数量开关攻击，下一 tick 的攻击就能按新的开关来。
+        ClientTickEvents.END_CLIENT_TICK.register(client -> MendingManager.get().tick());
+
         // 记录下界传送门边：只有 /pc move <轴> / /pc move face 的终点是传送门时才会武装，
         // 所以这里要一直跑着（传送是服务端做的，得等维度变化才能确认落点）
         ClientTickEvents.END_CLIENT_TICK.register(PortalTracker::tick);
@@ -68,7 +75,7 @@ public class PlayerControllerClient implements ClientModInitializer {
         // 每次进世界都把「不显示容器界面」的计数清零：上次要是非正常退出（崩了 / 被强杀），
         // 计数会一直挂着，那之后所有容器界面都被挡住，箱子永远打不开。
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            if (ScreenSuppressor.reset()) {
+            if (ScreenSuppressor.resetAll()) {
                 ChatUtils.debug("进世界：已解除容器界面抑制（上次没正常收尾留下的计数）");
             }
 
@@ -76,6 +83,7 @@ public class PlayerControllerClient implements ClientModInitializer {
             HotbarManager.get().reset();
             RotateManager.get().reset();
             AttackManager.get().reset();
+            MendingManager.get().reset();
             ServerTickRate.onJoin();
         });
 
