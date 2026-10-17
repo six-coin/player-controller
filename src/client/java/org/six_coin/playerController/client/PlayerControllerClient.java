@@ -58,9 +58,6 @@ public class PlayerControllerClient implements ClientModInitializer {
         // 这时候这一 tick 的位置 / 朝向都已经定下来了，攻击包发出去不会和移动包打架。
         ClientTickEvents.END_CLIENT_TICK.register(client -> AttackManager.get().tick());
 
-        // 自动转头：太久没人刷新的请求自动还回去（见 RotateManager）
-        ClientTickEvents.END_CLIENT_TICK.register(client -> RotateManager.get().tick());
-
         // 记录下界传送门边：只有 /pc move <轴> / /pc move face 的终点是传送门时才会武装，
         // 所以这里要一直跑着（传送是服务端做的，得等维度变化才能确认落点）
         ClientTickEvents.END_CLIENT_TICK.register(PortalTracker::tick);
