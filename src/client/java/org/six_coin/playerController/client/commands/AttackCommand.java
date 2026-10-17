@@ -8,6 +8,7 @@ import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.EntityType;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.MutableText;
@@ -293,10 +294,11 @@ public final class AttackCommand {
 
         source.sendFeedback(Text.literal("§8[§bPC§8]§r §7当前 profile：" + profile.name()
             + "（" + AttackProfiles.file(profile.name()) + "）"));
-        source.sendFeedback(Text.literal("自动切换物品：" + Field.text(profile.autoSwitch())));
+        source.sendFeedback(flagLine(ROOT + "profile current auto_switch",
+            "自动切换物品", profile.autoSwitch() ? "开" : "关"));
         for (Field field : Field.values()) {
-            source.sendFeedback(Text.literal("默认" + field.label() + "："
-                + Field.text(field.getDefault(profile))));
+            source.sendFeedback(flagLine(ROOT + "profile current " + field.defaultId(),
+                "默认" + field.label(), Field.text(field.getDefault(profile))));
         }
 
         source.sendFeedback(Text.literal("攻击实体：" + profile.rules().size() + " 种"));
@@ -458,8 +460,9 @@ public final class AttackCommand {
             source.sendError(Text.literal("没有这个实体：" + id));
             return 0;
         }
-        if (!EntityGroups.isLiving(type)) {
-            source.sendError(Text.literal(id + " 不是活物，打不了"));
+        EntityGroups.Group group = EntityGroups.groupOf(type);
+        if (group == null) {
+            source.sendError(Text.literal(id + " 不是活物，打不了（还是说还没进世界？）"));
             return 0;
         }
         if (!profile.addEntity(type)) {
@@ -469,7 +472,7 @@ public final class AttackCommand {
         profile.save();
 
         source.sendFeedback(Text.literal("已加入攻击实体：").append(entityLabel(id.toString()))
-            .append(Text.literal("（组：" + EntityGroups.groupOf(type).label() + "）")));
+            .append(Text.literal("（组：" + group.label() + "）")));
         return 1;
     }
 
@@ -627,6 +630,12 @@ public final class AttackCommand {
 
     private static int showAllMobs(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
+
+        if (MinecraftClient.getInstance().world == null) {
+            source.sendError(Text.literal("还没进世界，读不到实体注册表"));
+            return 0;
+        }
+
         AttackProfile profile = AttackConfig.get().currentProfile();
 
         source.sendFeedback(Text.literal("§8[§bPC§8]§r §7所有生物（"
@@ -673,6 +682,15 @@ public final class AttackCommand {
     // ------------------------------------------------------------------
     // 小工具
     // ------------------------------------------------------------------
+
+    /** 「[切换] 自动切换物品：开」：点了把切换的命令填进聊天栏。 */
+    private static MutableText flagLine(String command, String label, String value) {
+        MutableText line = Text.literal(" ");
+        line.append(fillButton("[切换]", command,
+            "把「切换" + label + "」的命令填进聊天栏，回车生效"));
+        line.append(Text.literal(" " + label + "：" + value));
+        return line;
+    }
 
     /** 当前 profile；读不出来就报错并返回 null。 */
     @Nullable
