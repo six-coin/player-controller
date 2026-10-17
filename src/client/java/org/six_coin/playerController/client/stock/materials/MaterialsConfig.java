@@ -2,9 +2,11 @@ package org.six_coin.playerController.client.stock.materials;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
@@ -15,14 +17,15 @@ import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
 
 import java.io.IOException;
-import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -57,11 +60,22 @@ import java.util.TreeSet;
  *
  * <p>每次用的时候都**重新读一遍盘**（{@link #load()}）：这几个文件很小，而且改完配置马上重跑
  * 是常态，缓存住反而会让人以为改了没用。改配置的命令是先 {@link #load()}、改、再 {@link #save()}。
+ *
+ * <p>这六份文件各自都有一份默认配置，打包在模组的 jar 里
+ * （{@code player-controller/materials/}）。**只有文件不在**的时候才照默认配置建一份出来；
+ * 文件在、但是读不出来（写坏了）的时候不动它，也不拿默认值顶上去，只报一句，
+ * 并且这一次不会往它写回去（{@link #save()} 跳过它），免得把用户的内容覆盖掉。
  */
 public final class MaterialsConfig {
 
     /** 这六份配置所在的文件夹：{@code config/player-controller/materials/}。 */
     public static final String FOLDER_NAME = "materials";
+
+    /** 模组 id（找 jar 里那份默认配置用）。 */
+    public static final String MOD_ID = "player-controller";
+
+    /** 默认配置在 jar 里的位置（前面那个目录名和模组 id 同一个）。 */
+    private static final String DEFAULT_RESOURCES = MOD_ID + "/" + FOLDER_NAME + "/";
 
     private static final String TERMINAL_FILE = "terminal_items.json";
     private static final String BLACKLIST_FILE = "blacklist.json";
@@ -92,6 +106,9 @@ public final class MaterialsConfig {
 
     /** 被替换的物品 id -> 换成什么。 */
     private final Map<String, String> replaceMaterials = new LinkedHashMap<>();
+
+    /** 这次读不出来的文件（{@link #save()} 不往它们写，免得覆盖掉用户的内容）。 */
+    private final Set<String> broken = new LinkedHashSet<>();
 
     private MaterialsConfig() {
     }
@@ -132,11 +149,11 @@ public final class MaterialsConfig {
     // 读 / 写
     // ------------------------------------------------------------------
 
-    /** 重新读一遍盘；缺的文件会建出来（空表）。 */
+    /** 重新读一遍盘；缺的文件按模组自带的默认配置建出来。 */
     public static MaterialsConfig load() {
         MaterialsConfig config = new MaterialsConfig();
 
-        for (String id : readArray(terminalFile())) {
+        for (String id : config.readArray(TERMINAL_FILE)) {
             String canonical = canonicalItem(id);
             if (canonical == null) {
                 ChatUtils.error("terminal_items.json 里认不出的物品 id：" + id);
@@ -145,7 +162,7 @@ public final class MaterialsConfig {
             config.terminalItems.add(canonical);
         }
 
-        for (String id : readArray(blacklistFile())) {
+        for (String id : config.readArray(BLACKLIST_FILE)) {
             String canonical = canonicalItem(id);
             if (canonical == null) {
                 ChatUtils.error("blacklist.json 里认不出的物品 id：" + id);
@@ -154,7 +171,7 @@ public final class MaterialsConfig {
             config.blacklist.add(canonical);
         }
 
-        readMap(recipeFile(), (key, value) -> {
+        config.readMap(RECIPE_FILE, (key, value) -> {
             String item = canonicalItem(key);
             String recipe = canonicalRecipe(value);
             if (item == null || recipe == null) {
@@ -164,7 +181,7 @@ public final class MaterialsConfig {
             config.recipePreferences.put(item, recipe);
         });
 
-        readMap(tagFile(), (key, value) -> {
+        config.readMap(TAG_FILE, (key, value) -> {
             String tag = canonicalTag(key);
             String item = canonicalItem(value);
             if (tag == null || item == null) {
@@ -174,7 +191,7 @@ public final class MaterialsConfig {
             config.tagPreferences.put(tag, item);
         });
 
-        readMap(ingredientFile(), (key, value) -> {
+        config.readMap(INGREDIENT_FILE, (key, value) -> {
             String slot = canonicalIngredientKey(key);
             String item = canonicalItem(value);
             if (slot == null || item == null) {
@@ -184,7 +201,7 @@ public final class MaterialsConfig {
             config.ingredientPreferences.put(slot, item);
         });
 
-        readMap(replaceFile(), (key, value) -> {
+        config.readMap(REPLACE_FILE, (key, value) -> {
             String from = canonicalItem(key);
             String to = canonicalItem(value);
             if (from == null || to == null) {
@@ -198,14 +215,20 @@ public final class MaterialsConfig {
         return config;
     }
 
-    /** 六份配置全写一遍（目录不存在会自动创建）。 */
+    /** 六份配置全写一遍（目录不存在会自动创建）；这次读不出来的那份不写。 */
     public void save() {
-        writeArray(terminalFile(), terminalItems);
-        writeArray(blacklistFile(), blacklist);
-        writeMap(recipeFile(), recipePreferences);
-        writeMap(tagFile(), tagPreferences);
-        writeMap(ingredientFile(), ingredientPreferences);
-        writeMap(replaceFile(), replaceMaterials);
+        if (writable(TERMINAL_FILE)) writeArray(terminalFile(), terminalItems);
+        if (writable(BLACKLIST_FILE)) writeArray(blacklistFile(), blacklist);
+        if (writable(RECIPE_FILE)) writeMap(recipeFile(), recipePreferences);
+        if (writable(TAG_FILE)) writeMap(tagFile(), tagPreferences);
+        if (writable(INGREDIENT_FILE)) writeMap(ingredientFile(), ingredientPreferences);
+        if (writable(REPLACE_FILE)) writeMap(replaceFile(), replaceMaterials);
+    }
+
+    private boolean writable(String fileName) {
+        if (!broken.contains(fileName)) return true;
+        ChatUtils.error("这次不改写 " + fileName + "：它读不出来，写回去会把你原来的内容覆盖掉");
+        return false;
     }
 
     /** 认不出的物品 / 标签统一提醒一次，免得散在各处。 */
@@ -473,49 +496,105 @@ public final class MaterialsConfig {
         void accept(String key, String value);
     }
 
-    /** 读一个「物品 id -> 值」的对象；文件不在就建一个空的。 */
-    private static void readMap(Path path, EntryConsumer consumer) {
-        if (!Files.exists(path)) {
-            writeMap(path, new LinkedHashMap<>());
-            ChatUtils.debug("已创建空的材料配置：" + path);
-            return;
-        }
+    private static Path pathOf(String fileName) {
+        return dir().resolve(fileName);
+    }
+
+    /**
+     * 确保这份配置在盘上：不在就照模组里那份默认配置拷一份过来。
+     *
+     * <p>只在这个文件本身不存在的时候动手；文件在的时候一个字节都不碰它
+     * （哪怕读不出来也留着，让用户自己去修）。
+     *
+     * @param array 这份配置最外层是不是数组（jar 里找不到默认配置时建空表用）
+     */
+    private static void ensureFile(String fileName, boolean array) {
+        Path path = pathOf(fileName);
+        if (Files.exists(path)) return;
+
         try {
-            JsonElement root = JsonParser.parseString(Files.readString(path, StandardCharsets.UTF_8));
-            if (!root.isJsonObject()) {
-                ChatUtils.error(path.getFileName() + " 最外层应该是一个对象 { ... }，这一项按空的算");
+            Files.createDirectories(path.getParent());
+            Optional<Path> bundled = FabricLoader.getInstance()
+                .getModContainer(MOD_ID)
+                .flatMap(container -> container.findPath(DEFAULT_RESOURCES + fileName));
+            if (bundled.isPresent()) {
+                Files.copy(bundled.get(), path);
+                ChatUtils.debug("已按默认配置创建：" + path);
                 return;
             }
-            for (Map.Entry<String, JsonElement> entry : root.getAsJsonObject().entrySet()) {
-                JsonElement value = entry.getValue();
-                if (value == null || !value.isJsonPrimitive()) continue;
-                consumer.accept(entry.getKey(), value.getAsString());
-            }
+            ChatUtils.debug("模组里没有 " + fileName + " 的默认配置，建一个空的：" + path);
+        } catch (IOException e) {
+            ChatUtils.error("按默认配置创建 " + path + " 失败：" + e.getMessage());
+        }
+
+        write(path, array ? new JsonArray() : new JsonObject());
+    }
+
+    /** 读一份配置的全文；文件不在就按默认配置建一个，读不出来就记一笔（之后不往它写）。 */
+    @Nullable
+    private String readText(String fileName, boolean array) {
+        ensureFile(fileName, array);
+
+        Path path = pathOf(fileName);
+        try {
+            return Files.readString(path, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            broken.add(fileName);
+            ChatUtils.error("读 " + fileName + " 失败：" + e.getMessage()
+                + "（这一份这次按空的算，也不会写回去）");
+            return null;
+        }
+    }
+
+    /** 读一个「物品 id -> 值」的对象。 */
+    private void readMap(String fileName, EntryConsumer consumer) {
+        String text = readText(fileName, false);
+        if (text == null) return;
+
+        JsonElement root;
+        try {
+            root = JsonParser.parseString(text);
         } catch (Exception e) {
-            ChatUtils.error("读 " + path + " 失败：" + e.getMessage());
+            broken.add(fileName);
+            ChatUtils.error(fileName + " 不是合法的 json：" + e.getMessage() + "（这一份这次按空的算，也不会写回去）");
+            return;
+        }
+
+        if (!root.isJsonObject()) {
+            broken.add(fileName);
+            ChatUtils.error(fileName + " 最外层应该是一个对象 { ... }（这一份这次按空的算，也不会写回去）");
+            return;
+        }
+        for (Map.Entry<String, JsonElement> entry : root.getAsJsonObject().entrySet()) {
+            JsonElement value = entry.getValue();
+            if (value == null || !value.isJsonPrimitive()) continue;
+            consumer.accept(entry.getKey(), value.getAsString());
         }
     }
 
     /** 读一个物品 id 的数组。 */
-    private static java.util.List<String> readArray(Path path) {
-        java.util.List<String> ids = new java.util.ArrayList<>();
-        if (!Files.exists(path)) {
-            writeArray(path, new LinkedHashSet<>());
-            ChatUtils.debug("已创建空的材料配置：" + path);
+    private List<String> readArray(String fileName) {
+        List<String> ids = new ArrayList<>();
+        String text = readText(fileName, true);
+        if (text == null) return ids;
+
+        JsonElement root;
+        try {
+            root = JsonParser.parseString(text);
+        } catch (Exception e) {
+            broken.add(fileName);
+            ChatUtils.error(fileName + " 不是合法的 json：" + e.getMessage() + "（这一份这次按空的算，也不会写回去）");
             return ids;
         }
-        try {
-            JsonElement root = JsonParser.parseString(Files.readString(path, StandardCharsets.UTF_8));
-            if (!root.isJsonArray()) {
-                ChatUtils.error(path.getFileName() + " 最外层应该是一个数组 [ ... ]，这一项按空的算");
-                return ids;
-            }
-            for (JsonElement element : root.getAsJsonArray()) {
-                if (element == null || !element.isJsonPrimitive()) continue;
-                ids.add(element.getAsString());
-            }
-        } catch (Exception e) {
-            ChatUtils.error("读 " + path + " 失败：" + e.getMessage());
+
+        if (!root.isJsonArray()) {
+            broken.add(fileName);
+            ChatUtils.error(fileName + " 最外层应该是一个数组 [ ... ]（这一份这次按空的算，也不会写回去）");
+            return ids;
+        }
+        for (JsonElement element : root.getAsJsonArray()) {
+            if (element == null || !element.isJsonPrimitive()) continue;
+            ids.add(element.getAsString());
         }
         return ids;
     }
@@ -529,7 +608,7 @@ public final class MaterialsConfig {
     }
 
     private static void writeArray(Path path, Set<String> ids) {
-        com.google.gson.JsonArray array = new com.google.gson.JsonArray();
+        JsonArray array = new JsonArray();
         for (String id : ids) array.add(id);
         write(path, array);
     }

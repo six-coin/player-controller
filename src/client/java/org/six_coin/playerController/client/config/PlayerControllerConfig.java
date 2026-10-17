@@ -27,6 +27,8 @@ import java.nio.file.Path;
  *     "move_speed": 5.0,
  *     "max_descent_speed": 3.0,
  *     "interaction_range": 4.5,
+ *     "attack_range": 4.5,
+ *     "attack_wall_range": 4.5,
  *     "anti_kick_delay": 40,
  *     "anti_kick_off_time": 1,
  *     "network_delay_ticks": 2,
@@ -63,6 +65,24 @@ public final class PlayerControllerConfig {
     /** 触及距离的合法范围（单位：方块）。 */
     public static final double MIN_INTERACTION_RANGE = 0.5;
     public static final double MAX_INTERACTION_RANGE = 64.0;
+
+    /** 攻击范围的默认值（单位：方块），和 meteor 的 killaura 一样是 4.5。 */
+    public static final double DEFAULT_ATTACK_RANGE = 4.5;
+
+    /** 攻击范围的合法范围（单位：方块）。 */
+    public static final double MIN_ATTACK_RANGE = 0.5;
+    public static final double MAX_ATTACK_RANGE = 64.0;
+
+    /**
+     * 看不见目标时（隔着方块）还能打到的距离，默认 {@value #DEFAULT_ATTACK_WALL_RANGE}。
+     *
+     * <p>注意：和 meteor 的默认值（3.5）不一样，这里是 4.5。
+     */
+    public static final double DEFAULT_ATTACK_WALL_RANGE = 4.5;
+
+    /** 穿墙攻击距离的合法范围（单位：方块）。 */
+    public static final double MIN_ATTACK_WALL_RANGE = 0.5;
+    public static final double MAX_ATTACK_WALL_RANGE = 64.0;
 
     /** 防踢：两次「往下补一点」之间的间隔（tick）。 */
     public static final int DEFAULT_ANTI_KICK_DELAY = 40;
@@ -141,6 +161,22 @@ public final class PlayerControllerConfig {
         private double interactionRange = DEFAULT_INTERACTION_RANGE;
 
         /**
+         * 攻击范围，单位：方块（{@code /pc attack} 用）。
+         *
+         * <p>默认 4.5，和 meteor 的 killaura 一样。
+         */
+        @SerializedName("attack_range")
+        private double attackRange = DEFAULT_ATTACK_RANGE;
+
+        /**
+         * 看不见目标时还能打到的距离，单位：方块。
+         *
+         * <p>挡着的时候要求近一点；默认 4.5（和 meteor 的 3.5 不一样）。
+         */
+        @SerializedName("attack_wall_range")
+        private double attackWallRange = DEFAULT_ATTACK_WALL_RANGE;
+
+        /**
          * 防踢：两次「往下补一点」之间隔多少 tick。
          *
          * <p>见 {@code feature/AntiKick}：飞行（悬停）期间每隔这么多 tick 往服务端补一个
@@ -202,6 +238,22 @@ public final class PlayerControllerConfig {
         public void interactionRange(double value) {
             interactionRange = Math.min(MAX_INTERACTION_RANGE,
                 Math.max(MIN_INTERACTION_RANGE, value));
+        }
+
+        public double attackRange() {
+            return attackRange;
+        }
+
+        public void attackRange(double value) {
+            attackRange = Math.min(MAX_ATTACK_RANGE, Math.max(MIN_ATTACK_RANGE, value));
+        }
+
+        public double attackWallRange() {
+            return attackWallRange;
+        }
+
+        public void attackWallRange(double value) {
+            attackWallRange = Math.min(MAX_ATTACK_WALL_RANGE, Math.max(MIN_ATTACK_WALL_RANGE, value));
         }
 
         public int antiKickDelay() {
@@ -294,6 +346,26 @@ public final class PlayerControllerConfig {
         instance.save();
     }
 
+    /** 攻击范围（方块），{@code /pc attack} 用。 */
+    public static double getAttackRange() {
+        return instance.actions.attackRange();
+    }
+
+    public static void setAttackRange(double value) {
+        instance.actions.attackRange(value);
+        instance.save();
+    }
+
+    /** 看不见目标时还能打到的距离（方块）。 */
+    public static double getAttackWallRange() {
+        return instance.actions.attackWallRange();
+    }
+
+    public static void setAttackWallRange(double value) {
+        instance.actions.attackWallRange(value);
+        instance.save();
+    }
+
     /** 防踢：两次「往下补一点」之间隔多少 tick。 */
     public static int getAntiKickDelay() {
         return instance.actions.antiKickDelay();
@@ -373,6 +445,8 @@ public final class PlayerControllerConfig {
                 + ", move_speed=" + instance.actions.moveSpeed()
                 + ", max_descent_speed=" + instance.actions.maxDescentSpeed()
                 + ", interaction_range=" + instance.actions.interactionRange()
+                + ", attack_range=" + instance.actions.attackRange()
+                + ", attack_wall_range=" + instance.actions.attackWallRange()
                 + ", anti_kick_delay=" + instance.actions.antiKickDelay()
                 + ", anti_kick_off_time=" + instance.actions.antiKickOffTime()
                 + ", network_delay_ticks=" + instance.actions.networkDelayTicks()

@@ -7,6 +7,7 @@ import com.mojang.brigadier.context.CommandContext;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.text.Text;
+import org.six_coin.playerController.client.attack.AttackConfig;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.stock.station.StationManager;
@@ -22,6 +23,8 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * /pc config actions move_speed [speed]
  * /pc config actions max_descent_speed [speed]
  * /pc config actions interaction_range [range]
+ * /pc config actions attack_range [range]
+ * /pc config actions attack_wall_range [range]
  * /pc config actions anti_kick_delay [tick]
  * /pc config actions anti_kick_off_time [tick]
  * /pc config actions network_delay_ticks [1~40]
@@ -74,6 +77,7 @@ public final class ConfigCommand {
                     ContainerCacheManager.get().switchWorld(num);
                     StationManager.get().switchWorld(num);
                     StockManager.get().switchWorld(num);
+                    AttackConfig.get().switchWorld(num);
                     context.getSource().sendFeedback(Text.literal("已切换到世界配置 world_" + num));
                     return 1;
                 }));
@@ -130,6 +134,36 @@ public final class ConfigCommand {
                         PlayerControllerConfig.setInteractionRange(range);
                         context.getSource().sendFeedback(Text.literal(
                             "触及距离已设为 " + PlayerControllerConfig.getInteractionRange() + " 格"));
+                        return 1;
+                    })))
+            .then(ClientCommandManager.literal("attack_range")
+                .executes(context -> {
+                    showAttackRange(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("range",
+                        DoubleArgumentType.doubleArg(PlayerControllerConfig.MIN_ATTACK_RANGE,
+                            PlayerControllerConfig.MAX_ATTACK_RANGE))
+                    .executes(context -> {
+                        double range = DoubleArgumentType.getDouble(context, "range");
+                        PlayerControllerConfig.setAttackRange(range);
+                        context.getSource().sendFeedback(Text.literal(
+                            "攻击范围已设为 " + PlayerControllerConfig.getAttackRange() + " 格"));
+                        return 1;
+                    })))
+            .then(ClientCommandManager.literal("attack_wall_range")
+                .executes(context -> {
+                    showAttackWallRange(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("range",
+                        DoubleArgumentType.doubleArg(PlayerControllerConfig.MIN_ATTACK_WALL_RANGE,
+                            PlayerControllerConfig.MAX_ATTACK_WALL_RANGE))
+                    .executes(context -> {
+                        double range = DoubleArgumentType.getDouble(context, "range");
+                        PlayerControllerConfig.setAttackWallRange(range);
+                        context.getSource().sendFeedback(Text.literal(
+                            "穿墙攻击范围已设为 " + PlayerControllerConfig.getAttackWallRange() + " 格"));
                         return 1;
                     })))
             .then(ClientCommandManager.literal("anti_kick_delay")
@@ -207,6 +241,10 @@ public final class ConfigCommand {
             + PlayerControllerConfig.getMaxDescentSpeed() + " 格/tick（下降时取 min(move_speed, 这个)）"));
         source.sendFeedback(Text.literal("  actions.interaction_range = "
             + PlayerControllerConfig.getInteractionRange() + " 格"));
+        source.sendFeedback(Text.literal("  actions.attack_range = "
+            + PlayerControllerConfig.getAttackRange() + " 格"));
+        source.sendFeedback(Text.literal("  actions.attack_wall_range = "
+            + PlayerControllerConfig.getAttackWallRange() + " 格（看不见目标时也打的距离）"));
         source.sendFeedback(Text.literal("  actions.anti_kick_delay = "
             + PlayerControllerConfig.getAntiKickDelay() + " tick"));
         source.sendFeedback(Text.literal("  actions.anti_kick_off_time = "
@@ -225,6 +263,8 @@ public final class ConfigCommand {
         showMoveSpeed(source);
         showMaxDescentSpeed(source);
         showInteractionRange(source);
+        showAttackRange(source);
+        showAttackWallRange(source);
         showAntiKickDelay(source);
         showAntiKickOffTime(source);
         showNetworkDelayTicks(source);
@@ -248,8 +288,18 @@ public final class ConfigCommand {
             + PlayerControllerConfig.getInteractionRange() + " 格"));
     }
 
-    private static void showAntiKickDelay(FabricClientCommandSource source) {
-        source.sendFeedback(Text.literal("  anti_kick_delay = "
+    private static void showAttackRange(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  attack_range = "
+            + PlayerControllerConfig.getAttackRange() + " 格（/pc attack 的攻击范围）"));
+    }
+
+    private static void showAttackWallRange(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  attack_wall_range = "
+            + PlayerControllerConfig.getAttackWallRange()
+            + " 格（看不见目标时（隔着方块）还够得着的距离）"));
+    }
+
+    private static void showAntiKickDelay(FabricClientCommandSource source) {        source.sendFeedback(Text.literal("  anti_kick_delay = "
             + PlayerControllerConfig.getAntiKickDelay() + " tick（防踢：多久补一次「往下掉」）"));
     }
 

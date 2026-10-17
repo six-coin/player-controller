@@ -5,7 +5,6 @@ import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -13,6 +12,9 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import org.six_coin.playerController.client.action.Action;
+import org.six_coin.playerController.client.hotbar.HotbarManager;
+import org.six_coin.playerController.client.owner.Owner;
+import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
@@ -23,7 +25,8 @@ import org.six_coin.playerController.client.util.ShulkerUtils;
  * <p>摆放处本身必须是空气、下面那格不是空气（见 {@code StationPrecheck}），
  * 所以这里的做法是对着**下面那格**的上面右键：潜影盒就会被放到摆放处那一格。
  *
- * <p>放之前会把手上那一格切过去（{@code selectedSlot}），放完检查摆放处是不是真的变成潜影盒了。
+ * <p>放之前会通过 {@link HotbarManager} 把手上那一格切过去、通过 {@link RotateManager}
+ * 让服务端以为我们看着摆放处（客户端视角不动），放完检查摆放处是不是真的变成潜影盒了。
  */
 public class PlaceShulkerBoxAction extends Action {
 
@@ -87,12 +90,11 @@ public class PlaceShulkerBoxAction extends Action {
             return;
         }
 
-        player.getInventory().setSelectedSlot(hotbarIndex);
-        PlayerUtils.lookAt(spot.down());
-        if (mc.getNetworkHandler() != null) {
-            mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
-                player.getYaw(), player.getPitch(), player.isOnGround(), player.horizontalCollision));
+        if (!HotbarManager.get().request(Owner.STOCK, hotbarIndex)) {
+            fail("快捷栏第 " + (hotbarIndex + 1) + " 格现在不让切过去（别的功能在用）");
+            return;
         }
+        RotateManager.get().rotateTo(Owner.STOCK, spot.down());
 
         Vec3d hitPos = Vec3d.ofCenter(spot).add(0.0, -0.5, 0.0);
         BlockHitResult hit = new BlockHitResult(hitPos, Direction.UP, spot.down(), false);
@@ -124,6 +126,12 @@ public class PlaceShulkerBoxAction extends Action {
             fail("放了潜影盒但 " + spot.toShortString() + " 那里还是 "
                 + Registries.BLOCK.getId(state.getBlock()) + "（没放上去？）");
         }
+    }
+
+    @Override
+    protected void onEnd() {
+        HotbarManager.get().release(Owner.STOCK);
+        RotateManager.get().release(Owner.STOCK);
     }
 
     private static String describe(ItemStack stack) {

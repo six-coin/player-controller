@@ -7,8 +7,6 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.Item;
 import net.minecraft.registry.tag.TagKey;
-import net.minecraft.text.ClickEvent;
-import net.minecraft.text.HoverEvent;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -27,6 +25,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import static org.six_coin.playerController.client.commands.CommandStyle.fillButton;
+import static org.six_coin.playerController.client.commands.CommandStyle.gray;
+import static org.six_coin.playerController.client.commands.CommandStyle.runButton;
 
 /**
  * {@code /pc materials ...} —— 材料清单的配置，以及生成材料清单。
@@ -756,37 +758,14 @@ public final class MaterialsCommand {
             + " 条（能拿什么替什么）"));
         source.sendFeedback(Text.literal("§7  /pc stock task <名字> generate_materials_list"
             + " §8- §7把 original.json 处理成 materials.json"));
+        source.sendFeedback(Text.literal("§7  六份都有默认值：文件不在的时候按模组自带的默认建一份；"
+            + "文件在但读不出来就只报错、不动它"));
         return 1;
     }
 
     // ------------------------------------------------------------------
     // 小工具
     // ------------------------------------------------------------------
-
-    /** 可点的按钮：点了把这个命令填进聊天栏（不直接执行）。 */
-    private static MutableText fillButton(String label, String command, String hover) {
-        return Text.literal(label).styled(style -> style
-            .withColor(Formatting.GOLD)
-            .withUnderline(true)
-            .withHoverEvent(new HoverEvent.ShowText(Text.literal(hover)))
-            .withClickEvent(new ClickEvent.SuggestCommand(command)));
-    }
-
-    /** 可点的按钮：点了直接执行（只看不改的命令才用这个）。 */
-    private static MutableText runButton(String label, String command, String hover) {
-        return Text.literal(label).styled(style -> style
-            .withColor(Formatting.AQUA)
-            .withUnderline(true)
-            .withHoverEvent(new HoverEvent.ShowText(Text.literal(hover)))
-            .withClickEvent(new ClickEvent.RunCommand(command)));
-    }
-
-    /** 灰色的 id，点了复制。 */
-    private static MutableText gray(String text, String copy) {
-        return Text.literal(text).styled(style -> style
-            .withColor(Formatting.GRAY)
-            .withClickEvent(new ClickEvent.CopyToClipboard(copy)));
-    }
 
     /** 「名字 (id)」：名字用当前语言，id 灰色可复制。 */
     private static MutableText itemLabel(Item item) {

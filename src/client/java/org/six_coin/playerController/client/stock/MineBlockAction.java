@@ -4,11 +4,13 @@ import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import org.six_coin.playerController.client.action.Action;
+import org.six_coin.playerController.client.hotbar.HotbarManager;
+import org.six_coin.playerController.client.owner.Owner;
+import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
@@ -19,7 +21,8 @@ import org.six_coin.playerController.client.util.PlayerUtils;
  * {@code attackBlock}（发 START_DESTROY_BLOCK）→ 每 tick {@code updateBlockBreakingProgress}
  * （累进度，够了客户端发 STOP_DESTROY_BLOCK 并把方块设成空气）。
  *
- * <p>挖之前会把工具那一格切过去、并把视线对准方块（服务端不校验朝向，但对准一下更像人）。
+ * <p>挖之前会通过 {@link HotbarManager} 把工具那一格切过去、通过 {@link RotateManager}
+ * 让服务端以为我们看着这个方块（客户端视角不动）。
  */
 public class MineBlockAction extends Action {
 
@@ -70,14 +73,14 @@ public class MineBlockAction extends Action {
             return;
         }
 
-        player.getInventory().setSelectedSlot(hotbarIndex);
-        ItemStack tool = player.getInventory().getStack(hotbarIndex);
-        PlayerUtils.lookAt(pos);
-        side = PlayerUtils.facingSide(pos);
-        if (mc.getNetworkHandler() != null) {
-            mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
-                player.getYaw(), player.getPitch(), player.isOnGround(), player.horizontalCollision));
+        if (!HotbarManager.get().request(Owner.STOCK, hotbarIndex)) {
+            fail("快捷栏第 " + (hotbarIndex + 1) + " 格现在不让切过去（别的功能在用）");
+            return;
         }
+
+        ItemStack tool = player.getInventory().getStack(hotbarIndex);
+        side = PlayerUtils.facingSide(pos);
+        RotateManager.get().rotateTo(Owner.STOCK, pos);
 
         ChatUtils.debug("开始挖 %s（%s，面 %s，手上 %s）",
             pos.toShortString(), Registries.BLOCK.getId(state.getBlock()), side.asString(), describe(tool));
@@ -112,6 +115,9 @@ public class MineBlockAction extends Action {
 
     @Override
     protected void onEnd() {
+        HotbarManager.get().release(Owner.STOCK);
+        RotateManager.get().release(Owner.STOCK);
+
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.interactionManager == null || mc.world == null) return;
         if (!mc.world.getBlockState(pos).isAir()) {

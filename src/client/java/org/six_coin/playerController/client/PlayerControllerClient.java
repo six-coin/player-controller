@@ -4,6 +4,8 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import org.six_coin.playerController.client.action.ActionManager;
+import org.six_coin.playerController.client.attack.AttackConfig;
+import org.six_coin.playerController.client.attack.AttackManager;
 import org.six_coin.playerController.client.commands.PcCommand;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
@@ -13,7 +15,10 @@ import org.six_coin.playerController.client.feature.AccountSwitcher;
 import org.six_coin.playerController.client.feature.AntiKick;
 import org.six_coin.playerController.client.feature.DimensionWait;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
+import org.six_coin.playerController.client.feature.ServerTickRate;
+import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.recipe.LocalRecipes;
+import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.stock.station.StationManager;
 import org.six_coin.playerController.client.stock.station.StationRenderer;
 import org.six_coin.playerController.client.stock.StockManager;
@@ -31,6 +36,7 @@ public class PlayerControllerClient implements ClientModInitializer {
         ContainerCacheManager.get().load();
         StationManager.get().load();
         StockManager.get().load();
+        AttackConfig.get().load();
         PcCommand.register();
         WaypointRenderer.register();
         ContainerCacheRenderer.register();
@@ -48,6 +54,13 @@ public class PlayerControllerClient implements ClientModInitializer {
         // 换维度（传送门）之后先等一会儿再动：服务端还没把落点同步好，马上走容易被拉回去
         ClientTickEvents.END_CLIENT_TICK.register(client -> DimensionWait.tick());
 
+        // 攻击：常驻扫描，不受动作队列影响（见 AttackManager）。放在 tick 末尾：
+        // 这时候这一 tick 的位置 / 朝向都已经定下来了，攻击包发出去不会和移动包打架。
+        ClientTickEvents.END_CLIENT_TICK.register(client -> AttackManager.get().tick());
+
+        // 自动转头：太久没人刷新的请求自动还回去（见 RotateManager）
+        ClientTickEvents.END_CLIENT_TICK.register(client -> RotateManager.get().tick());
+
         // 记录下界传送门边：只有 /pc move <轴> / /pc move face 的终点是传送门时才会武装，
         // 所以这里要一直跑着（传送是服务端做的，得等维度变化才能确认落点）
         ClientTickEvents.END_CLIENT_TICK.register(PortalTracker::tick);
@@ -61,6 +74,12 @@ public class PlayerControllerClient implements ClientModInitializer {
             if (ScreenSuppressor.reset()) {
                 ChatUtils.debug("进世界：已解除容器界面抑制（上次没正常收尾留下的计数）");
             }
+
+            // 换世界 / 重连之后，快捷栏和朝向的占用、服务端 tick 速率的样本都不算数了
+            HotbarManager.get().reset();
+            RotateManager.get().reset();
+            AttackManager.get().reset();
+            ServerTickRate.onJoin();
         });
 
         // /pc account：换账户是分 tick 做的（先换身份下线，再自动重连），这里驱动它

@@ -7,7 +7,6 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
@@ -171,14 +170,6 @@ public final class PlayerUtils {
         double dz = pos.getZ() + 0.5 - eye.getZ();
         double horizontal = Math.sqrt(dx * dx + dz * dz);
         return (float) (-Math.toDegrees(Math.atan2(dy, horizontal)));
-    }
-
-    /** 把玩家（客户端）的朝向转到目标方块上。 */
-    public static void lookAt(BlockPos pos) {
-        ClientPlayerEntity player = player();
-        if (player == null) return;
-        player.setYaw(MathHelper.wrapDegrees(yawTo(pos)));
-        player.setPitch(MathHelper.clamp(pitchTo(pos), -90.0f, 90.0f));
     }
 
     /** 玩家眼睛相对方块中心的方向，也就是应该点击的面。 */
