@@ -8,6 +8,7 @@ import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
+import net.minecraft.command.argument.IdentifierArgumentType;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
@@ -71,7 +72,7 @@ public final class MineCommand {
                                 .suggests((context, builder) -> suggestCorner(context, builder, Direction.Axis.Y))
                                 .then(ClientCommandManager.argument("z2", IntegerArgumentType.integer())
                                     .suggests((context, builder) -> suggestCorner(context, builder, Direction.Axis.Z))
-                                    .then(ClientCommandManager.argument("dim", StringArgumentType.word())
+                                    .then(ClientCommandManager.argument("dim", IdentifierArgumentType.identifier())
                                         .suggests(DimensionSuggestions::suggest)
                                         .executes(MineCommand::startDefault)
                                         .then(ClientCommandManager.argument("list",
@@ -130,11 +131,9 @@ public final class MineCommand {
             IntegerArgumentType.getInteger(context, "y2"),
             IntegerArgumentType.getInteger(context, "z2"));
 
-        String dimension;
-        try {
-            dimension = readDimension(context);
-        } catch (IllegalArgumentException e) {
-            source.sendError(Text.literal(e.getMessage()));
+        String dimension = readDimension(context);
+        if (dimension == null) {
+            source.sendError(Text.literal("没有写维度"));
             return 0;
         }
 
@@ -155,11 +154,16 @@ public final class MineCommand {
         return 1;
     }
 
+    /**
+     * 维度 id。
+     *
+     * <p>参数类型用的是原版的 {@code IdentifierArgumentType} 而不是 {@code StringArgumentType.word()}：
+     * word 只吃 {@code [a-zA-Z0-9_]}，会在 {@code minecraft:overworld} 的冒号那里断掉。
+     * {@code IdentifierArgumentType.getIdentifier(...)} 只收服务端命令源，这里直接 {@code getArgument} 拿。
+     */
     private static String readDimension(CommandContext<FabricClientCommandSource> context) {
-        String text = StringArgumentType.getString(context, "dim").trim();
-        Identifier id = Identifier.tryParse(text);
-        if (id == null) throw new IllegalArgumentException("维度 id 不合法：" + text);
-        return id.toString();
+        Identifier dim = context.getArgument("dim", Identifier.class);
+        return dim == null ? null : dim.toString();
     }
 
     // ------------------------------------------------------------------
