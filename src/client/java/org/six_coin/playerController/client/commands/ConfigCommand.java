@@ -32,6 +32,9 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * /pc config actions wait_ticks_after_dimension_teleport [tick]
  * /pc config actions mending_max_wait_exp_seconds [second]
  * /pc config actions mending_detect_interval_ticks [tick]
+ * /pc config actions mine_simple_range [range]
+ * /pc config actions mine_simple_wall_range [range]
+ * /pc config actions mine_simple_max_blocks_per_tick [blocks]
  * </pre>
  */
 public final class ConfigCommand {
@@ -265,6 +268,53 @@ public final class ConfigCommand {
                             "mending 的检测间隔已设为 "
                                 + PlayerControllerConfig.getMendingDetectIntervalTicks() + " tick"));
                         return 1;
+                    })))
+            .then(ClientCommandManager.literal("mine_simple_range")
+                .executes(context -> {
+                    showMineSimpleRange(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("range",
+                        DoubleArgumentType.doubleArg(PlayerControllerConfig.MIN_MINE_SIMPLE_RANGE,
+                            PlayerControllerConfig.MAX_MINE_SIMPLE_RANGE))
+                    .executes(context -> {
+                        double range = DoubleArgumentType.getDouble(context, "range");
+                        PlayerControllerConfig.setMineSimpleRange(range);
+                        context.getSource().sendFeedback(Text.literal(
+                            "挖掘（看得见的）范围已设为 " + PlayerControllerConfig.getMineSimpleRange() + " 格"));
+                        return 1;
+                    })))
+            .then(ClientCommandManager.literal("mine_simple_wall_range")
+                .executes(context -> {
+                    showMineSimpleWallRange(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("range",
+                        DoubleArgumentType.doubleArg(PlayerControllerConfig.MIN_MINE_SIMPLE_WALL_RANGE,
+                            PlayerControllerConfig.MAX_MINE_SIMPLE_WALL_RANGE))
+                    .executes(context -> {
+                        double range = DoubleArgumentType.getDouble(context, "range");
+                        PlayerControllerConfig.setMineSimpleWallRange(range);
+                        context.getSource().sendFeedback(Text.literal(
+                            "挖掘（隔墙的）范围已设为 " + PlayerControllerConfig.getMineSimpleWallRange() + " 格"));
+                        return 1;
+                    })))
+            .then(ClientCommandManager.literal("mine_simple_max_blocks_per_tick")
+                .executes(context -> {
+                    showMineSimpleMaxBlocks(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("blocks",
+                        IntegerArgumentType.integer(
+                            PlayerControllerConfig.MIN_MINE_SIMPLE_MAX_BLOCKS_PER_TICK,
+                            PlayerControllerConfig.MAX_MINE_SIMPLE_MAX_BLOCKS_PER_TICK))
+                    .executes(context -> {
+                        int blocks = IntegerArgumentType.getInteger(context, "blocks");
+                        PlayerControllerConfig.setMineSimpleMaxBlocksPerTick(blocks);
+                        context.getSource().sendFeedback(Text.literal(
+                            "挖掘每 tick 最多挖的方块数已设为 "
+                                + PlayerControllerConfig.getMineSimpleMaxBlocksPerTick()));
+                        return 1;
                     })));
     }
 
@@ -295,6 +345,12 @@ public final class ConfigCommand {
             + PlayerControllerConfig.getMendingMaxWaitExpSeconds() + " 秒（没有进展就退出检测）"));
         source.sendFeedback(Text.literal("  actions.mending_detect_interval_ticks = "
             + PlayerControllerConfig.getMendingDetectIntervalTicks() + " tick（多久检测一次）"));
+        source.sendFeedback(Text.literal("  actions.mine_simple_range = "
+            + PlayerControllerConfig.getMineSimpleRange() + " 格（挖掘：看得见的）"));
+        source.sendFeedback(Text.literal("  actions.mine_simple_wall_range = "
+            + PlayerControllerConfig.getMineSimpleWallRange() + " 格（挖掘：隔墙的）"));
+        source.sendFeedback(Text.literal("  actions.mine_simple_max_blocks_per_tick = "
+            + PlayerControllerConfig.getMineSimpleMaxBlocksPerTick() + " 个（挖掘：每 tick 最多）"));
         source.sendFeedback(Text.literal("  文件: " + PlayerControllerConfig.configFile()));
         return 1;
     }
@@ -313,6 +369,9 @@ public final class ConfigCommand {
         showWaitAfterTeleport(source);
         showMendingMaxWait(source);
         showMendingDetectInterval(source);
+        showMineSimpleRange(source);
+        showMineSimpleWallRange(source);
+        showMineSimpleMaxBlocks(source);
         return 1;
     }
 
@@ -378,6 +437,24 @@ public final class ConfigCommand {
         source.sendFeedback(Text.literal("  mending_detect_interval_ticks = "
             + PlayerControllerConfig.getMendingDetectIntervalTicks()
             + " tick（mending：多久检测一次，20 tick = 1 秒）"));
+    }
+
+    private static void showMineSimpleRange(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  mine_simple_range = "
+            + PlayerControllerConfig.getMineSimpleRange()
+            + " 格（挖掘：看得见的方块能挖多远）"));
+    }
+
+    private static void showMineSimpleWallRange(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  mine_simple_wall_range = "
+            + PlayerControllerConfig.getMineSimpleWallRange()
+            + " 格（挖掘：被方块挡住的时候还能挖多远）"));
+    }
+
+    private static void showMineSimpleMaxBlocks(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  mine_simple_max_blocks_per_tick = "
+            + PlayerControllerConfig.getMineSimpleMaxBlocksPerTick()
+            + " 个（挖掘：一个 tick 最多挖几个方块）"));
     }
 
     private static int setDebug(CommandContext<FabricClientCommandSource> context, boolean value) {

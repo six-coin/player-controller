@@ -34,7 +34,10 @@ import java.nio.file.Path;
  *     "network_delay_ticks": 2,
  *     "wait_ticks_after_dimension_teleport": 40,
  *     "mending_max_wait_exp_seconds": 30,
- *     "mending_detect_interval_ticks": 20
+ *     "mending_detect_interval_ticks": 20,
+ *     "mine_simple_range": 4.0,
+ *     "mine_simple_wall_range": 4.0,
+ *     "mine_simple_max_blocks_per_tick": 40
  *   }
  * }
  * </pre>
@@ -129,6 +132,21 @@ public final class PlayerControllerConfig {
     public static final int DEFAULT_MENDING_DETECT_INTERVAL_TICKS = 20;
     public static final int MIN_MENDING_DETECT_INTERVAL_TICKS = 1;
     public static final int MAX_MENDING_DETECT_INTERVAL_TICKS = 1200;
+
+    /** 挖掘：看得见的方块能挖多远（单位：方块，默认 {@value #DEFAULT_MINE_SIMPLE_RANGE}）。 */
+    public static final double DEFAULT_MINE_SIMPLE_RANGE = 4.0;
+    public static final double MIN_MINE_SIMPLE_RANGE = 0.5;
+    public static final double MAX_MINE_SIMPLE_RANGE = 64.0;
+
+    /** 挖掘：被别的方块挡住的时候还能挖多远（单位：方块，默认 {@value #DEFAULT_MINE_SIMPLE_WALL_RANGE}）。 */
+    public static final double DEFAULT_MINE_SIMPLE_WALL_RANGE = 4.0;
+    public static final double MIN_MINE_SIMPLE_WALL_RANGE = 0.5;
+    public static final double MAX_MINE_SIMPLE_WALL_RANGE = 64.0;
+
+    /** 挖掘：一个 tick 最多挖几个方块（默认 {@value #DEFAULT_MINE_SIMPLE_MAX_BLOCKS_PER_TICK}）。 */
+    public static final int DEFAULT_MINE_SIMPLE_MAX_BLOCKS_PER_TICK = 40;
+    public static final int MIN_MINE_SIMPLE_MAX_BLOCKS_PER_TICK = 1;
+    public static final int MAX_MINE_SIMPLE_MAX_BLOCKS_PER_TICK = 200;
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -244,6 +262,28 @@ public final class PlayerControllerConfig {
         @SerializedName("mending_detect_interval_ticks")
         private int mendingDetectIntervalTicks = DEFAULT_MENDING_DETECT_INTERVAL_TICKS;
 
+        /**
+         * 挖掘：看得见的方块能挖多远，单位：方块。
+         *
+         * <p>见 {@code mine/MineManager}：{@code /pc mine simple} 扫方块时，
+         * 眼睛到方块中心这条线没被挡住就按这个距离算。
+         */
+        @SerializedName("mine_simple_range")
+        private double mineSimpleRange = DEFAULT_MINE_SIMPLE_RANGE;
+
+        /**
+         * 挖掘：被别的方块挡住的时候还能挖多远，单位：方块。
+         *
+         * <p>和 meteor 的 nuker 一样分「range」和「walls range」两条：
+         * 挡着的方块要求近一点（服务端那边只认距离，看不见也能挖到）。
+         */
+        @SerializedName("mine_simple_wall_range")
+        private double mineSimpleWallRange = DEFAULT_MINE_SIMPLE_WALL_RANGE;
+
+        /** 挖掘：一个 tick 最多挖几个方块（发包挖，数字越大越快）。 */
+        @SerializedName("mine_simple_max_blocks_per_tick")
+        private int mineSimpleMaxBlocksPerTick = DEFAULT_MINE_SIMPLE_MAX_BLOCKS_PER_TICK;
+
         public double moveSpeed() {
             return moveSpeed;
         }
@@ -337,6 +377,32 @@ public final class PlayerControllerConfig {
         public void mendingDetectIntervalTicks(int value) {
             mendingDetectIntervalTicks = Math.min(MAX_MENDING_DETECT_INTERVAL_TICKS,
                 Math.max(MIN_MENDING_DETECT_INTERVAL_TICKS, value));
+        }
+
+        public double mineSimpleRange() {
+            return mineSimpleRange;
+        }
+
+        public void mineSimpleRange(double value) {
+            mineSimpleRange = Math.min(MAX_MINE_SIMPLE_RANGE, Math.max(MIN_MINE_SIMPLE_RANGE, value));
+        }
+
+        public double mineSimpleWallRange() {
+            return mineSimpleWallRange;
+        }
+
+        public void mineSimpleWallRange(double value) {
+            mineSimpleWallRange = Math.min(MAX_MINE_SIMPLE_WALL_RANGE,
+                Math.max(MIN_MINE_SIMPLE_WALL_RANGE, value));
+        }
+
+        public int mineSimpleMaxBlocksPerTick() {
+            return mineSimpleMaxBlocksPerTick;
+        }
+
+        public void mineSimpleMaxBlocksPerTick(int value) {
+            mineSimpleMaxBlocksPerTick = Math.min(MAX_MINE_SIMPLE_MAX_BLOCKS_PER_TICK,
+                Math.max(MIN_MINE_SIMPLE_MAX_BLOCKS_PER_TICK, value));
         }
     }
 
@@ -474,6 +540,36 @@ public final class PlayerControllerConfig {
         instance.save();
     }
 
+    /** 挖掘：看得见的方块能挖多远（格）。 */
+    public static double getMineSimpleRange() {
+        return instance.actions.mineSimpleRange();
+    }
+
+    public static void setMineSimpleRange(double value) {
+        instance.actions.mineSimpleRange(value);
+        instance.save();
+    }
+
+    /** 挖掘：被挡住的时候还能挖多远（格）。 */
+    public static double getMineSimpleWallRange() {
+        return instance.actions.mineSimpleWallRange();
+    }
+
+    public static void setMineSimpleWallRange(double value) {
+        instance.actions.mineSimpleWallRange(value);
+        instance.save();
+    }
+
+    /** 挖掘：一个 tick 最多挖几个方块。 */
+    public static int getMineSimpleMaxBlocksPerTick() {
+        return instance.actions.mineSimpleMaxBlocksPerTick();
+    }
+
+    public static void setMineSimpleMaxBlocksPerTick(int value) {
+        instance.actions.mineSimpleMaxBlocksPerTick(value);
+        instance.save();
+    }
+
     /** 配置目录：config/player-controller/ */
     public static Path configDir() {
         return FabricLoader.getInstance()
@@ -521,7 +617,10 @@ public final class PlayerControllerConfig {
                 + ", wait_ticks_after_dimension_teleport="
                 + instance.actions.waitTicksAfterDimensionTeleport()
                 + ", mending_max_wait_exp_seconds=" + instance.actions.mendingMaxWaitExpSeconds()
-                + ", mending_detect_interval_ticks=" + instance.actions.mendingDetectIntervalTicks() + ")");
+                + ", mending_detect_interval_ticks=" + instance.actions.mendingDetectIntervalTicks()
+                + ", mine_simple_range=" + instance.actions.mineSimpleRange()
+                + ", mine_simple_wall_range=" + instance.actions.mineSimpleWallRange()
+                + ", mine_simple_max_blocks_per_tick=" + instance.actions.mineSimpleMaxBlocksPerTick() + ")");
         } catch (Exception e) {
             instance = new PlayerControllerConfig();
             ChatUtils.error("读取配置文件失败，已使用默认值: " + e.getMessage());

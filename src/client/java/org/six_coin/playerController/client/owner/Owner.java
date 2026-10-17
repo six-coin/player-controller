@@ -10,7 +10,10 @@ package org.six_coin.playerController.client.owner;
  */
 public enum Owner {
 
-    /** 攻击：动快捷栏、动朝向，优先级最低，谁来抢都让。 */
+    /** 挖掘：动快捷栏、动朝向，优先级最低：攻击要打的时候先让给攻击。 */
+    MINE(0),
+
+    /** 攻击：动快捷栏、动朝向，比挖掘强势，抢不过 mending / 备货。 */
     ATTACK(1),
 
     /** mending：只动朝向（打开末影箱），比攻击强势，但抢不过备货。 */

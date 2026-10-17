@@ -19,6 +19,7 @@ import org.six_coin.playerController.client.feature.ServerTickRate;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.mending.MendingConfig;
 import org.six_coin.playerController.client.mending.MendingManager;
+import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.recipe.LocalRecipes;
 import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.stock.station.StationManager;
@@ -65,6 +66,10 @@ public class PlayerControllerClient implements ClientModInitializer {
         // 放在攻击后面：它每一轮会按经验球数量开关攻击，下一 tick 的攻击就能按新的开关来。
         ClientTickEvents.END_CLIENT_TICK.register(client -> MendingManager.get().tick());
 
+        // 挖掘：按 /pc mine simple 选中的区域一直挖（见 MineManager）。放在攻击后面：
+        // 这一 tick 攻击已经占过快捷栏 / 朝向，挖掘按优先级让开，不会把攻击的剑切走。
+        ClientTickEvents.END_CLIENT_TICK.register(client -> MineManager.get().tick());
+
         // 记录下界传送门边：只有 /pc move <轴> / /pc move face 的终点是传送门时才会武装，
         // 所以这里要一直跑着（传送是服务端做的，得等维度变化才能确认落点）
         ClientTickEvents.END_CLIENT_TICK.register(PortalTracker::tick);
@@ -84,6 +89,7 @@ public class PlayerControllerClient implements ClientModInitializer {
             RotateManager.get().reset();
             AttackManager.get().reset();
             MendingManager.get().reset();
+            MineManager.get().reset();
             ServerTickRate.onJoin();
         });
 

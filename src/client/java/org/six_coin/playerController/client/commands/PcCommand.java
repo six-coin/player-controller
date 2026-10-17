@@ -48,13 +48,14 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " dump all_items|inventory|all_tags §8- §7把物品 / 物品栏 / minecraft 物品标签导成 json（config/player-controller/dump/）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " attack ... §8- §7攻击（一直监听，按 profile 挑该打谁）：toggle、profile、show_all_mobs"));
                 source.sendFeedback(Text.literal("§7  /" + name + " mending ... §8- §7经验修补：start；station stand_point|ender_chest set|set_here|set_target|del"));
+        source.sendFeedback(Text.literal("§7  /" + name + " mine ... §8- §7挖掘：cancel 取消所有挖掘任务；simple <x1> <y1> <z1> <x2> <y2> <z2> <dim> [list] 在框里挖方块"));
                 source.sendFeedback(Text.literal("§7  /" + name + " waypoints ... §8- §7路径点 / 边 / 出生点"));
                 source.sendFeedback(Text.literal("§7    §7子命令：show、edit、list、optimize default|radical"));
                 source.sendFeedback(Text.literal("§7    §7  add_waypoint here|target|position <x> <y> <z> <dim> [name]"));
                 source.sendFeedback(Text.literal("§7    §7  name_waypoint here|target|id <id> [name]（不写名字就是删掉名字）"));
                 source.sendFeedback(Text.literal("§7    §7  del_waypoint here|target|id <id>|position <x> <y> <z> <dim>|name <name>"));
                 source.sendFeedback(Text.literal("§7    §7  add_edge <id1> <id2>、del_edge <负数id>、set_spawn <选择器>、del_spawn"));
-                source.sendFeedback(Text.literal("§7  /" + name + " config ... §8- §7配置（debug / world / actions move_speed、max_descent_speed、interaction_range、attack_range、attack_wall_range、anti_kick_delay、anti_kick_off_time、network_delay_ticks、wait_ticks_after_dimension_teleport、mending_max_wait_exp_seconds、mending_detect_interval_ticks）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " config ... §8- §7配置（debug / world / actions move_speed、max_descent_speed、interaction_range、attack_range、attack_wall_range、anti_kick_delay、anti_kick_off_time、network_delay_ticks、wait_ticks_after_dimension_teleport、mending_max_wait_exp_seconds、mending_detect_interval_ticks、mine_simple_range、mine_simple_wall_range、mine_simple_max_blocks_per_tick）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " account [player_id] §8- §7换成名为 player_id 的离线账户：下线后重新加入刚才的世界（不带参数看当前账户）"));
                 source.sendFeedback(Text.literal("§7  item_list 例：§f{\"minecraft:cobblestone\": 65, \"minecraft:grass_block\": 13}"));
                 return 1;
@@ -67,6 +68,7 @@ public final class PcCommand {
             .then(DumpCommand.build())
             .then(AttackCommand.build())
             .then(MendingCommand.build())
+            .then(MineCommand.build())
             .then(WaypointsCommand.build())
             .then(ConfigCommand.build())
             .then(AccountCommand.build());

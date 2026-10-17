@@ -2,6 +2,7 @@ package org.six_coin.playerController.client.stock;
 
 import net.minecraft.client.MinecraftClient;
 import org.six_coin.playerController.client.action.Action;
+import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.util.ChatUtils;
 
 import java.util.List;
@@ -59,6 +60,12 @@ public final class StockTask extends Action {
 
     @Override
     protected void onStart() {
+        // 备货自己会挖方块（见 MineBlockAction），先把挖掘任务收掉：
+        // 两边都要切快捷栏、都要动服务端那边的朝向，一起跑会互相抢
+        if (MineManager.get().cancel()) {
+            ChatUtils.info("备货开始，先取消了正在跑的挖掘任务");
+        }
+
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.world == null || mc.player == null) {
             fail("没有玩家或世界");
