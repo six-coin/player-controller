@@ -10,12 +10,15 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.block.EnderChestBlock;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import org.six_coin.playerController.client.attack.AttackConfig;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerTypes;
+import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.mending.MendingConfig;
 import org.six_coin.playerController.client.mending.MendingManager;
 import org.six_coin.playerController.client.mending.MendingPos;
@@ -42,6 +45,9 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
  *
  * <p>坐标都带维度：set / set_here / set_target 用当前维度，也可以补一个 [dim] 直接写别的维度。
  * x y z 都支持一次 Tab 补齐成准星指着的方块。
+ *
+ * <p>{@code start} 要求快捷栏第一位是一把带经验修补、剩余耐久大于 100 的剑（和攻击挑武器的门槛一样）；
+ * 开始以后手上就切成第一位。第一位和盔甲一样不挪地方。
  *
  * <p>改配置的按钮都是「填命令」（点了只填进聊天栏，回车才生效）；{@code [开始]} 是直接执行的。
  */
@@ -86,6 +92,7 @@ public final class MendingCommand {
 
         sendStandPoint(source);
         sendEnderChest(source);
+        sendFirstSlot(source);
 
         String tempSlot = manager.tempSlotText();
         if (tempSlot != null) {
@@ -137,6 +144,27 @@ public final class MendingCommand {
         if (chest != null) {
             line.append(Text.literal(" "));
             line.append(fillButton("[删掉]", ROOT + "station ender_chest del", "填命令：删掉末影箱"));
+        }
+        source.sendFeedback(line);
+    }
+
+    /** 快捷栏第一位那把剑合不合用（start 的硬性条件之一）。 */
+    private static void sendFirstSlot(FabricClientCommandSource source) {
+        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        if (player == null) return;
+
+        ItemStack sword = player.getInventory().getStack(MendingManager.FIRST_SLOT);
+        String problem = MendingManager.firstSlotProblem(player);
+
+        MutableText line = Text.literal("  第一位（不挪）：");
+        line.append(sword.isEmpty()
+            ? Text.literal("§c空的")
+            : Text.literal(InventoryUtils.describe(sword)));
+        line.append(Text.literal("  "));
+        if (problem == null) {
+            line.append(Text.literal("§a可以打（带经验修补）"));
+        } else {
+            line.append(Text.literal("§c" + problem));
         }
         source.sendFeedback(line);
     }

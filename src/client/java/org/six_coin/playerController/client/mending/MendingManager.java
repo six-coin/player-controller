@@ -6,6 +6,7 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.ExperienceOrbEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
@@ -17,6 +18,7 @@ import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.action.PathMoveAction;
 import org.six_coin.playerController.client.attack.AttackConfig;
+import org.six_coin.playerController.client.attack.AttackManager;
 import org.six_coin.playerController.client.attack.AttackProfile;
 import org.six_coin.playerController.client.attack.AttackProfiles;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
@@ -25,6 +27,7 @@ import org.six_coin.playerController.client.container.ContainerOpener;
 import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
+import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -44,8 +47,9 @@ import java.util.List;
  *
  * <ol>
  *   <li>检查 attack 里有 {@link #PROFILE} 这份 profile（没有就报错，让用户自己建）；</li>
+ *   <li>检查快捷栏第一位是一把带经验修补、剩余耐久 &gt; {@link AttackManager#MIN_DURABILITY} 的剑；</li>
  *   <li>检查玩家脚下是路径点或者某条边（否则既走不过去，也走不回来）；</li>
- *   <li>记下出发的位置和 attack 的开关 / profile（收尾时还原）；</li>
+ *   <li>手上切成第一位那把剑，记下出发的位置和 attack 的开关 / profile（收尾时还原）；</li>
  *   <li>走 {@link PathPlanner} 算出来的路到站立点；</li>
  *   <li>attack 换成 {@link #PROFILE} 并打开；</li>
  *   <li>设了末影箱就打开它（界面一直开着：末影箱里的东西只有界面开着才看得到）；</li>
@@ -60,7 +64,7 @@ import java.util.List;
  *   <li>物品栏（快捷栏、背包、盔甲、副手）和末影箱里还有没有「耐久不满 + 有经验修补」的东西，
  *       一件都没有就退出检测；潜影盒里的东西不处理；</li>
  *   <li>副手空着或者已经修满了，就把副手和临时物品格换回来（有的话），再挑下一件要修的
- *       换到副手（盔甲不动：它们本来就在装备栏里被修）。</li>
+ *       换到副手（第一位那把剑、盔甲都不挪：它们在装备栏里本来就会被修）。</li>
  * </ol>
  *
  * <p>退出检测以后：换回副手 → 关末影箱 → 还原 attack → 走回出发的位置。
@@ -81,6 +85,16 @@ public final class MendingManager {
 
     /** mending 用的 attack profile 名字。 */
     public static final String PROFILE = "mending";
+
+    /**
+     * 快捷栏第一位。
+     *
+     * <p>这一格是常驻的剑：start 的时候要求它是一把带经验修补、剩余耐久
+     * {@code >} {@link AttackManager#MIN_DURABILITY} 的剑（和攻击挑武器的门槛一样），
+     * 开始以后手上就切成它。它和盔甲一样**不挪地方**，也不会被换到副手 ——
+     * 但它自己的磨损一样算在「还有没有要修的」里面。
+     */
+    public static final int FIRST_SLOT = 0;
 
     /** 等末影箱界面出来最多等这么多 tick。 */
     private static final int MAX_OPEN_WAIT_TICKS = 60;
@@ -207,6 +221,32 @@ public final class MendingManager {
         return countOrbs(mc, stand);
     }
 
+    /**
+     * 快捷栏第一位那把剑合不合用（{@code /pc mending} 和 {@code start} 都用它）。
+     *
+     * @return null = 没问题；否则是一句为什么不行
+     */
+    @Nullable
+    public static String firstSlotProblem(ClientPlayerEntity player) {
+        ItemStack sword = player.getInventory().getStack(FIRST_SLOT);
+        if (sword.isEmpty()) {
+            return "快捷栏第一位是空的，要放一把带经验修补的剑";
+        }
+        if (!sword.isIn(ItemTags.SWORDS)) {
+            return "快捷栏第一位不是剑（现在是 " + InventoryUtils.describe(sword) + "）";
+        }
+        if (!MendingItems.hasMending(sword)) {
+            return "快捷栏第一位那把剑没有经验修补（" + InventoryUtils.describe(sword) + "）";
+        }
+
+        int remaining = MendingItems.remainingDurability(sword);
+        if (remaining <= AttackManager.MIN_DURABILITY) {
+            return "快捷栏第一位那把剑剩余耐久 " + remaining + "，要大于 " + AttackManager.MIN_DURABILITY
+                + "（和攻击挑武器的门槛一样）";
+        }
+        return null;
+    }
+
     // ------------------------------------------------------------------
     // /pc mending start
     // ------------------------------------------------------------------
@@ -237,20 +277,24 @@ public final class MendingManager {
                 + "开起来也不会打任何东西（/pc attack show_all_mobs 里点 [添加]）");
         }
 
-        // 2) 玩家脚下必须是路径点或某条边上：既走不过去也走不回来就没意义了
+        // 2) 快捷栏第一位必须是合用的剑（它一直在手上打，所以不挪；门槛和攻击那边一致）
+        String swordProblem = firstSlotProblem(player);
+        if (swordProblem != null) return swordProblem;
+
+        // 3) 玩家脚下必须是路径点或某条边上：既走不过去也走不回来就没意义了
         if (WaypointManager.get().playerStartWaypoint() == null) {
             BlockPos here = PlayerUtils.currentBlockPos();
             return "你现在所在的 " + (here == null ? "?" : here.toShortString())
                 + " 既不是路径点，也不在任何边上，先用 /pc waypoints add_waypoint here 加一个";
         }
 
-        // 3) 站立点
+        // 4) 站立点
         MendingPos stand = MendingConfig.get().standPoint();
         if (stand == null) {
             return "还没设站立点：/pc mending station stand_point set_here";
         }
 
-        // 4) 别的任务在跑就不掺和（移动和容器都是共用的）
+        // 5) 别的任务在跑就不掺和（移动和容器都是共用的）
         if (ActionManager.get().isBusy()) {
             Action busy = ActionManager.get().currentAction();
             return "现在还有别的任务在跑" + (busy == null ? "" : "（" + busy.name() + "）")
@@ -258,6 +302,11 @@ public final class MendingManager {
         }
 
         clearRuntime();
+
+        // 手上先换成第一位那把剑（只切这一次；之后攻击自己还会按需要切）
+        if (HotbarManager.get().request(Owner.MENDING, FIRST_SLOT)) {
+            HotbarManager.get().release(Owner.MENDING);
+        }
 
         // 记下出发的位置和攻击状态，收尾时还原
         returnPos = PlayerUtils.currentBlockPos();
@@ -520,9 +569,9 @@ public final class MendingManager {
      * <p>物品栏直接读 {@link PlayerInventory}：开没开容器界面、开的是哪个界面都不影响
      * （末影箱界面里是没有盔甲格和副手格的，按界面上的格子扫会漏掉它们）。
      *
-     * <p>「能换到副手的」只有快捷栏和背包（盔甲不动，副手已经在修了）；
-     * 但是判断「还没修完」要连盔甲和副手一起算 —— 它们在装备栏里一样会被修，
-     * 修完之前不该退出去。
+     * <p>「能换到副手的」只有快捷栏第 2 格起的 8 格和背包 27 格
+     * （第一位那把剑、盔甲、副手都不挪）；但是判断「还没修完」要连它们一起算 ——
+     * 第一位和盔甲在装备栏里一样会被修，修完之前不该退出去。
      */
     private Scan scan(ClientPlayerEntity player) {
         PlayerInventory inventory = player.getInventory();
@@ -540,8 +589,9 @@ public final class MendingManager {
             repairable++;
             damageSum += MendingItems.damage(stack);
 
-            // 盔甲（36~39）和副手（40）不搬
-            if (index >= InventoryUtils.MAIN_END) continue;
+            // 只搬快捷栏第 2 格起、以及背包 27 格：
+            // 第一位（常驻的剑）和盔甲（36~39）、副手（40）都不挪
+            if (index == FIRST_SLOT || index >= InventoryUtils.MAIN_END) continue;
             if (candidate == null) candidate = new SlotKey(Side.PLAYER, index);
         }
 
