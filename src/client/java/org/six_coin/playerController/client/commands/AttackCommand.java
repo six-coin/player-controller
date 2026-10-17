@@ -22,6 +22,7 @@ import org.six_coin.playerController.client.attack.AttackProfile.Field;
 import org.six_coin.playerController.client.attack.AttackProfile.Rule;
 import org.six_coin.playerController.client.attack.AttackProfiles;
 import org.six_coin.playerController.client.attack.EntityGroups;
+import org.six_coin.playerController.client.compat.MeteorCompat;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 
 import java.util.List;
@@ -110,6 +111,12 @@ public final class AttackCommand {
         }
         source.sendFeedback(Text.literal("  范围：" + PlayerControllerConfig.getAttackRange()
             + " 格（看不见的时候 " + PlayerControllerConfig.getAttackWallRange() + " 格内也打）"));
+        if (MeteorCompat.isLoaded()) {
+            source.sendFeedback(Text.literal("  meteor 的 anti-hunger："
+                + (MeteorCompat.isAntiHungerActive()
+                    ? "§e开着（它把 onGround 报成 false，站着打没有剑气；开着攻击时会被自动关掉）"
+                    : "§a没开")));
+        }
         source.sendFeedback(Text.literal("§7  §f/pc attack toggle [true|false]§7 - 开 / 关（不带值 = 切换）"));
         source.sendFeedback(Text.literal("§7  §f/pc attack profile§7 - 有哪些 profile、切 / 增 / 删"));
         source.sendFeedback(Text.literal("§7  §f/pc attack profile current list§7 - 改当前这一份"));

@@ -14,6 +14,7 @@ import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.util.Hand;
@@ -23,6 +24,7 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.compat.MeteorCompat;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.feature.ServerTickRate;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
@@ -133,6 +135,13 @@ public final class AttackManager {
             return;
         }
 
+        // meteor 的 anti-hunger 会把每个移动包的 onGround 改成 false，服务端就认为我们一直悬空；
+        // 而原版判扫击（剑气）要求 onGround —— 所以开着攻击的时候把它关掉
+        if (MeteorCompat.disableAntiHunger()) {
+            ChatUtils.info("已关掉 meteor 的 anti-hunger：它把 onGround 报成 false，站着打没有剑气");
+            reassertOnGround();
+        }
+
         AttackProfile profile = config.currentProfile();
         if (profile == null) {
             idle(State.NO_PROFILE);
@@ -215,6 +224,22 @@ public final class AttackManager {
         }
         HotbarManager.get().release(Owner.ATTACK);
         RotateManager.get().release(Owner.ATTACK);
+    }
+
+    /**
+     * 把服务端那边记的 onGround 纠正回来（刚关掉 anti-hunger 的时候用）。
+     *
+     * <p>anti-hunger 把之前那些包的 onGround 都改成了 false，而客户端自己的 onGround 没变，
+     * 所以原版不会主动补一个「我在地方」的包；站着不动的时候服务端就一直是悬空状态。
+     * 这里补一个带着真实 onGround 的位置包，服务端立刻就会改过来。
+     */
+    private static void reassertOnGround() {
+        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        if (player == null || player.networkHandler == null) return;
+
+        player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
+            player.getX(), player.getY(), player.getZ(),
+            player.isOnGround(), player.horizontalCollision));
     }
 
     // ------------------------------------------------------------------
