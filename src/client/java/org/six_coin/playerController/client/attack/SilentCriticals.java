@@ -19,17 +19,16 @@ import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
  *
  * <p>注意那个 {@code !isSprinting()}：**跑着打永远不会暴击**，这是原版规则，跟补不补包无关。
  *
- * <p>下面两种情况不补包（补了有害）：
+ * <p>补包的条件见 {@link #canCrit}：站得稳稳的时候才补 —— 站在地上、不在水里、不在岩浆里、
+ * 没在爬、没在滑翔、没骑着东西。
  *
  * <ul>
- *   <li>骑着东西（船 / 矿车 / 马）：位置由载具驱动，自己报位置会被服务端当成「移动异常」，
- *       而且原版本来就不让骑乘状态暴击；</li>
- *   <li>滑翔中：位置和下落是服务端按鞘翅的飞行模型算的，插假位移容易跟飞行速度校验打架
- *       （被拉回去）；而且滑翔时本来就离地 + {@code fallDistance > 0}，原版直接就给暴击。</li>
+ *   <li>水里 / 岩浆里 / 爬着 / 骑着的时候原版本来就不给暴击，补了也白补；</li>
+ *   <li>滑翔和骑乘的时候位置是服务端那边按鞘翅 / 载具算出来的，自己插一个假位移
+ *       会跟它的校验打架（容易被拉回去）。</li>
  * </ul>
  *
- * <p>其余情况（站在地上、泡在水里、在岩浆里、爬梯子）补包都没坏处：水里 / 爬着的时候
- * 原版本来就不给暴击，补了只是白费两个包，攻击照样命中，所以不拦。
+ * <p>不补包的时候这一下老老实实当普通攻击。
  *
  * <p>用哪些生物请看 profile 里那条的 {@code critical}。
  */
@@ -48,12 +47,17 @@ public final class SilentCriticals {
         sendY(mc, 0.0);
     }
 
-    /** 现在补暴击包会不会出事。 */
+    /** 现在这个状态补暴击包合不合适。 */
     public static boolean canCrit(MinecraftClient mc) {
         ClientPlayerEntity player = mc.player;
         if (player == null || player.networkHandler == null) return false;
 
-        return !player.hasVehicle() && !player.isGliding();
+        return player.isOnGround()
+            && !player.isSubmergedInWater()
+            && !player.isInLava()
+            && !player.isClimbing()
+            && !player.isGliding()
+            && !player.hasVehicle();
     }
 
     /** 不带动朝向、只改高度的一个位置包。 */
