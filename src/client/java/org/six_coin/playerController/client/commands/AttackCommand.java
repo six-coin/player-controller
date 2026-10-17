@@ -44,23 +44,27 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
  * /pc attack profile del &lt;名字&gt;                                   删掉一份（正在用的不能删）
  * /pc attack profile current                                       同 current list
  * /pc attack profile current list                                  当前这份的全部设置 + 攻击实体
- * /pc attack profile current auto_switch [true|false]
+ * /pc attack profile current auto_switch true|false
  * /pc attack profile current default_critical|default_ignore_named|default_ignore_passive|
- *                              default_ignore_tamed|default_ignore_baby [true|false]
+ *                              default_ignore_tamed|default_ignore_baby true|false
  * /pc attack profile current entities add &lt;实体 id&gt;
  * /pc attack profile current entities add_batch &lt;组 id&gt;
  * /pc attack profile current entities del &lt;实体 id&gt;
  * /pc attack profile current entities del_batch &lt;组 id&gt;
  * /pc attack profile current entities edit &lt;实体 id&gt;                  看这一只的特殊配置
- * /pc attack profile current entities edit &lt;实体 id&gt; &lt;开关&gt; [toggle|true|false]
- * /pc attack profile current entities edit_batch &lt;组 id&gt; &lt;开关&gt; [toggle|true|false]
+ * /pc attack profile current entities edit &lt;实体 id&gt; &lt;开关&gt; true|false|default
+ * /pc attack profile current entities edit_batch &lt;组 id&gt; &lt;开关&gt; true|false|default
  * /pc attack show_all_mobs                                          所有生物，按组列，批量加 / 删 / 改
  * </pre>
  *
  * <p>改配置的按钮都是「填命令」，回车才生效；只有「看一眼」的按钮（{@code [编辑]}）点了直接执行。
  *
- * <p>不带值的开关一律是**切换**；实体的那几个开关是三态循环
- * （默认 → 开 → 关 → 默认，见 {@link Field#cycle}）。
+ * <p>只有 {@code /pc attack toggle} 不带值就是切换，别的开关一律明写 {@code true|false}。
+ * 实体的那几个开关还多一个 {@code default}（= 这一项不写进 json，跟着 profile 的默认值走），
+ * 所以它们有三种状态：默认 / 开 / 关。
+ *
+ * <p>按钮按当前状态给：只有开关两态的，关着给 {@code [启用]}、开着给 {@code [禁用]}；
+ * 有三态的，开 / 关的时候先给 {@code [默认]} 再给另一个，已经在默认态就给开 / 关两个。
  */
 public final class AttackCommand {
 
@@ -294,11 +298,11 @@ public final class AttackCommand {
 
         source.sendFeedback(Text.literal("§8[§bPC§8]§r §7当前 profile：" + profile.name()
             + "（" + AttackProfiles.file(profile.name()) + "）"));
-        source.sendFeedback(flagLine(ROOT + "profile current auto_switch",
-            "自动切换物品", profile.autoSwitch() ? "开" : "关"));
+        source.sendFeedback(switchLine(ROOT + "profile current auto_switch",
+            "自动切换物品", profile.autoSwitch()));
         for (Field field : Field.values()) {
-            source.sendFeedback(flagLine(ROOT + "profile current " + field.defaultId(),
-                "默认" + field.label(), Field.text(field.getDefault(profile))));
+            source.sendFeedback(switchLine(ROOT + "profile current " + field.defaultId(),
+                "默认" + field.label(), field.getDefault(profile)));
         }
 
         source.sendFeedback(Text.literal("攻击实体：" + profile.rules().size() + " 种"));
@@ -332,58 +336,47 @@ public final class AttackCommand {
     // ------------------------------------------------------------------
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> autoSwitch() {
-        LiteralArgumentBuilder<FabricClientCommandSource> builder =
-            ClientCommandManager.literal("auto_switch")
-                .executes(context -> setAutoSwitch(context, AttackArguments.Toggle.TOGGLE));
-
-        for (AttackArguments.Toggle toggle : AttackArguments.Toggle.values()) {
-            builder.then(ClientCommandManager.literal(toggle.id())
-                .executes(context -> setAutoSwitch(context, toggle)));
-        }
-        return builder;
+        return ClientCommandManager.literal("auto_switch")
+            .then(ClientCommandManager.literal("true")
+                .executes(context -> setAutoSwitch(context, true)))
+            .then(ClientCommandManager.literal("false")
+                .executes(context -> setAutoSwitch(context, false)));
     }
 
-    private static int setAutoSwitch(CommandContext<FabricClientCommandSource> context,
-                                     AttackArguments.Toggle toggle) {
+    private static int setAutoSwitch(CommandContext<FabricClientCommandSource> context, boolean value) {
         FabricClientCommandSource source = context.getSource();
         AttackProfile profile = profileOrError(source);
         if (profile == null) return 0;
 
         boolean before = profile.autoSwitch();
-        boolean after = toggle.apply(before);
-        profile.autoSwitch(after);
+        profile.autoSwitch(value);
         profile.save();
 
         source.sendFeedback(Text.literal("自动切换物品：" + Field.text(before) + " -> "
-            + Field.text(after)));
+            + Field.text(value)));
         return 1;
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> defaultFlag(Field field) {
-        LiteralArgumentBuilder<FabricClientCommandSource> builder =
-            ClientCommandManager.literal(field.defaultId())
-                .executes(context -> setDefault(context, field, AttackArguments.Toggle.TOGGLE));
-
-        for (AttackArguments.Toggle toggle : AttackArguments.Toggle.values()) {
-            builder.then(ClientCommandManager.literal(toggle.id())
-                .executes(context -> setDefault(context, field, toggle)));
-        }
-        return builder;
+        return ClientCommandManager.literal(field.defaultId())
+            .then(ClientCommandManager.literal("true")
+                .executes(context -> setDefault(context, field, true)))
+            .then(ClientCommandManager.literal("false")
+                .executes(context -> setDefault(context, field, false)));
     }
 
     private static int setDefault(CommandContext<FabricClientCommandSource> context, Field field,
-                                  AttackArguments.Toggle toggle) {
+                                  boolean value) {
         FabricClientCommandSource source = context.getSource();
         AttackProfile profile = profileOrError(source);
         if (profile == null) return 0;
 
         boolean before = field.getDefault(profile);
-        boolean after = toggle.apply(before);
-        field.setDefault(profile, after);
+        field.setDefault(profile, value);
         profile.save();
 
         source.sendFeedback(Text.literal("默认" + field.label() + "：" + Field.text(before)
-            + " -> " + Field.text(after)));
+            + " -> " + Field.text(value)));
         return 1;
     }
 
@@ -409,7 +402,7 @@ public final class AttackCommand {
             .then(editBatch());
     }
 
-    /** {@code edit <实体> [开关 [toggle|true|false]]}。 */
+    /** {@code edit <实体> [开关 [true|false|default]]}。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> edit() {
         RequiredArgumentBuilder<FabricClientCommandSource, Identifier> withId =
             ClientCommandManager.argument("entitie_id", AttackArguments.EntityId.entityId())
@@ -417,18 +410,17 @@ public final class AttackCommand {
 
         for (Field field : Field.values()) {
             LiteralArgumentBuilder<FabricClientCommandSource> node =
-                ClientCommandManager.literal(field.id())
-                    .executes(context -> editEntity(context, field, AttackArguments.Toggle.TOGGLE));
-            for (AttackArguments.Toggle toggle : AttackArguments.Toggle.values()) {
-                node.then(ClientCommandManager.literal(toggle.id())
-                    .executes(context -> editEntity(context, field, toggle)));
+                ClientCommandManager.literal(field.id());
+            for (AttackArguments.Value value : AttackArguments.Value.all()) {
+                node.then(ClientCommandManager.literal(value.id())
+                    .executes(context -> editEntity(context, field, value.value())));
             }
             withId.then(node);
         }
         return ClientCommandManager.literal("edit").then(withId);
     }
 
-    /** {@code edit_batch <组> <开关> <toggle|true|false>}。 */
+    /** {@code edit_batch <组> <开关> <true|false|default>}。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> editBatch() {
         RequiredArgumentBuilder<FabricClientCommandSource, EntityGroups.Group> withGroup =
             ClientCommandManager.argument("group_id", AttackArguments.GroupId.groupId());
@@ -436,9 +428,9 @@ public final class AttackCommand {
         for (Field field : Field.values()) {
             LiteralArgumentBuilder<FabricClientCommandSource> node =
                 ClientCommandManager.literal(field.id());
-            for (AttackArguments.Toggle toggle : AttackArguments.Toggle.values()) {
-                node.then(ClientCommandManager.literal(toggle.id())
-                    .executes(context -> editBatch(context, field, toggle)));
+            for (AttackArguments.Value value : AttackArguments.Value.all()) {
+                node.then(ClientCommandManager.literal(value.id())
+                    .executes(context -> editBatch(context, field, value.value())));
             }
             withGroup.then(node);
         }
@@ -556,18 +548,15 @@ public final class AttackCommand {
 
         source.sendFeedback(Text.literal("实体：").append(entityLabel(rule.entitieId())));
         for (Field field : Field.values()) {
-            MutableText line = Text.literal(" ");
-            line.append(fillButton("[修改]", EDIT + "edit " + rule.entitieId() + " " + field.id(),
-                "把「切换" + field.label() + "」的命令填进聊天栏（默认 → 开 → 关 → 默认）"));
-            line.append(Text.literal(" " + field.label() + "：" + Field.text(field.get(rule))));
-            source.sendFeedback(line);
+            source.sendFeedback(threeStateLine(EDIT + "edit " + rule.entitieId() + " " + field.id(),
+                field.label(), field.get(rule)));
         }
         source.sendFeedback(Text.literal("§7  「默认」= 实体上不写这一项，跟着 profile 的默认值走"));
         return 1;
     }
 
     private static int editEntity(CommandContext<FabricClientCommandSource> context, Field field,
-                                  AttackArguments.Toggle toggle) {
+                                  Boolean value) {
         FabricClientCommandSource source = context.getSource();
         AttackProfile profile = profileOrError(source);
         if (profile == null) return 0;
@@ -580,17 +569,16 @@ public final class AttackCommand {
         }
 
         Boolean before = field.get(rule);
-        Boolean after = toggle.apply(before);
-        field.set(rule, after);
+        field.set(rule, value);
         profile.save();
 
         source.sendFeedback(Text.literal(id + " " + field.label() + "：" + Field.text(before)
-            + " -> " + Field.text(after)));
+            + " -> " + Field.text(value)));
         return 1;
     }
 
     private static int editBatch(CommandContext<FabricClientCommandSource> context, Field field,
-                                 AttackArguments.Toggle toggle) {
+                                 Boolean value) {
         FabricClientCommandSource source = context.getSource();
         AttackProfile profile = profileOrError(source);
         if (profile == null) return 0;
@@ -610,7 +598,7 @@ public final class AttackCommand {
                 skipped++;
                 continue;
             }
-            field.set(rule, toggle.apply(field.get(rule)));
+            field.set(rule, value);
             changed++;
         }
         if (changed == 0) {
@@ -619,8 +607,9 @@ public final class AttackCommand {
         }
         profile.save();
 
-        source.sendFeedback(Text.literal("已改「" + group.label() + "」里的 " + changed + " 种生物的"
-            + field.label() + "（组里还有 " + skipped + " 种不在列表里，跳过）"));
+        source.sendFeedback(Text.literal("已把「" + group.label() + "」里 " + changed + " 种生物的"
+            + field.label() + "设成「" + Field.text(value) + "」"
+            + "（组里还有 " + skipped + " 种不在列表里，跳过）"));
         return 1;
     }
 
@@ -656,7 +645,7 @@ public final class AttackCommand {
                 "把「" + group.label() + "」整组移出攻击实体"));
             head.append(Text.literal(" "));
             head.append(fillButton("[批量编辑]", EDIT + "edit_batch " + group.id() + " ",
-                "把「批量改这一组」的命令填进聊天栏，后面再补开关和 toggle/true/false"));
+                "把「批量改这一组」的命令填进聊天栏，后面再补开关和 true/false/default"));
             head.append(Text.literal(" " + group.label() + " (" + group.id() + ")"));
             source.sendFeedback(head);
 
@@ -683,12 +672,50 @@ public final class AttackCommand {
     // 小工具
     // ------------------------------------------------------------------
 
-    /** 「[切换] 自动切换物品：开」：点了把切换的命令填进聊天栏。 */
-    private static MutableText flagLine(String command, String label, String value) {
+    /**
+     * 「[启用] 自动切换物品：关」这种只有开 / 关的配置项：
+     * 现在是关就给 {@code [启用]}，是开就给 {@code [禁用]}。
+     */
+    private static MutableText switchLine(String command, String label, boolean value) {
         MutableText line = Text.literal(" ");
-        line.append(fillButton("[切换]", command,
-            "把「切换" + label + "」的命令填进聊天栏，回车生效"));
-        line.append(Text.literal(" " + label + "：" + value));
+        if (value) {
+            line.append(fillButton("[禁用]", command + " false",
+                "把「关掉" + label + "」的命令填进聊天栏，回车生效"));
+        } else {
+            line.append(fillButton("[启用]", command + " true",
+                "把「打开" + label + "」的命令填进聊天栏，回车生效"));
+        }
+        line.append(Text.literal(" " + label + "：" + Field.text(value)));
+        return line;
+    }
+
+    /**
+     * 「[默认] [禁用] 忽略命名：开」这种有默认 / 开 / 关三态的配置项。
+     *
+     * <p>已经是开 / 关的时候，前面还给一个 {@code [默认]}（回到跟随默认值）；
+     * 已经在默认态的时候不给 {@code [默认]}（没意义），只给开 / 关两个。
+     */
+    private static MutableText threeStateLine(String command, String label,
+                                             @Nullable Boolean value) {
+        MutableText line = Text.literal(" ");
+
+        if (value != null) {
+            line.append(fillButton("[默认]", command + " default",
+                "把「" + label + " 回到跟着默认值走」的命令填进聊天栏，回车生效"));
+            line.append(Text.literal(" "));
+        }
+
+        if (value == null || !value) {
+            line.append(fillButton("[启用]", command + " true",
+                "把「打开" + label + "」的命令填进聊天栏，回车生效"));
+        }
+        if (value == null || value) {
+            if (value == null) line.append(Text.literal(" "));
+            line.append(fillButton("[禁用]", command + " false",
+                "把「关掉" + label + "」的命令填进聊天栏，回车生效"));
+        }
+
+        line.append(Text.literal(" " + label + "：" + Field.text(value)));
         return line;
     }
 

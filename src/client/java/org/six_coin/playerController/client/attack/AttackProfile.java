@@ -132,17 +132,6 @@ public final class AttackProfile {
         // 「默认 / 开 / 关」这三态怎么表示
         // --------------------------------------------------------------
 
-        /**
-         * 三态往后转一格：默认 → 开 → 关 → 默认。
-         *
-         * <p>「默认」表示实体上不写这个键，跟着 {@code default_*} 走。
-         */
-        @Nullable
-        public static Boolean cycle(@Nullable Boolean current) {
-            if (current == null) return Boolean.TRUE;
-            return current ? Boolean.FALSE : null;
-        }
-
         /** 显示成「开 / 关 / 默认」。 */
         public static String text(@Nullable Boolean value) {
             if (value == null) return "默认";

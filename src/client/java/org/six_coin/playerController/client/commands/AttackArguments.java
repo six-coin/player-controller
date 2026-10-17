@@ -12,16 +12,16 @@ import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import org.jetbrains.annotations.Nullable;
-import org.six_coin.playerController.client.attack.AttackProfile;
 import org.six_coin.playerController.client.attack.EntityGroups;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
 /**
  * {@code /pc attack ...} 专用的两三个参数类型（实体 id、组 id）和取值枚举。
  *
- * <p>开关名和 {@code toggle|true|false} 都是命令树里的字面量，不走参数类型，
+ * <p>开关名和 {@code true|false|default} 都是命令树里的字面量，不走参数类型，
  * 这样 tab 补全和「写错了直接不认」都是白送的。
  */
 public final class AttackArguments {
@@ -137,43 +137,43 @@ public final class AttackArguments {
     }
 
     // ------------------------------------------------------------------
-    // toggle / true / false
+    // true / false / default
     // ------------------------------------------------------------------
 
-    /** 一个开关的新取值。 */
-    public enum Toggle {
+    /**
+     * 一个开关的新取值。
+     *
+     * <p>{@code true} / {@code false} 谁都能用；{@code default} 只有
+     * 「默认 / 开 / 关」三态的那些（实体上的 ignore_* 和 critical）才有，
+     * 意思是把这一项从 json 里去掉、跟着 profile 的默认值走。
+     */
+    public enum Value {
 
-        TOGGLE("toggle"),
-        ON("true"),
-        OFF("false");
+        TRUE("true", Boolean.TRUE),
+        FALSE("false", Boolean.FALSE),
+        DEFAULT("default", null);
 
         private final String id;
+        @Nullable
+        private final Boolean value;
 
-        Toggle(String id) {
+        Value(String id, @Nullable Boolean value) {
             this.id = id;
+            this.value = value;
         }
 
         public String id() {
             return id;
         }
 
-        /** 作用在「默认 / 开 / 关」这种三态上：默认 → 开 → 关 → 默认。 */
+        /** {@code default} 是 null（= 这一项不写进 json）。 */
         @Nullable
-        public Boolean apply(@Nullable Boolean current) {
-            return switch (this) {
-                case TOGGLE -> AttackProfile.Field.cycle(current);
-                case ON -> Boolean.TRUE;
-                case OFF -> Boolean.FALSE;
-            };
+        public Boolean value() {
+            return value;
         }
 
-        /** 作用在只有开 / 关两态的开关上。 */
-        public boolean apply(boolean current) {
-            return switch (this) {
-                case TOGGLE -> !current;
-                case ON -> true;
-                case OFF -> false;
-            };
+        public static List<Value> all() {
+            return List.of(values());
         }
     }
 }

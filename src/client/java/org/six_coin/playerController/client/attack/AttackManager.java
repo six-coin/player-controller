@@ -6,7 +6,11 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.Tameable;
-import net.minecraft.entity.Targeter;
+import net.minecraft.entity.mob.EndermanEntity;
+import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.mob.PiglinEntity;
+import net.minecraft.entity.mob.ZombifiedPiglinEntity;
+import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
@@ -267,10 +271,8 @@ public final class AttackManager {
             return false;
         }
 
-        // 玩家不受「忽略被动」影响：玩家不会「对你有仇恨」，那这条一开就永远不打人了
-        if (!(entity instanceof PlayerEntity)
-            && profile.effective(AttackProfile.Field.IGNORE_PASSIVE, rule)
-            && !isHostileTowards(entity, player)) {
+        // 「忽略没有仇恨的被动生物」：只特判下面这几种（和 meteor 的 killaura 一致），别的照打
+        if (profile.effective(AttackProfile.Field.IGNORE_PASSIVE, rule) && isIdlePassive(entity)) {
             return false;
         }
 
@@ -316,9 +318,29 @@ public final class AttackManager {
         ).getType() == HitResult.Type.MISS;
     }
 
-    /** 这东西现在对你有仇恨吗（有目标，而且目标就是你）。 */
-    private static boolean isHostileTowards(LivingEntity entity, ClientPlayerEntity player) {
-        return entity instanceof Targeter targeter && targeter.getTarget() == player;
+    /**
+     * 这是「没有仇恨的被动生物」吗（{@code ignore_passive} 一开就不打它）。
+     *
+     * <p>和 meteor 的 killaura 一样，只特判这几种：
+     *
+     * <ul>
+     *   <li>末影人：没被激怒（没瞪着你看）的时候不打；</li>
+     *   <li>猪灵 / 僵尸猪灵 / 狼：没有攻击目标的时候不打。</li>
+     * </ul>
+     *
+     * <p>别的生物（牛羊、村民、铁傀儡…）不在这张表里，一律算「不是被动的」，
+     * 也就是 profile 说打就打 —— 玩家同理。
+     */
+    private static boolean isIdlePassive(LivingEntity entity) {
+        if (entity instanceof EndermanEntity enderman) {
+            return !enderman.isAngry();
+        }
+        if (entity instanceof PiglinEntity
+            || entity instanceof ZombifiedPiglinEntity
+            || entity instanceof WolfEntity) {
+            return !((MobEntity) entity).isAttacking();
+        }
+        return false;
     }
 
     private static boolean isTamedBy(LivingEntity entity, ClientPlayerEntity player) {
