@@ -45,6 +45,7 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " stock add_task|del_task <名字>、/" + name + " stock task <名字> generate_materials_list|start_collect"));
                 source.sendFeedback(Text.literal("§7    §7generate_materials_list 把 litematica 导出的 original.json 处理成 materials.json；start_collect 开始备货（预检查 → 取货 → 分盒重装 → 合成）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " materials ... §8- §7材料清单配置（terminal_items、recipe_preferences、tag_preferences、ingredient_preferences、replace_materials）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " dump all_items|inventory|all_tags §8- §7把物品 / 物品栏 / minecraft 物品标签导成 json（config/player-controller/dump/）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " waypoints ... §8- §7路径点 / 边 / 出生点"));
                 source.sendFeedback(Text.literal("§7    §7子命令：show、edit、list、optimize default|radical"));
                 source.sendFeedback(Text.literal("§7    §7  add_waypoint here|target|position <x> <y> <z> <dim> [name]"));
@@ -61,6 +62,7 @@ public final class PcCommand {
             .then(RecipeCommand.build())
             .then(StockCommand.build())
             .then(MaterialsCommand.build())
+            .then(DumpCommand.build())
             .then(WaypointsCommand.build())
             .then(ConfigCommand.build())
             .then(AccountCommand.build());
