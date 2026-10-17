@@ -394,7 +394,8 @@ public final class MaterialsRecipes {
                 continue;
             }
             if (slot.tag() != null) {
-                Item item = config.tagPreference(slot.tag());
+                // 标签里只有一个物品就直接用它，没什么可决定的
+                Item item = decidedTagItem(slot.tag(), config);
                 if (item == null) {
                     return new Decision(null, new Problem(ProblemKind.UNDECIDED_TAG, null,
                         slot.tag(), List.of(), null), List.of());
@@ -438,5 +439,23 @@ public final class MaterialsRecipes {
             ChatUtils.debug("读标签 " + tag.id() + " 失败：" + t);
         }
         return items;
+    }
+
+    /**
+     * 这个标签现在用哪个物品。
+     *
+     * <ul>
+     *   <li>{@code tag_preferences} 里写了就用它；</li>
+     *   <li>没写、而标签里**只有一个**物品，就直接用那个（没得选，用不着问用户）；</li>
+     *   <li>其余情况返回 null —— 调用方按「未决定的标签」报错。</li>
+     * </ul>
+     */
+    @Nullable
+    public static Item decidedTagItem(TagKey<Item> tag, MaterialsConfig config) {
+        Item preferred = config.tagPreference(tag);
+        if (preferred != null) return preferred;
+
+        List<Item> members = tagItems(tag);
+        return members.size() == 1 ? members.getFirst() : null;
     }
 }

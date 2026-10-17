@@ -8,6 +8,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.Item;
 import net.minecraft.registry.tag.TagKey;
 import net.minecraft.text.ClickEvent;
+import net.minecraft.text.HoverEvent;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -121,30 +122,44 @@ public final class MaterialsCommand {
         return 1;
     }
 
-    /** 生成失败时的汇总（每一行都能点，点了自动填好对应的命令）。 */
+    /**
+     * 生成失败时的汇总。
+     *
+     * <p>每一行的 {@code [处理]} 都不一样：「要你选一个」的那几种（多种合成方式、未决定的标签、
+     * 未决定的原料）点一下**直接执行**对应的 {@code show}，把可以选的东西列出来；
+     * 「只有一条路可走」的（循环、树太大）点一下把 {@code terminal_items add} 填进聊天栏，
+     * 回车才真的改配置（改配置这件事不替用户按下去）。
+     */
     private static void sendIssues(FabricClientCommandSource source, String task,
                                    MaterialsGenerator.Result result) {
         source.sendError(Text.literal("材料列表生成失败：" + result.issues().size() + " 处"));
         for (MaterialTreeBuilder.Issue issue : result.issues()) {
             MutableText line = Text.literal(" ");
-            line.append(button("[处理]", commandFor(issue)));
+            line.append(issueButton(issue));
             line.append(Text.literal(" "));
             line.append(describeIssue(issue));
             source.sendFeedback(line);
         }
-        source.sendFeedback(Text.literal("§7改完配置再跑一次 §f/pc stock task " + task
+        source.sendFeedback(Text.literal("§7金色的点了填命令（回车确认）、"
+            + "§b浅蓝色的点了直接列出可以选什么§7；改完再跑一次 §f/pc stock task " + task
             + " generate_materials_list§7（这次没有写 materials.json）"));
     }
 
-    /** 这个问题点一下要填什么命令。 */
-    private static String commandFor(MaterialTreeBuilder.Issue issue) {
+    /** 这一行的 {@code [处理]}。 */
+    private static MutableText issueButton(MaterialTreeBuilder.Issue issue) {
         String item = MaterialsConfig.itemId(issue.item());
         return switch (issue.kind()) {
-            case LOOP -> ROOT + "terminal_items add " + item;
-            case AMBIGUOUS, BAD_PREFERENCE -> ROOT + "recipe_preferences add " + item + " ";
-            case UNDECIDED_TAG -> ROOT + "tag_preferences add " + MaterialsConfig.tagId(issue.tag()) + " ";
-            case UNDECIDED_INGREDIENT -> ROOT + "ingredient_preferences add " + issue.detail() + " ";
-            case TOO_BIG -> ROOT + "terminal_items add " + item;
+            case LOOP, TOO_BIG -> fillButton("[处理]", ROOT + "terminal_items add " + item,
+                "把「" + item + " 到此为止、不再往里追溯」的命令填进聊天栏，回车生效");
+            case AMBIGUOUS, BAD_PREFERENCE -> runButton("[处理]",
+                ROOT + "recipe_preferences show " + item,
+                "直接列出 " + item + " 有哪些配方可以选");
+            case UNDECIDED_TAG -> runButton("[处理]",
+                ROOT + "tag_preferences show " + MaterialsConfig.tagId(issue.tag()),
+                "直接列出 " + MaterialsConfig.tagId(issue.tag()) + " 里有哪些物品可以选");
+            case UNDECIDED_INGREDIENT -> runButton("[处理]",
+                ROOT + "ingredient_preferences show " + issue.detail(),
+                "直接列出 " + issue.detail() + " 这一格有哪些物品可以选");
         };
     }
 
@@ -292,8 +307,9 @@ public final class MaterialsCommand {
             Identifier id = recipe.id();
 
             MutableText head = Text.literal("[" + (i + 1) + "] ").formatted(Formatting.GOLD);
-            head.append(button("[选择该配方]",
-                ROOT + "recipe_preferences add " + MaterialsConfig.itemId(result) + " " + id));
+            head.append(fillButton("[选择该配方]",
+                ROOT + "recipe_preferences add " + MaterialsConfig.itemId(result) + " " + id,
+                "把「" + MaterialsConfig.itemId(result) + " 用 " + id + " 这条配方」的命令填进聊天栏，回车生效"));
             head.append(Text.literal(" ").append(gray("(" + id + ")", id.toString())));
             if (id.equals(preferred)) head.append(Text.literal(" §a（当前选择）"));
             source.sendFeedback(head);
@@ -319,13 +335,20 @@ public final class MaterialsCommand {
             if (slot.isEmpty()) continue;
 
             if (slot.tag() != null) {
-                Item used = config.tagPreference(slot.tag());
+                Item used = MaterialsRecipes.decidedTagItem(slot.tag(), config);
                 String tag = MaterialsConfig.tagId(slot.tag());
                 String key = used == null ? "tag:" + tag : "item:" + MaterialsConfig.itemId(used);
                 counts.merge(key, 1, Integer::sum);
-                descriptions.putIfAbsent(key, used == null
-                    ? Text.literal(tag + "（还没定用哪个物品）").formatted(Formatting.GRAY)
-                    : itemLabel(used).append(Text.literal(" 来自 " + tag).formatted(Formatting.GRAY)));
+                if (used == null) {
+                    descriptions.putIfAbsent(key,
+                        Text.literal(tag + "（还没定用哪个物品）").formatted(Formatting.GRAY));
+                } else {
+                    // 没配偏好也会定下来，说明这个标签里只有一个物品
+                    String why = config.tagPreference(slot.tag()) == null
+                        ? "（标签里只有这一个物品）" : "";
+                    descriptions.putIfAbsent(key, itemLabel(used)
+                        .append(Text.literal(" 来自 " + tag + why).formatted(Formatting.GRAY)));
+                }
                 continue;
             }
             if (slot.items().size() == 1) {
@@ -438,16 +461,24 @@ public final class MaterialsCommand {
 
         MaterialsConfig config = MaterialsConfig.load();
         Item current = config.tagPreference(tag);
+        if (items.size() == 1) {
+            source.sendFeedback(Text.literal("§7（这个标签里只有一个物品，不配也会直接用它）"));
+        }
         source.sendFeedback(Text.literal("可用物品："));
 
         int shown = 0;
         for (Item item : items) {
             if (shown++ >= MAX_LINES) break;
             MutableText line = Text.literal(" ");
-            line.append(button("[选择该物品]",
-                ROOT + "tag_preferences add " + tagId + " " + MaterialsConfig.itemId(item)));
+            line.append(fillButton("[选择该物品]",
+                ROOT + "tag_preferences add " + tagId + " " + MaterialsConfig.itemId(item),
+                "把「" + tagId + " 用 " + MaterialsConfig.itemId(item) + "」的命令填进聊天栏，回车生效"));
             line.append(Text.literal(" ").append(itemLabel(item)));
-            if (item == current) line.append(Text.literal(" §a（当前选择）"));
+            if (item == current) {
+                line.append(Text.literal(" §a（当前选择）"));
+            } else if (items.size() == 1) {
+                line.append(Text.literal(" §7（没配也用它）"));
+            }
             source.sendFeedback(line);
         }
         if (items.size() > MAX_LINES) {
@@ -539,8 +570,9 @@ public final class MaterialsCommand {
 
         for (Item item : items) {
             MutableText line = Text.literal(" ");
-            line.append(button("[选择该物品]",
-                ROOT + "ingredient_preferences add " + key + " " + MaterialsConfig.itemId(item)));
+            line.append(fillButton("[选择该物品]",
+                ROOT + "ingredient_preferences add " + key + " " + MaterialsConfig.itemId(item),
+                "把「" + key + " 这一格用 " + MaterialsConfig.itemId(item) + "」的命令填进聊天栏，回车生效"));
             line.append(Text.literal(" ").append(itemLabel(item)));
             if (item == current) line.append(Text.literal(" §a（当前选择）"));
             source.sendFeedback(line);
@@ -671,11 +703,21 @@ public final class MaterialsCommand {
     // ------------------------------------------------------------------
 
     /** 可点的按钮：点了把这个命令填进聊天栏（不直接执行）。 */
-    private static MutableText button(String label, String command) {
+    private static MutableText fillButton(String label, String command, String hover) {
         return Text.literal(label).styled(style -> style
             .withColor(Formatting.GOLD)
             .withUnderline(true)
+            .withHoverEvent(new HoverEvent.ShowText(Text.literal(hover)))
             .withClickEvent(new ClickEvent.SuggestCommand(command)));
+    }
+
+    /** 可点的按钮：点了直接执行（只看不改的命令才用这个）。 */
+    private static MutableText runButton(String label, String command, String hover) {
+        return Text.literal(label).styled(style -> style
+            .withColor(Formatting.AQUA)
+            .withUnderline(true)
+            .withHoverEvent(new HoverEvent.ShowText(Text.literal(hover)))
+            .withClickEvent(new ClickEvent.RunCommand(command)));
     }
 
     /** 灰色的 id，点了复制。 */
