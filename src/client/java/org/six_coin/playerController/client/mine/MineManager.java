@@ -39,6 +39,7 @@ import java.util.List;
  * <ul>
  *   <li>手上这件工具附近还挖得动方块，就一直用它挖（哪怕更近的方块要别的工具）；</li>
  *   <li>只有「附近已经一个都挖不动了」才换，换成最近那个方块要的工具；</li>
+ *   <li>换完之后先空 {@code mine_tool_switch_interval_ticks}（默认 4）个 tick 再动手；</li>
  *   <li>发包之前再确认一次：只对**触及范围内**而且**手上这件工具挖得动**的方块发破坏请求。</li>
  * </ul>
  * 切得越少，客户端和服务端越不容易对不上（来回切工具那套会把两边的挖掘状态搅乱）。
@@ -66,6 +67,7 @@ public final class MineManager {
         NO_SUITABLE_TOOL("最近的方块要的工具，快捷栏里没有"),
         HOTBAR_DENIED("快捷栏被别的功能占着，这次没切工具"),
         ROTATE_DENIED("朝向被别的功能占着，这次没挖"),
+        SWITCH_WAIT("刚换完工具，等一会儿再挖"),
         MINING("正在挖");
 
         private final String text;
@@ -95,6 +97,9 @@ public final class MineManager {
 
     /** 这一 tick 挖了几个。 */
     private int lastTickCount;
+
+    /** 刚换完工具，还要空几个 tick 才动手（见 {@code mine_tool_switch_interval_ticks}）。 */
+    private int switchCooldown;
 
     /** 快捷栏 / 朝向现在是不是我们占着（还的时候用）。 */
     private boolean hotbarHeld;
@@ -146,6 +151,7 @@ public final class MineManager {
         this.target = null;
         this.targetTool = null;
         this.lastTickCount = 0;
+        this.switchCooldown = 0;
         ChatUtils.debug("开始挖掘任务：" + region.describe());
     }
 
@@ -159,6 +165,7 @@ public final class MineManager {
         target = null;
         targetTool = null;
         lastTickCount = 0;
+        switchCooldown = 0;
         release();
         return true;
     }
@@ -170,6 +177,7 @@ public final class MineManager {
         target = null;
         targetTool = null;
         lastTickCount = 0;
+        switchCooldown = 0;
         MineTools.clearCache();
         release();
     }
@@ -221,6 +229,14 @@ public final class MineManager {
             return;
         }
 
+        // 刚换完工具：先空几个 tick 再动手，让服务端那边的选中格先稳定下来
+        if (switchCooldown > 0) {
+            switchCooldown--;
+            lastTickCount = 0;
+            setState(State.SWITCH_WAIT);
+            return;
+        }
+
         List<BlockPos> candidates = collect(mc, player);
         if (candidates.isEmpty()) {
             clearTarget();
@@ -267,7 +283,18 @@ public final class MineManager {
                 }
                 hotbarHeld = true;
                 held = desired;
+                target = nearest;
+                targetTool = desired;
                 ChatUtils.debug("挖掘：手上这件工具挖不动附近的方块了，换成" + desired.label());
+
+                // 换完工具先等一会儿（换工具这一 tick 也算一 tick）
+                int wait = PlayerControllerConfig.getMineToolSwitchIntervalTicks();
+                if (wait > 0) {
+                    switchCooldown = wait - 1;
+                    lastTickCount = 0;
+                    setState(State.SWITCH_WAIT);
+                    return;
+                }
             }
         }
 

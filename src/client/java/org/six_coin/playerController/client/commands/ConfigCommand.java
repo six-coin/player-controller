@@ -36,6 +36,7 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * /pc config actions mine_simple_range [range]
  * /pc config actions mine_simple_wall_range [range]
  * /pc config actions mine_simple_max_blocks_per_tick [blocks]
+ * /pc config actions mine_tool_switch_interval_ticks [tick]
  * </pre>
  */
 public final class ConfigCommand {
@@ -317,6 +318,23 @@ public final class ConfigCommand {
                             "挖掘每 tick 最多挖的方块数已设为 "
                                 + PlayerControllerConfig.getMineSimpleMaxBlocksPerTick()));
                         return 1;
+                    })))
+            .then(ClientCommandManager.literal("mine_tool_switch_interval_ticks")
+                .executes(context -> {
+                    showMineToolSwitchInterval(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("ticks",
+                        IntegerArgumentType.integer(
+                            PlayerControllerConfig.MIN_MINE_TOOL_SWITCH_INTERVAL_TICKS,
+                            PlayerControllerConfig.MAX_MINE_TOOL_SWITCH_INTERVAL_TICKS))
+                    .executes(context -> {
+                        int ticks = IntegerArgumentType.getInteger(context, "ticks");
+                        PlayerControllerConfig.setMineToolSwitchIntervalTicks(ticks);
+                        context.getSource().sendFeedback(Text.literal(
+                            "挖掘换工具后的等待已设为 "
+                                + PlayerControllerConfig.getMineToolSwitchIntervalTicks() + " tick"));
+                        return 1;
                     })));
     }
 
@@ -353,6 +371,8 @@ public final class ConfigCommand {
             + PlayerControllerConfig.getMineSimpleWallRange() + " 格（挖掘：隔墙的）"));
         source.sendFeedback(Text.literal("  actions.mine_simple_max_blocks_per_tick = "
             + PlayerControllerConfig.getMineSimpleMaxBlocksPerTick() + " 个（挖掘：每 tick 最多）"));
+        source.sendFeedback(Text.literal("  actions.mine_tool_switch_interval_ticks = "
+            + PlayerControllerConfig.getMineToolSwitchIntervalTicks() + " tick（挖掘：换完工具等多久）"));
         source.sendFeedback(Text.literal("  文件: " + PlayerControllerConfig.configFile()));
         return 1;
     }
@@ -374,6 +394,7 @@ public final class ConfigCommand {
         showMineSimpleRange(source);
         showMineSimpleWallRange(source);
         showMineSimpleMaxBlocks(source);
+        showMineToolSwitchInterval(source);
         return 1;
     }
 
@@ -457,6 +478,12 @@ public final class ConfigCommand {
         source.sendFeedback(Text.literal("  mine_simple_max_blocks_per_tick = "
             + PlayerControllerConfig.getMineSimpleMaxBlocksPerTick()
             + " 个（挖掘：一个 tick 最多挖几个方块）"));
+    }
+
+    private static void showMineToolSwitchInterval(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  mine_tool_switch_interval_ticks = "
+            + PlayerControllerConfig.getMineToolSwitchIntervalTicks()
+            + " tick（挖掘：换完工具之后空这么多 tick 再动手，0 = 不等）"));
     }
 
     private static int setDebug(CommandContext<FabricClientCommandSource> context, boolean value) {

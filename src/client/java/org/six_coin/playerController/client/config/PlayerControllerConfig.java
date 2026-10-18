@@ -37,7 +37,8 @@ import java.nio.file.Path;
  *     "mending_detect_interval_ticks": 20,
  *     "mine_simple_range": 4.0,
  *     "mine_simple_wall_range": 4.0,
- *     "mine_simple_max_blocks_per_tick": 40
+ *     "mine_simple_max_blocks_per_tick": 40,
+ *     "mine_tool_switch_interval_ticks": 4
  *   }
  * }
  * </pre>
@@ -147,6 +148,16 @@ public final class PlayerControllerConfig {
     public static final int DEFAULT_MINE_SIMPLE_MAX_BLOCKS_PER_TICK = 40;
     public static final int MIN_MINE_SIMPLE_MAX_BLOCKS_PER_TICK = 1;
     public static final int MAX_MINE_SIMPLE_MAX_BLOCKS_PER_TICK = 200;
+
+    /**
+     * 挖掘：换完工具之后要空多少 tick 才继续动手（默认
+     * {@value #DEFAULT_MINE_TOOL_SWITCH_INTERVAL_TICKS}）。
+     *
+     * <p>换工具那一 tick 连着后面这些 tick 都不发包，让服务端那边的选中格先稳定下来。
+     */
+    public static final int DEFAULT_MINE_TOOL_SWITCH_INTERVAL_TICKS = 4;
+    public static final int MIN_MINE_TOOL_SWITCH_INTERVAL_TICKS = 0;
+    public static final int MAX_MINE_TOOL_SWITCH_INTERVAL_TICKS = 200;
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -284,6 +295,15 @@ public final class PlayerControllerConfig {
         @SerializedName("mine_simple_max_blocks_per_tick")
         private int mineSimpleMaxBlocksPerTick = DEFAULT_MINE_SIMPLE_MAX_BLOCKS_PER_TICK;
 
+        /**
+         * 挖掘：换完工具之后空多少 tick 再动手。
+         *
+         * <p>换工具那一 tick 和后面这几个 tick 都只切快捷栏、不发破坏包，
+         * 免得服务端还没把选中格换过来就收到挖掘请求。
+         */
+        @SerializedName("mine_tool_switch_interval_ticks")
+        private int mineToolSwitchIntervalTicks = DEFAULT_MINE_TOOL_SWITCH_INTERVAL_TICKS;
+
         public double moveSpeed() {
             return moveSpeed;
         }
@@ -403,6 +423,15 @@ public final class PlayerControllerConfig {
         public void mineSimpleMaxBlocksPerTick(int value) {
             mineSimpleMaxBlocksPerTick = Math.min(MAX_MINE_SIMPLE_MAX_BLOCKS_PER_TICK,
                 Math.max(MIN_MINE_SIMPLE_MAX_BLOCKS_PER_TICK, value));
+        }
+
+        public int mineToolSwitchIntervalTicks() {
+            return mineToolSwitchIntervalTicks;
+        }
+
+        public void mineToolSwitchIntervalTicks(int value) {
+            mineToolSwitchIntervalTicks = Math.min(MAX_MINE_TOOL_SWITCH_INTERVAL_TICKS,
+                Math.max(MIN_MINE_TOOL_SWITCH_INTERVAL_TICKS, value));
         }
     }
 
@@ -570,6 +599,16 @@ public final class PlayerControllerConfig {
         instance.save();
     }
 
+    /** 挖掘：换完工具之后空多少 tick 再动手。 */
+    public static int getMineToolSwitchIntervalTicks() {
+        return instance.actions.mineToolSwitchIntervalTicks();
+    }
+
+    public static void setMineToolSwitchIntervalTicks(int value) {
+        instance.actions.mineToolSwitchIntervalTicks(value);
+        instance.save();
+    }
+
     /** 配置目录：config/player-controller/ */
     public static Path configDir() {
         return FabricLoader.getInstance()
@@ -620,7 +659,8 @@ public final class PlayerControllerConfig {
                 + ", mending_detect_interval_ticks=" + instance.actions.mendingDetectIntervalTicks()
                 + ", mine_simple_range=" + instance.actions.mineSimpleRange()
                 + ", mine_simple_wall_range=" + instance.actions.mineSimpleWallRange()
-                + ", mine_simple_max_blocks_per_tick=" + instance.actions.mineSimpleMaxBlocksPerTick() + ")");
+                + ", mine_simple_max_blocks_per_tick=" + instance.actions.mineSimpleMaxBlocksPerTick()
+                + ", mine_tool_switch_interval_ticks=" + instance.actions.mineToolSwitchIntervalTicks() + ")");
         } catch (Exception e) {
             instance = new PlayerControllerConfig();
             ChatUtils.error("读取配置文件失败，已使用默认值: " + e.getMessage());

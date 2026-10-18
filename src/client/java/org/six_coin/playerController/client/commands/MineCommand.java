@@ -363,7 +363,8 @@ public final class MineCommand {
             + config.blocks(MineFilter.Mode.BLACKLIST).size() + " 种（/pc mine list）"));
         source.sendFeedback(Text.literal("  范围：看得见的 " + PlayerControllerConfig.getMineSimpleRange()
             + " 格 / 隔墙的 " + PlayerControllerConfig.getMineSimpleWallRange() + " 格；每 tick 最多 "
-            + PlayerControllerConfig.getMineSimpleMaxBlocksPerTick() + " 个方块"));
+            + PlayerControllerConfig.getMineSimpleMaxBlocksPerTick() + " 个方块；换工具后等 "
+            + PlayerControllerConfig.getMineToolSwitchIntervalTicks() + " tick"));
         source.sendFeedback(Text.literal("§7  §f" + ROOT
             + "simple <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 在框里挖方块"));
         source.sendFeedback(Text.literal("§7  §f" + ROOT + "cancel§7 - 取消所有挖掘任务"));
