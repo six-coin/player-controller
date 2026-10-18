@@ -11,6 +11,7 @@ import org.six_coin.playerController.client.attack.AttackConfig;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.mending.MendingConfig;
+import org.six_coin.playerController.client.mine.station.MineStationManager;
 import org.six_coin.playerController.client.stock.station.StationManager;
 import org.six_coin.playerController.client.stock.StockManager;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
@@ -85,6 +86,7 @@ public final class ConfigCommand {
                     StockManager.get().switchWorld(num);
                     AttackConfig.get().switchWorld(num);
                     MendingConfig.get().switchWorld(num);
+                    MineStationManager.get().switchWorld(num);
                     context.getSource().sendFeedback(Text.literal("已切换到世界配置 world_" + num));
                     return 1;
                 }));

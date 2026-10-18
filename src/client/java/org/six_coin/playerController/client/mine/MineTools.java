@@ -20,6 +20,9 @@ import java.util.Optional;
  * <p>表是从原版那四个 {@code data/minecraft/tags/block/mineable/} 标签推出来的：
  * 锄头 → 镐子 → 斧头 → 铲子，谁先命中就算谁的（一个方块理论上只在一张表里）。
  * 查一次就缓存住，不会每挖一个方块都重新算一遍。
+ *
+ * <p>另外：剩余耐久少于 {@value #MIN_DURABILITY} 的工具算「不能用」，
+ * 手上那件不够了会自动去找快捷栏里另一件同类工具。
  */
 public final class MineTools {
 
@@ -79,10 +82,17 @@ public final class MineTools {
         return Optional.empty();
     }
 
-    /** 手上这件东西算哪一类工具；{@code null} = 不是这四类（空手、剑、方块…）。 */
+    /**
+     * 剩余耐久少于这个数的工具**不用**（{@code /pc mine simple} 里它会去快捷栏找别的；
+     * 一个都没有就算这一类工具没有）。
+     */
+    public static final int MIN_DURABILITY = 100;
+
+    /** 手上这件东西算哪一类工具；{@code null} = 不是这四类（空手、剑、方块…）或者耐久不够。 */
     @Nullable
     public static Kind held(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return null;
+        if (remaining(stack) < MIN_DURABILITY) return null;
         for (Kind kind : Kind.values()) {
             if (stack.isIn(kind.itemTag())) return kind;
         }
@@ -93,16 +103,25 @@ public final class MineTools {
      * 快捷栏里哪一格放着一件 {@code kind} 这类工具。
      *
      * <p>手上已经是这一类就不动（返回当前选中格）；否则按快捷栏顺序找第一件。
+     * 剩余耐久少于 {@link #MIN_DURABILITY} 的跳过。
      *
      * @return -1 = 快捷栏里没有
      */
     public static int hotbarSlot(PlayerInventory inventory, Kind kind) {
-        if (inventory.getSelectedStack().isIn(kind.itemTag())) {
+        ItemStack selected = inventory.getSelectedStack();
+        if (selected.isIn(kind.itemTag()) && remaining(selected) >= MIN_DURABILITY) {
             return inventory.getSelectedSlot();
         }
         for (int i = 0; i < PlayerInventory.getHotbarSize(); i++) {
-            if (inventory.getStack(i).isIn(kind.itemTag())) return i;
+            ItemStack stack = inventory.getStack(i);
+            if (stack.isIn(kind.itemTag()) && remaining(stack) >= MIN_DURABILITY) return i;
         }
         return -1;
+    }
+
+    /** 还剩多少耐久；不会坏的物品算无限。 */
+    public static int remaining(ItemStack stack) {
+        if (stack == null || stack.isEmpty() || !stack.isDamageable()) return Integer.MAX_VALUE;
+        return stack.getMaxDamage() - stack.getDamage();
     }
 }

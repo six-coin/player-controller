@@ -9,6 +9,8 @@ import org.six_coin.playerController.client.container.CachedContainer;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.mending.MendingConfig;
 import org.six_coin.playerController.client.mending.MendingPos;
+import org.six_coin.playerController.client.mine.station.MinePlace;
+import org.six_coin.playerController.client.mine.station.MineStationManager;
 import org.six_coin.playerController.client.stock.station.StationManager;
 import org.six_coin.playerController.client.stock.station.StationPos;
 import org.six_coin.playerController.client.util.DimensionUtils;
@@ -19,7 +21,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 
-/** {@code [dim]} 参数的补全：原版三个维度 + 路径点图 / 工作站 / 容器缓存里出现过的维度。 */
+/** {@code [dim]} 参数的补全：原版三个维度 + 路径点图 / 工作站 / 挖掘站 / 容器缓存里出现过的维度。 */
 public final class DimensionSuggestions {
 
     private DimensionSuggestions() {
@@ -44,6 +46,9 @@ public final class DimensionSuggestions {
         if (enderChest != null) dimensions.add(enderChest.dimension());
         for (CachedContainer container : ContainerCacheManager.get().all()) {
             dimensions.add(container.dimension());
+        }
+        for (MinePlace place : MineStationManager.get().allPositions()) {
+            dimensions.add(place.dimension());
         }
 
         return CommandSource.suggestMatching(dimensions, builder);

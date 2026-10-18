@@ -48,7 +48,8 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " dump all_items|inventory|all_tags §8- §7把物品 / 物品栏 / minecraft 物品标签导成 json（config/player-controller/dump/）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " attack ... §8- §7攻击（一直监听，按 profile 挑该打谁）：toggle、profile、show_all_mobs"));
                 source.sendFeedback(Text.literal("§7  /" + name + " mending ... §8- §7经验修补：start；station stand_point|ender_chest set|set_here|set_target|del"));
-        source.sendFeedback(Text.literal("§7  /" + name + " mine ... §8- §7挖掘：cancel 取消所有挖掘任务；simple <x1> <y1> <z1> <x2> <y2> <z2> <dim> [list] 在框里挖方块"));
+                source.sendFeedback(Text.literal("§7  /" + name + " mine ... §8- §7挖掘：cancel；simple <x1> <y1> <z1> <x2> <y2> <z2> <dim>（按 mine/ 下的白/黑名单挖框里的方块）；list mode|whitelist|blacklist list|add|del"));
+                source.sendFeedback(Text.literal("§7  /" + name + " mine complex station ... §8- §7挖掘站：list、check（算落点 + 走过去开箱检查）、show、safe_point / food_provider / totem_provider / item_collector / tool_cache / slime_cache"));
                 source.sendFeedback(Text.literal("§7  /" + name + " waypoints ... §8- §7路径点 / 边 / 出生点"));
                 source.sendFeedback(Text.literal("§7    §7子命令：show、edit、list、optimize default|radical"));
                 source.sendFeedback(Text.literal("§7    §7  add_waypoint here|target|position <x> <y> <z> <dim> [name]"));

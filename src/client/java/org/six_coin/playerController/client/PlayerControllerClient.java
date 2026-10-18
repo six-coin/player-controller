@@ -19,7 +19,10 @@ import org.six_coin.playerController.client.feature.ServerTickRate;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.mending.MendingConfig;
 import org.six_coin.playerController.client.mending.MendingManager;
+import org.six_coin.playerController.client.mine.MineFilterConfig;
 import org.six_coin.playerController.client.mine.MineManager;
+import org.six_coin.playerController.client.mine.station.MineStationManager;
+import org.six_coin.playerController.client.mine.station.MineStationRenderer;
 import org.six_coin.playerController.client.recipe.LocalRecipes;
 import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.stock.station.StationManager;
@@ -41,10 +44,13 @@ public class PlayerControllerClient implements ClientModInitializer {
         StockManager.get().load();
         AttackConfig.get().load();
         MendingConfig.get().load();
+        MineFilterConfig.get().load();
+        MineStationManager.get().load();
         PcCommand.register();
         WaypointRenderer.register();
         ContainerCacheRenderer.register();
         StationRenderer.register();
+        MineStationRenderer.register();
 
         // 在原版 tick 世界之前驱动动作队列，移动类动作写入的速度才能在当 tick 生效
         ClientTickEvents.START_CLIENT_TICK.register(ActionManager.get()::tick);
@@ -91,6 +97,9 @@ public class PlayerControllerClient implements ClientModInitializer {
             MendingManager.get().reset();
             MineManager.get().reset();
             ServerTickRate.onJoin();
+
+            // 挖掘的过滤列表是可以手改的 json，进世界时重新读一遍
+            MineFilterConfig.get().load();
         });
 
         // /pc account：换账户是分 tick 做的（先换身份下线，再自动重连），这里驱动它
