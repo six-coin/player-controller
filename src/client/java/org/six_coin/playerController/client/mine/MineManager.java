@@ -35,8 +35,13 @@ import java.util.List;
  * {@code tryBreakBlock}，所以不受挖掘速度限制，一个 tick 能挖很多个。
  *
  * <p>工具：方块要什么工具从原版那四张 {@code mineable} 方块标签推出来（见 {@link MineTools}，
- * 结果会缓存）。每 tick 先按「最近的这个方块」把快捷栏切到对应的工具，然后只挖
- * **手上这件工具挖得动**的方块（only-suitable-tools）—— 不匹配的就跳过。
+ * 结果会缓存）。切工具的规则是**尽量不切**：
+ * <ul>
+ *   <li>手上这件工具附近还挖得动方块，就一直用它挖（哪怕更近的方块要别的工具）；</li>
+ *   <li>只有「附近已经一个都挖不动了」才换，换成最近那个方块要的工具；</li>
+ *   <li>发包之前再确认一次：只对**触及范围内**而且**手上这件工具挖得动**的方块发破坏请求。</li>
+ * </ul>
+ * 切得越少，客户端和服务端越不容易对不上（来回切工具那套会把两边的挖掘状态搅乱）。
  *
  * <p>和攻击的关系：切快捷栏、转头都走 {@link HotbarManager} / {@link RotateManager}，
  * {@link Owner#MINE} 的优先级比攻击低：攻击正在打的时候不抢快捷栏、也不抢朝向
@@ -224,25 +229,60 @@ public final class MineManager {
             return;
         }
 
-        // 最近的这个方块决定用哪件工具
-        BlockPos nearest = candidates.get(0);
-        target = nearest;
-        targetTool = MineTools.required(mc.world.getBlockState(nearest));
+        double range = PlayerControllerConfig.getMineSimpleRange();
+        double wallRange = PlayerControllerConfig.getMineSimpleWallRange();
+        Vec3d eye = player.getEyePos();
 
         MineTools.Kind held = heldTool(player);
-        if (targetTool != null && targetTool != held) {
-            int slot = MineTools.hotbarSlot(player.getInventory(), targetTool);
-            if (slot < 0) {
-                // 快捷栏里没有这件工具：只能挖手上这件工具挖得动的
-                setState(State.NO_SUITABLE_TOOL);
-            } else if (!HotbarManager.get().request(Owner.MINE, slot)) {
-                lastTickCount = 0;
-                setState(State.HOTBAR_DENIED);
-                return;
-            } else {
-                hotbarHeld = true;
-                held = targetTool;
+
+        // 手上这件工具附近还挖得动东西吗？挖得动就**不换**：切得越少，服务端那边越不容易对不上
+        boolean somethingMineable = false;
+        for (BlockPos pos : candidates) {
+            if (suitable(mc.world.getBlockState(pos), held)) {
+                somethingMineable = true;
+                break;
             }
+        }
+
+        if (!somethingMineable) {
+            // 一个都挖不动了才换：换成最近那个方块要的工具
+            BlockPos nearest = candidates.get(0);
+            MineTools.Kind desired = MineTools.required(mc.world.getBlockState(nearest));
+
+            if (desired != null && desired != held) {
+                int slot = MineTools.hotbarSlot(player.getInventory(), desired);
+                if (slot < 0) {
+                    target = nearest;
+                    targetTool = desired;
+                    lastTickCount = 0;
+                    setState(State.NO_SUITABLE_TOOL);
+                    return;
+                }
+                if (!HotbarManager.get().request(Owner.MINE, slot)) {
+                    target = nearest;
+                    targetTool = desired;
+                    lastTickCount = 0;
+                    setState(State.HOTBAR_DENIED);
+                    return;
+                }
+                hotbarHeld = true;
+                held = desired;
+                ChatUtils.debug("挖掘：手上这件工具挖不动附近的方块了，换成" + desired.label());
+            }
+        }
+
+        // 这一 tick 要挖的第一个方块（显示用）
+        target = null;
+        targetTool = held;
+        for (BlockPos pos : candidates) {
+            if (suitable(mc.world.getBlockState(pos), held)) {
+                target = pos;
+                break;
+            }
+        }
+        if (target == null) {
+            target = candidates.get(0);
+            targetTool = MineTools.required(mc.world.getBlockState(target));
         }
 
         int limit = PlayerControllerConfig.getMineSimpleMaxBlocksPerTick();
@@ -250,11 +290,14 @@ public final class MineManager {
         for (BlockPos pos : candidates) {
             if (mined >= limit) break;
 
-            // 挖着挖着工具坏了：这一 tick 就停，下一 tick 重新找工具
+            // 挖着挖着工具坏了：这一 tick 就停，下一 tick 重新判断
             if (mined > 0 && heldTool(player) != held) break;
 
-            MineTools.Kind need = MineTools.required(mc.world.getBlockState(pos));
-            if (need != null && need != held) continue; // 手上这件工具挖不动，跳过
+            BlockState state = mc.world.getBlockState(pos);
+            // 只对手上这件工具挖得动的方块发包
+            if (!suitable(state, held)) continue;
+            // 再怎么也不能超出触及范围
+            if (!inRange(mc, player, eye, pos, range, wallRange)) continue;
 
             if (!RotateManager.get().rotateTo(Owner.MINE, pos)) {
                 lastTickCount = mined;
@@ -270,9 +313,15 @@ public final class MineManager {
         lastTickCount = mined;
         if (mined > 0) {
             setState(State.MINING);
-        } else if (state != State.NO_SUITABLE_TOOL) {
+        } else {
             setState(State.NO_BLOCKS);
         }
+    }
+
+    /** 手上这件工具（{@code null} = 空手）挖不挖得动这个方块。 */
+    private static boolean suitable(BlockState state, @Nullable MineTools.Kind held) {
+        MineTools.Kind need = MineTools.required(state);
+        return need == null || need == held;
     }
 
     /** 现在手上这件东西算哪一类工具。 */
