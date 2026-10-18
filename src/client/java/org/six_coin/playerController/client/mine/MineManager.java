@@ -44,8 +44,9 @@ import java.util.List;
  * </ul>
  * 切得越少，客户端和服务端越不容易对不上（来回切工具那套会把两边的挖掘状态搅乱）。
  *
- * <p>另外：**玩家水平速度不是 0 的时候一概暂停**（在走、在飞、被推都不发破坏包），
- * 站定了才动手；上下移动（掉落 / 上升）不算，纵向速度不参与判断。
+ * <p>另外：**水平速度不是 0、或者纵向速度不小于上限**的时候一概暂停
+ * （在走、在飞、被推、掉得太快 / 升得太快都不发破坏包），站定了才动手。
+ * 纵向速度的上限是 {@code mine_max_vertical_speed_blocks_per_tick}（默认 1 格/tick）。
  *
  * <p>和攻击的关系：切快捷栏、转头都走 {@link HotbarManager} / {@link RotateManager}，
  * {@link Owner#MINE} 的优先级比攻击低：攻击正在打的时候不抢快捷栏、也不抢朝向
@@ -79,7 +80,7 @@ public final class MineManager {
         HOTBAR_DENIED("快捷栏被别的功能占着，这次没切工具"),
         ROTATE_DENIED("朝向被别的功能占着，这次没挖"),
         SWITCH_WAIT("刚换完工具，等一会儿再挖"),
-        MOVING("玩家在走，先暂停"),
+        MOVING("玩家在动 / 掉得太快，先暂停"),
         MINING("正在挖");
 
         private final String text;
@@ -249,7 +250,7 @@ public final class MineManager {
             return;
         }
 
-        // 玩家还在走（水平速度不为 0）：一概暂停，一个破坏包都不发
+        // 玩家还在走，或者掉 / 升得太快：一概暂停，一个破坏包都不发
         if (!isStill(player)) {
             lastTickCount = 0;
             setState(State.MOVING);
@@ -371,14 +372,21 @@ public final class MineManager {
     }
 
     /**
-     * 玩家是不是「速度为 0」（只看水平方向）。
+     * 玩家现在是不是「站定了」：水平速度约等于 0，而且纵向速度小于上限。
      *
-     * <p>水平速度平方小于 {@link #STILL_EPSILON_SQUARED} 就算 0（约 0.001 格/tick）：
+     * <p>水平：速度平方小于 {@link #STILL_EPSILON_SQUARED} 就算 0（约 0.001 格/tick）：
      * 站着不动的时候原版算出来就是 (0, 0, 0)，这里留一点余量只是怕浮点残渣。
-     * 纵向速度不计 —— 掉落、上升的时候水平没动就可以挖。
+     *
+     * <p>纵向：绝对值要**小于** {@code mine_max_vertical_speed_blocks_per_tick}
+     * （默认 1 格/tick）；配成 0 就要求纵向速度正好是 0。
      */
     private static boolean isStill(ClientPlayerEntity player) {
-        return player.getVelocity().horizontalLengthSquared() < STILL_EPSILON_SQUARED;
+        Vec3d velocity = player.getVelocity();
+        if (velocity.horizontalLengthSquared() >= STILL_EPSILON_SQUARED) return false;
+
+        double limit = PlayerControllerConfig.getMineMaxVerticalSpeedPerTick();
+        double vertical = Math.abs(velocity.y);
+        return limit <= 0.0 ? vertical == 0.0 : vertical < limit;
     }
 
     /** 现在手上这件东西算哪一类工具。 */

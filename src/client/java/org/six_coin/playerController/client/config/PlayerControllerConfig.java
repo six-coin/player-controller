@@ -38,7 +38,8 @@ import java.nio.file.Path;
  *     "mine_simple_range": 4.0,
  *     "mine_simple_wall_range": 4.0,
  *     "mine_simple_max_blocks_per_tick": 40,
- *     "mine_tool_switch_interval_ticks": 4
+ *     "mine_tool_switch_interval_ticks": 4,
+ *     "mine_max_vertical_speed_blocks_per_tick": 1.0
  *   }
  * }
  * </pre>
@@ -158,6 +159,16 @@ public final class PlayerControllerConfig {
     public static final int DEFAULT_MINE_TOOL_SWITCH_INTERVAL_TICKS = 4;
     public static final int MIN_MINE_TOOL_SWITCH_INTERVAL_TICKS = 0;
     public static final int MAX_MINE_TOOL_SWITCH_INTERVAL_TICKS = 200;
+
+    /**
+     * 挖掘：纵向速度上限（格 / tick，默认 {@value #DEFAULT_MINE_MAX_VERTICAL_SPEED_PER_TICK}）。
+     *
+     * <p>只有纵向速度**小于**这个值的时候才动手：掉得太快 / 升得太快先暂停。
+     * 0 表示要求纵向速度正好是 0。
+     */
+    public static final double DEFAULT_MINE_MAX_VERTICAL_SPEED_PER_TICK = 1.0;
+    public static final double MIN_MINE_MAX_VERTICAL_SPEED_PER_TICK = 0.0;
+    public static final double MAX_MINE_MAX_VERTICAL_SPEED_PER_TICK = 64.0;
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -304,6 +315,14 @@ public final class PlayerControllerConfig {
         @SerializedName("mine_tool_switch_interval_ticks")
         private int mineToolSwitchIntervalTicks = DEFAULT_MINE_TOOL_SWITCH_INTERVAL_TICKS;
 
+        /**
+         * 挖掘：纵向速度上限（格 / tick）。
+         *
+         * <p>纵向速度小于它才动手；0 表示要求纵向速度正好是 0。
+         */
+        @SerializedName("mine_max_vertical_speed_blocks_per_tick")
+        private double mineMaxVerticalSpeedPerTick = DEFAULT_MINE_MAX_VERTICAL_SPEED_PER_TICK;
+
         public double moveSpeed() {
             return moveSpeed;
         }
@@ -432,6 +451,15 @@ public final class PlayerControllerConfig {
         public void mineToolSwitchIntervalTicks(int value) {
             mineToolSwitchIntervalTicks = Math.min(MAX_MINE_TOOL_SWITCH_INTERVAL_TICKS,
                 Math.max(MIN_MINE_TOOL_SWITCH_INTERVAL_TICKS, value));
+        }
+
+        public double mineMaxVerticalSpeedPerTick() {
+            return mineMaxVerticalSpeedPerTick;
+        }
+
+        public void mineMaxVerticalSpeedPerTick(double value) {
+            mineMaxVerticalSpeedPerTick = Math.min(MAX_MINE_MAX_VERTICAL_SPEED_PER_TICK,
+                Math.max(MIN_MINE_MAX_VERTICAL_SPEED_PER_TICK, value));
         }
     }
 
@@ -609,6 +637,16 @@ public final class PlayerControllerConfig {
         instance.save();
     }
 
+    /** 挖掘：纵向速度上限（格 / tick）。 */
+    public static double getMineMaxVerticalSpeedPerTick() {
+        return instance.actions.mineMaxVerticalSpeedPerTick();
+    }
+
+    public static void setMineMaxVerticalSpeedPerTick(double value) {
+        instance.actions.mineMaxVerticalSpeedPerTick(value);
+        instance.save();
+    }
+
     /** 配置目录：config/player-controller/ */
     public static Path configDir() {
         return FabricLoader.getInstance()
@@ -660,7 +698,9 @@ public final class PlayerControllerConfig {
                 + ", mine_simple_range=" + instance.actions.mineSimpleRange()
                 + ", mine_simple_wall_range=" + instance.actions.mineSimpleWallRange()
                 + ", mine_simple_max_blocks_per_tick=" + instance.actions.mineSimpleMaxBlocksPerTick()
-                + ", mine_tool_switch_interval_ticks=" + instance.actions.mineToolSwitchIntervalTicks() + ")");
+                + ", mine_tool_switch_interval_ticks=" + instance.actions.mineToolSwitchIntervalTicks()
+                + ", mine_max_vertical_speed_blocks_per_tick="
+                + instance.actions.mineMaxVerticalSpeedPerTick() + ")");
         } catch (Exception e) {
             instance = new PlayerControllerConfig();
             ChatUtils.error("读取配置文件失败，已使用默认值: " + e.getMessage());

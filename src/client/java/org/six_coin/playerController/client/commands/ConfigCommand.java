@@ -37,6 +37,7 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * /pc config actions mine_simple_wall_range [range]
  * /pc config actions mine_simple_max_blocks_per_tick [blocks]
  * /pc config actions mine_tool_switch_interval_ticks [tick]
+ * /pc config actions mine_max_vertical_speed_blocks_per_tick [speed]
  * </pre>
  */
 public final class ConfigCommand {
@@ -335,6 +336,23 @@ public final class ConfigCommand {
                             "挖掘换工具后的等待已设为 "
                                 + PlayerControllerConfig.getMineToolSwitchIntervalTicks() + " tick"));
                         return 1;
+                    })))
+            .then(ClientCommandManager.literal("mine_max_vertical_speed_blocks_per_tick")
+                .executes(context -> {
+                    showMineMaxVerticalSpeed(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("speed",
+                        DoubleArgumentType.doubleArg(
+                            PlayerControllerConfig.MIN_MINE_MAX_VERTICAL_SPEED_PER_TICK,
+                            PlayerControllerConfig.MAX_MINE_MAX_VERTICAL_SPEED_PER_TICK))
+                    .executes(context -> {
+                        double speed = DoubleArgumentType.getDouble(context, "speed");
+                        PlayerControllerConfig.setMineMaxVerticalSpeedPerTick(speed);
+                        context.getSource().sendFeedback(Text.literal(
+                            "挖掘的纵向速度上限已设为 "
+                                + PlayerControllerConfig.getMineMaxVerticalSpeedPerTick() + " 格/tick"));
+                        return 1;
                     })));
     }
 
@@ -373,6 +391,9 @@ public final class ConfigCommand {
             + PlayerControllerConfig.getMineSimpleMaxBlocksPerTick() + " 个（挖掘：每 tick 最多）"));
         source.sendFeedback(Text.literal("  actions.mine_tool_switch_interval_ticks = "
             + PlayerControllerConfig.getMineToolSwitchIntervalTicks() + " tick（挖掘：换完工具等多久）"));
+        source.sendFeedback(Text.literal("  actions.mine_max_vertical_speed_blocks_per_tick = "
+            + PlayerControllerConfig.getMineMaxVerticalSpeedPerTick()
+            + " 格/tick（挖掘：纵向速度要小于这个才动手）"));
         source.sendFeedback(Text.literal("  文件: " + PlayerControllerConfig.configFile()));
         return 1;
     }
@@ -395,6 +416,7 @@ public final class ConfigCommand {
         showMineSimpleWallRange(source);
         showMineSimpleMaxBlocks(source);
         showMineToolSwitchInterval(source);
+        showMineMaxVerticalSpeed(source);
         return 1;
     }
 
@@ -484,6 +506,12 @@ public final class ConfigCommand {
         source.sendFeedback(Text.literal("  mine_tool_switch_interval_ticks = "
             + PlayerControllerConfig.getMineToolSwitchIntervalTicks()
             + " tick（挖掘：换完工具之后空这么多 tick 再动手，0 = 不等）"));
+    }
+
+    private static void showMineMaxVerticalSpeed(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal("  mine_max_vertical_speed_blocks_per_tick = "
+            + PlayerControllerConfig.getMineMaxVerticalSpeedPerTick()
+            + " 格/tick（挖掘：纵向速度小于它才动手，0 = 要求正好 0）"));
     }
 
     private static int setDebug(CommandContext<FabricClientCommandSource> context, boolean value) {
