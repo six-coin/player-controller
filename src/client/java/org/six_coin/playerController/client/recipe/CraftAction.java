@@ -30,18 +30,19 @@ import java.util.List;
  * {@code /pc recipe ...} 的执行体：打开工作站的工作台 / 切石机，把这一轮的材料摆进格子，
  * 然后 QuickMove 成品（原版 QuickMove 是从最后一格往前填，所以成品会进快捷栏靠后的格子）。
  *
- * <p><b>摆材料跟往容器里搬东西是一回事</b>：格子里的数量点击是本地预测、立即生效的，
- * 所以一个 tick 里就能把这一轮的格子全摆好（点击上限见 {@code ContainerClicks.MAX_CLICKS_PER_TICK}），
- * 不用一格一格等。摆完等「网络延迟」（{@code actions.network_delay_ticks}）那么多 tick 让服务端把数量同步回来，
- * 再**逐格核对**「计划的格子有对的材料、别的输入格是空的」，不对就再摆一遍
- * （连点被服务端少接受的情况在这里发现）。
+ * <p><b>摆材料急不得</b>：点击是本地预测、立即生效的，但服务端只接受其中的一部分时，
+ * 会把它实际的数量推回来。所以每次只点一格、只点一批（上限见 {@code ContainerClicks.MAX_CLICKS_PER_TICK}），
+ * 点完等这一格的数量稳定下来再按最新的数量接着摆。一圈摆完再等「网络延迟」
+ * （{@code actions.network_delay_ticks}）那么多 tick，然后**逐格核对**
+ * 「计划的格子有对的材料、别的输入格是空的」，不对就再摆一遍（这一遍按实际数量补差、清多的）。
  *
  * <p><b>唯一不能照搬的是成品格</b>：它不是客户端算的，是服务端按配方算出来推给客户端的。
  * 所以「材料齐了没有」不能靠看成品格（那一刻客户端看到的可能还是旧的），而是靠核对输入格；
  * 「合出几个」也只能等服务端把物品栏的增量推回来（{@link #tickWaitCrafted}）。
  *
  * <p>材料只从主背包 27 格和快捷栏 9 格里拿（见 {@link #findSource}），
- * 手上多出来的材料一律放回主背包 27 格。
+ * 手上多出来的材料一律放回主背包 27 格；要是某个格子被多塞了（客户端和服务端的数字对不上时会出现），
+ * 多出来的那部分会被拿回来重新分（见 {@link #findGridSource}），实在分不匀就清空格子从头摆一遍。
  *
  * <p>要合的次数超过一格能叠的上限时，{@link CraftPlan#rounds()} 会是好几轮：
  * 摆一轮 → 合完（原版一次 QuickMove 会把这一轮能合的都合掉）→ 再摆下一轮。
@@ -49,10 +50,10 @@ import java.util.List;
 public class CraftAction extends Action {
 
     /**
-     * 一轮材料摆完（本地预测看着是对的）之后，先等几 tick 再核对格子。
+     * 等服务器同步的 tick 数：每批点击之后等这一格的数量稳下来、一轮摆完之后核对格子，都用它。
      *
      * <p>一 tick 连发一大串点击时，服务端可能只接受了其中一部分、并把它那份数量推回来 ——
-     * 等它推完再核对，才不会把「客户端以为摆好了」当成真的摆好了。
+     * 等它推完再往下走，才不会把「客户端以为摆好了」当成真的摆好了。
      * 等的是配置里的「网络延迟」（{@code actions.network_delay_ticks}）。
      */
     private int verifyWaitTicks() {
@@ -74,6 +75,9 @@ public class CraftAction extends Action {
 
     /** 等不到成品格时最多回头重摆几次。 */
     private static final int MAX_READY_RETRIES = 3;
+
+    /** 材料凑不齐时最多先歇一歇、重扫几次（服务端的数字可能还在路上）。 */
+    private static final int MAX_SUPPLY_RETRIES = 2;
 
     private static final int MAX_TOTAL_TICKS = 20 * 600;
 
@@ -100,6 +104,24 @@ public class CraftAction extends Action {
 
     /** 摆到第几个输入格了（每轮从头开始）。 */
     private int gridIndex;
+
+    /** 刚动过的格子（-1 = 没有等它稳定下来的一批点击）。 */
+    private int watchingCell = -1;
+    /** 那一批点完之后这一格「应该」有几个。 */
+    private int watchingCount;
+    /** 这一格的数量连着几 tick 没变了。 */
+    private int watchingTicks;
+
+    /** 界面打开后第一次看到的状态号（初值不可能出现），和它连着几 tick 没变了。 */
+    private int openRevision = Integer.MIN_VALUE;
+    private int openSettleTicks;
+
+    /** 这一遍先把格子清空再摆（上一步摆歪了、材料被卡在别的格子里时用）。 */
+    private boolean clearFirst;
+
+    /** 「材料凑不齐」的时候先歇几 tick 再看（服务端的数字可能还在路上），歇几次还不行才报错。 */
+    private int placeWaitTicks;
+    private int supplyRetries;
 
     /** 这一 tick 还能点几下（每 tick 开头充满）。 */
     private int clicksLeft;
@@ -208,7 +230,20 @@ public class CraftAction extends Action {
     private void tickOpening(MinecraftClient mc) {
         switch (session.awaitOpen(mc)) {
             case READY -> {
+                // 界面的内容到了，但上一步的点击可能还在被服务端处理：状态号（每推一次格子内容就变）
+                // 连着几 tick 不动了再开工 —— 不然第一下拿材料就是照着一份过期的物品栏点的。
+                int revision = session.handler().getRevision();
+                if (revision != openRevision) {
+                    openRevision = revision;
+                    openSettleTicks = 0;
+                    return;
+                }
+                if (++openSettleTicks < Math.max(2, verifyWaitTicks())) return;
                 gridIndex = 0;
+                watchingCell = -1;
+                clearFirst = false;
+                supplyRetries = 0;
+                placeWaitTicks = 0;
                 phase = Phase.PLACE;
             }
             case TIMEOUT -> fail("打开" + (plan.station() == CraftPlan.Station.CRAFTING_TABLE ? "工作台" : "切石机")
@@ -221,8 +256,12 @@ public class CraftAction extends Action {
     /**
      * 摆这一轮的材料：一格一格来，该空的弄空、该放的按数量放够，手上多的放回物品栏。
      *
-     * <p>一个 tick 里能干完就干完（点击是本地预测、立即生效的）—— 摆完不急着下结论，
-     * 先等「网络延迟」那么多 tick 让服务端把格子的数量同步回来，再核对一遍（见 {@link #tickVerify}）。
+     * <p><b>每次只动一格、只点一批</b>：点完先等这一格的数量稳定下来（服务端会把它**实际**接受到的数量
+     * 推回来），再按最新的数量决定下一步。一 tick 里连点几十下时服务端只接受其中一部分，
+     * 客户端照着自己那份偏高的预测接着摆，就会把材料多塞进前面的格子（格子能叠到 64，多塞的它也收得下），
+     * 后面的格子反而没得放 —— 报出来的就是「找不到足够的材料」。
+     *
+     * <p>这一圈摆完先等「网络延迟」那么多 tick，再逐格核对（见 {@link #tickVerify}）。
      */
     private void tickPlace() {
         int amount = plan.amountForRound(round);
@@ -232,37 +271,38 @@ public class CraftAction extends Action {
         }
 
         List<Slot> grid = gridSlots();
-        while (clicksLeft > 0 && gridIndex < grid.size() && !isFinished()) {
-            int clicksBefore = clicksLeft;
-            int indexBefore = gridIndex;
 
-            if (fixCell(grid, gridIndex, amount)) gridIndex++;
-
-            // 这一圈既没点出去、也没往前走：本地预测还没生效，下一 tick 再看
-            if (clicksLeft == clicksBefore && gridIndex == indexBefore) break;
-        }
-        if (isFinished()) return;
-        if (gridIndex < grid.size()) return;   // 这一 tick 的点击用完了，剩下的下一 tick 接着摆
-
-        // 手上不能留着东西（会挡住下一格拿材料）
-        if (!session.handler().getCursorStack().isEmpty()) {
-            returnCursor();
+        // 上一次没凑齐，先歇几 tick 等服务器的数字过来
+        if (placeWaitTicks > 0) {
+            placeWaitTicks--;
             return;
         }
 
-        placePasses++;
-        verifyTicks = verifyWaitTicks();
-        phase = Phase.VERIFY;
-        ChatUtils.debug("第 %d/%d 轮材料摆好了（每格 %d 个，这一轮摆了 %d 遍、点了 %d 下），等服务器同步格子的数量",
-            round + 1, plan.rounds(), amount, placePasses, clicks);
-    }
+        // 上一批点完，先等这一格稳定下来（数量连着「网络延迟」那么多 tick 没变）
+        if (watchingCell >= 0 && !awaitStable(grid)) return;
 
-    /**
-     * 把第 {@code index} 个输入格弄成计划要的样子。
-     *
-     * @return true = 本地预测看这一格已经对了（该空的空着、该放的放够数量了）
-     */
-    private boolean fixCell(List<Slot> grid, int index, int amount) {
+        // 重摆：先把格子清空（材料全退回物品栏），再按计划重摆。
+        // 上一步摆歪的格子会把材料困在里面，前面的格子就会一直「找不到足够的材料」。
+        if (clearFirst) {
+            clearGridStep(grid);
+            return;
+        }
+
+        if (gridIndex >= grid.size()) {
+            // 手上不能留着东西（会挡住下一格拿材料）
+            if (!session.handler().getCursorStack().isEmpty()) {
+                returnCursor();
+                return;
+            }
+            placePasses++;
+            verifyTicks = verifyWaitTicks();
+            phase = Phase.VERIFY;
+            ChatUtils.debug("第 %d/%d 轮材料摆好了（每格 %d 个，这一轮摆了 %d 遍、点了 %d 下），等服务器同步格子的数量",
+                round + 1, plan.rounds(), amount, placePasses, clicks);
+            return;
+        }
+
+        int index = gridIndex;
         Slot slot = grid.get(index);
         Item want = wantedItemAt(grid, index);
         ItemStack have = slot.getStack();
@@ -272,59 +312,156 @@ public class CraftAction extends Action {
         if (!cursor.isEmpty()) {
             if (want != null && cursor.isOf(want)
                 && (have.isEmpty() || have.isOf(want)) && have.getCount() < amount) {
-                placeFromCursor(slot, amount - have.getCount());
+                placeFromCursor(slot, index, amount - have.getCount(), have.getCount());
             } else {
                 returnCursor();
             }
-            return false;
+            return;
         }
 
         // 这一格该空着
         if (want == null) {
-            if (have.isEmpty()) return true;
-            click(slot.id, 0, SlotActionType.PICKUP);   // 拿走，下一圈放回物品栏
-            return false;
+            if (have.isEmpty()) {
+                gridIndex++;
+                return;
+            }
+            click(slot.id, 0, SlotActionType.PICKUP);   // 拿走，下一 tick 放回物品栏
+            watch(index, 0);
+            return;
         }
 
-        // 东西不对 / 放多了：先清掉，下一圈按计划重摆
+        // 东西不对 / 放多了：先清掉，下一 tick 按计划重摆
         if (!have.isEmpty() && (!have.isOf(want) || have.getCount() > amount)) {
             click(slot.id, 0, SlotActionType.PICKUP);
-            return false;
+            watch(index, 0);
+            return;
         }
 
-        if (have.getCount() == amount) return true;
+        if (have.getCount() == amount) {
+            gridIndex++;
+            return;
+        }
 
-        // 从物品栏拿这一格还差的材料（整叠拿起来，多的下一圈放回去）
+        // 从物品栏拿这一格还差的材料（整叠拿起来，下一 tick 放进去，多的再放回去）
         int need = amount - have.getCount();
         int source = findSource(want, need);
+        if (source < 0) source = findGridSource(grid, want, index);
         if (source < 0) {
+            // 数字可能还没同步完（材料其实在别的格子里、只是客户端还没看到）：再等几 tick 重扫一遍
+            if (supplyRetries < MAX_SUPPLY_RETRIES) {
+                supplyRetries++;
+                ChatUtils.debug("这一格还差 %d 个 %s，物品栏和别的格里都没找到：先等服务器的数字同步，"
+                    + "第 %d/%d 次重扫", need, id(want), supplyRetries, MAX_SUPPLY_RETRIES);
+                gridIndex = 0;
+                watchingCell = -1;
+                clearFirst = true;
+                placeWaitTicks = Math.max(2, verifyWaitTicks()) + 1;
+                return;
+            }
             fail("找不到足够的 " + id(want) + "（这一轮每格要 " + amount + " 个，还差 " + need
                 + " 个）；" + describeWhereIs(want));
-            return false;
+            return;
         }
         click(source, 0, SlotActionType.PICKUP);
-        return false;
     }
 
-    /** 手上拿着的材料往这一格放：够放多少放多少（正好够就一下左键，不然一格一格右键放）。 */
-    private void placeFromCursor(Slot slot, int need) {
+    /** 记下「刚动过这一格、它现在应该有 count 个」，接下来先等它稳定下来再动别的格子。 */
+    private void watch(int index, int count) {
+        watchingCell = index;
+        watchingCount = count;
+        watchingTicks = 0;
+    }
+
+    /**
+     * 清场的一步：手上有东西就先放回物品栏，否则拿走一个还非空的输入格。
+     *
+     * <p>跟摆材料一样，每 tick 只动一下、动完等它稳定。格子全空之后把 {@link #clearFirst} 放掉，
+     * 这一遍从头按计划重摆。
+     */
+    private void clearGridStep(List<Slot> grid) {
         ItemStack cursor = session.handler().getCursorStack();
-        int place = Math.min(need, cursor.getCount());
+        if (!cursor.isEmpty()) {
+            returnCursor();
+            return;
+        }
+        for (int i = 0; i < grid.size(); i++) {
+            if (grid.get(i).getStack().isEmpty()) continue;
+            click(grid.get(i).id, 0, SlotActionType.PICKUP);
+            watch(i, 0);
+            return;
+        }
+        clearFirst = false;
+        gridIndex = 0;
+        ChatUtils.debug("输入格已清空，重新摆这一轮的材料");
+    }
+
+    /**
+     * 等刚动过的那一格稳定下来：数量连着「网络延迟」那么多 tick 没变才算数。
+     *
+     * <p>一批点击点出去之后，服务端会把它**实际**接受到的数量推回来 —— 客户端这一刻的数字可能偏高，
+     * 不等它推完就接着摆，会照着错的数字继续点，把材料多塞进这一格。
+     *
+     * @return true = 稳定了，可以接着动
+     */
+    private boolean awaitStable(List<Slot> grid) {
+        int now = grid.get(watchingCell).getStack().getCount();
+        if (now != watchingCount) {
+            if (now < watchingCount) {
+                ChatUtils.debug("格子 %d 的数量被服务端改成 %d 个（这一批点完应该是 %d 个），按实际数量接着补",
+                    watchingCell, now, watchingCount);
+            }
+            watchingCount = now;
+            watchingTicks = 0;
+            return false;
+        }
+        if (++watchingTicks < Math.max(2, verifyWaitTicks())) return false;
+        watchingCell = -1;
+        return true;
+    }
+
+    /**
+     * 手上拿着的材料往这一格放：够放多少放多少（正好够就一下左键，不然一格一格右键放）。
+     *
+     * @param space 这一格还能放几个
+     * @param have  放之前这一格有几个（放完之后用来看服务端认不认这个数）
+     */
+    private void placeFromCursor(Slot slot, int index, int space, int have) {
+        ItemStack cursor = session.handler().getCursorStack();
+        int place = Math.min(space, cursor.getCount());
         if (place <= 0) return;
 
         if (place == cursor.getCount()) {
             click(slot.id, 0, SlotActionType.PICKUP);
+            watch(index, have + place);
             return;
         }
-        for (int i = 0; i < place && clicksLeft > 0; i++) {
-            click(slot.id, 1, SlotActionType.PICKUP);
+        int placed = 0;
+        while (placed < place && click(slot.id, 1, SlotActionType.PICKUP)) {
+            placed++;
         }
+        watch(index, have + placed);
+    }
+
+    /**
+     * 材料不在物品栏里，但**别的输入格**里有一叠多的（之前多塞进去的）：从那儿拿。
+     *
+     * <p>只拿「比这一轮该放的多」的格子，已经摆好的格子不动 —— 不然这边补上了、那边又短了。
+     */
+    private int findGridSource(List<Slot> grid, Item item, int exceptIndex) {
+        int amount = plan.amountForRound(round);
+        for (int i = 0; i < grid.size(); i++) {
+            if (i == exceptIndex) continue;
+            ItemStack stack = grid.get(i).getStack();
+            if (stack.isEmpty() || !stack.isOf(item)) continue;
+            if (stack.getCount() > amount) return grid.get(i).id;
+        }
+        return -1;
     }
 
     /**
      * 核对格子：计划的格子有对的材料（数量够这一轮用）、别的输入格是空的。
      *
-     * <p>不对就再摆一遍（{@link #fixCell} 会把差的补上、多的清掉），摆了几遍还是不对就报错停下 ——
+     * <p>不对就再摆一遍（{@link #tickPlace} 会把差的补上、多的清掉），摆了几遍还是不对就报错停下 ——
      * 这样「服务端少接受了几下」在这里就被发现并补上，不用等到成品格一直不出来才回头重摆。
      */
     private void tickVerify() {
@@ -347,6 +484,10 @@ public class CraftAction extends Action {
 
         ChatUtils.debug("格子还没摆对（%s），再摆一遍（第 %d 遍）", problem, placePasses + 1);
         gridIndex = 0;
+        watchingCell = -1;
+        clearFirst = true;
+        supplyRetries = 0;
+        placeWaitTicks = 0;
         phase = Phase.PLACE;
     }
 
@@ -465,6 +606,10 @@ public class CraftAction extends Action {
     private void endRound() {
         round++;
         gridIndex = 0;
+        watchingCell = -1;
+        clearFirst = false;
+        supplyRetries = 0;
+        placeWaitTicks = 0;
         placePasses = 0;
         recipeIndex = -1;   // 切石机换了输入之后要重新选一次配方
         readyTicks = 0;
@@ -490,6 +635,10 @@ public class CraftAction extends Action {
         ChatUtils.debug(why + "，回去重新摆一遍材料（第 " + readyRetries + "/"
             + MAX_READY_RETRIES + " 次）");
         gridIndex = 0;
+        watchingCell = -1;
+        clearFirst = true;
+        supplyRetries = 0;
+        placeWaitTicks = 0;
         placePasses = 0;
         readyTicks = 0;
         recipeIndex = -1;
