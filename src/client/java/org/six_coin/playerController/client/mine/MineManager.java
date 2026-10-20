@@ -6,10 +6,12 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
@@ -49,8 +51,10 @@ import java.util.List;
  * 水平上限是 {@code mine_max_horizontal_speed_blocks_per_tick}（默认 0）、纵向上限是
  * {@code mine_max_vertical_speed_blocks_per_tick}（默认 0.08 格/tick）。
  *
- * <p>**玩家沾水的时候也一概不挖**（{@link ClientPlayerEntity#isTouchingWater()}）：水里游泳 / 漂浮
- * 会让客户端和服务端的挖掘状态对不上，所以哪怕速度满足条件也先停着，出水再继续。
+ * <p>**玩家沾水的时候也一概不挖**（见 {@link #touchingWater}）：水里游泳 / 漂浮会让客户端和
+ * 服务端的挖掘状态对不上，所以哪怕速度满足条件也先停着，出水再继续。
+ * 飞行也拦得住：这里不看原版的 {@code isTouchingWater()} 标志，而是直接查世界里玩家包围盒
+ * 覆盖的方块有没有水 —— 那个标志在开飞行之后不可靠（会变成 false，结果在水里飞着照样挖）。
  *
  * <p>和攻击的关系：切快捷栏、转头都走 {@link HotbarManager} / {@link RotateManager}，
  * {@link Owner#MINE} 的优先级比攻击低：攻击正在打的时候不抢快捷栏、也不抢朝向
@@ -249,7 +253,7 @@ public final class MineManager {
 
         // 玩家沾水就一概不挖：水里游泳 / 漂浮会让客户端和服务端的挖掘状态对不上，
         // 而且水里掉得慢，速度判定的余量很容易被绕过
-        if (player.isTouchingWater()) {
+        if (touchingWater(mc, player)) {
             lastTickCount = 0;
             setState(State.IN_WATER);
             return;
@@ -393,6 +397,28 @@ public final class MineManager {
 
         double verticalLimit = PlayerControllerConfig.getMineMaxVerticalSpeedPerTick();
         return Math.abs(velocity.y) <= verticalLimit;
+    }
+
+    /**
+     * 玩家身上有没有水。
+     *
+     * <p>不看 {@code player.isTouchingWater()} 那一个标志：开了飞行之后它在水里也会是 false，
+     * 结果「水里飞着」照样挖。这里直接查世界：玩家包围盒覆盖到的方块，只要流体状态是水就算沾水。
+     * 原版的标志也一并认（谁说是水都算），多拦一点没有坏处。
+     */
+    private static boolean touchingWater(MinecraftClient mc, ClientPlayerEntity player) {
+        if (player.isTouchingWater()) return true;
+        if (mc.world == null) return false;
+
+        // 稍微缩一点，免得贴着水面的时候因为浮点误差把旁边那格水算进来
+        Box box = player.getBoundingBox().contract(1.0E-4);
+        BlockPos min = BlockPos.ofFloored(box.minX, box.minY, box.minZ);
+        BlockPos max = BlockPos.ofFloored(box.maxX, box.maxY, box.maxZ);
+
+        for (BlockPos pos : BlockPos.iterate(min, max)) {
+            if (mc.world.getFluidState(pos).isIn(FluidTags.WATER)) return true;
+        }
+        return false;
     }
 
     /** 现在手上这件东西算哪一类工具。 */
