@@ -61,6 +61,10 @@ import java.util.concurrent.CompletableFuture;
  *
  * <p>和备货的工作站不一样：挖掘站不要求所有容器都在触及范围内，所以 set / add 只记坐标、不查距离；
  * 每个容器在哪里开（{@code access_position}）由 {@code check} 算出来。
+ *
+ * <p>产物收集（{@code item_collector}）是可选的：不配就不收集产物，{@code check} 也不会报错；
+ * 别的部分（食物、图腾、工具缓存、黏液块缓存）都必须配。配了的东西都要在路径点的可达范围内，
+ * 否则 {@code check} 会报错。
  */
 public final class MineStationCommand {
 
@@ -102,8 +106,8 @@ public final class MineStationCommand {
             + (manager.isShowing() ? "§a开" : "§c关") + "§r§7）："));
         for (MineStationPart part : MineStationPart.values()) {
             int count = manager.positions(part).size();
-            source.sendFeedback(Text.literal("  " + part.display() + "：" + count + " 个"
-                + (count == 0 ? "§c（无）" : "")));
+            String note = count > 0 ? "" : (part.optional() ? "§7（无，可选）" : "§c（无）");
+            source.sendFeedback(Text.literal("  " + part.display() + "：" + count + " 个" + note));
         }
         source.sendFeedback(Text.literal("  文件: " + manager.currentFile()));
         source.sendFeedback(Text.literal("  报告: " + manager.currentCheckFile()));

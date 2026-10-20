@@ -44,9 +44,10 @@ import java.util.List;
  * </ul>
  * 切得越少，客户端和服务端越不容易对不上（来回切工具那套会把两边的挖掘状态搅乱）。
  *
- * <p>另外：**水平速度不是 0、或者纵向速度不小于上限**的时候一概暂停
+ * <p>另外：**x / z 两个方向的水平速度分别超过上限、或者纵向速度超过上限**的时候一概暂停
  * （在走、在飞、被推、掉得太快 / 升得太快都不发破坏包），站定了才动手。
- * 纵向速度的上限是 {@code mine_max_vertical_speed_blocks_per_tick}（默认 1 格/tick）。
+ * 水平上限是 {@code mine_max_horizontal_speed_blocks_per_tick}、纵向上限是
+ * {@code mine_max_vertical_speed_blocks_per_tick}（默认都是 0.1 格/tick）。
  *
  * <p>和攻击的关系：切快捷栏、转头都走 {@link HotbarManager} / {@link RotateManager}，
  * {@link Owner#MINE} 的优先级比攻击低：攻击正在打的时候不抢快捷栏、也不抢朝向
@@ -58,14 +59,6 @@ import java.util.List;
 public final class MineManager {
 
     private static final MineManager INSTANCE = new MineManager();
-
-    /**
-     * 「速度为 0」的判定余量：**水平**速度平方小于这个数就算不动（约 0.001 格/tick）。
-     *
-     * <p>站着不动的时候原版算出来就是 (0, 0, 0)，这里留一点余量只是怕浮点残渣。
-     * 纵向速度不算：往下掉 / 往上飘的时候照样挖。
-     */
-    private static final double STILL_EPSILON_SQUARED = 1.0E-6;
 
     /** 现在是什么情况（{@code /pc mine} 会显示）。 */
     public enum State {
@@ -372,21 +365,22 @@ public final class MineManager {
     }
 
     /**
-     * 玩家现在是不是「站定了」：水平速度约等于 0，而且纵向速度小于上限。
+     * 玩家现在是不是「站定了」：x、z 两个方向的水平速度分别不超过
+     * {@code mine_max_horizontal_speed_blocks_per_tick}，而且纵向速度不超过
+     * {@code mine_max_vertical_speed_blocks_per_tick}（两个默认都是 0.1 格/tick）。
      *
-     * <p>水平：速度平方小于 {@link #STILL_EPSILON_SQUARED} 就算 0（约 0.001 格/tick）：
-     * 站着不动的时候原版算出来就是 (0, 0, 0)，这里留一点余量只是怕浮点残渣。
-     *
-     * <p>纵向：绝对值要**小于** {@code mine_max_vertical_speed_blocks_per_tick}
-     * （默认 1 格/tick）；配成 0 就要求纵向速度正好是 0。
+     * <p>站着不动的时候原版算出来就是 (0, 0, 0)，所以默认值下照常挖；
+     * 某一个上限配成 0 就要求那个方向的速度正好是 0。
      */
     private static boolean isStill(ClientPlayerEntity player) {
         Vec3d velocity = player.getVelocity();
-        if (velocity.horizontalLengthSquared() >= STILL_EPSILON_SQUARED) return false;
 
-        double limit = PlayerControllerConfig.getMineMaxVerticalSpeedPerTick();
-        double vertical = Math.abs(velocity.y);
-        return limit <= 0.0 ? vertical == 0.0 : vertical < limit;
+        double horizontalLimit = PlayerControllerConfig.getMineMaxHorizontalSpeedPerTick();
+        if (Math.abs(velocity.x) > horizontalLimit) return false;
+        if (Math.abs(velocity.z) > horizontalLimit) return false;
+
+        double verticalLimit = PlayerControllerConfig.getMineMaxVerticalSpeedPerTick();
+        return Math.abs(velocity.y) <= verticalLimit;
     }
 
     /** 现在手上这件东西算哪一类工具。 */

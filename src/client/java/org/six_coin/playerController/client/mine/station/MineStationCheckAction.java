@@ -53,9 +53,12 @@ import java.util.Set;
  *       （和 {@code /pc stock station check} 一样：不显示界面）。</li>
  * </ol>
  *
+ * <p>「不在路径点的可达范围内」是硬性要求：任何一个配了的东西，只要周围触及距离内没有路径点 / 边，
+ * 或者它的落点从安全点走不到，都记一条问题（而且不去开它，省得白跑）。
+ *
  * <p>内容要求（不满足的记成问题，最后一起报）：
  * <ul>
- *   <li>产物收集：方块必须是潜影盒，里面要么空、要么只有对应的产物；</li>
+ *   <li>产物收集（<b>可选</b>，不配就不查）：方块必须是潜影盒，里面要么空、要么只有对应的产物；</li>
  *   <li>食物补给：每一格都是熟猪排、而且每格 64 个；</li>
  *   <li>图腾补给：每一格都是不死图腾（不可堆叠，每格 1 个就是满的）；</li>
  *   <li>工具缓存：每个容器里只有合法工具（见 {@link MineToolRules}），
@@ -178,16 +181,12 @@ public class MineStationCheckAction extends Action {
         }
         safe.access(MineAccessPos.of(safe.dimension(), safe.pos()));
 
-        // 先看看有没有哪个部分根本没配
-        if (manager.single(MineStationPart.FOOD_PROVIDER) == null) {
-            addProblem("没有设置食物补给（food_provider）");
-        }
-        if (manager.single(MineStationPart.TOTEM_PROVIDER) == null) {
-            addProblem("没有设置图腾补给（totem_provider）");
-        }
-        for (MineStationPart part : List.of(MineStationPart.ITEM_COLLECTOR,
-            MineStationPart.TOOL_CACHE, MineStationPart.SLIME_CACHE)) {
-            if (manager.list(part).isEmpty()) addProblem("没有配置" + part.display() + "（" + part.id() + "）");
+        // 该配没配的部分：产物收集（item_collector）是可选的，不配就是不收集产物，别的不配都算问题
+        for (MineStationPart part : CONTAINER_PARTS) {
+            if (part.optional()) continue;
+            if (manager.positions(part).isEmpty()) {
+                addProblem("没有配置" + part.display() + "（" + part.id() + "）");
+            }
         }
 
         Map<String, Set<Long>> occupied = MineStationAccess.buildOccupied(graph);
@@ -196,27 +195,12 @@ public class MineStationCheckAction extends Action {
         ChatUtils.debug("挖掘站检查：给容器算落点（触及距离 " + PlayerUtils.reach()
             + " 格，球形偏移 " + offsets.size() + " 个）");
 
+        // 配了的东西每一个都要在路径点的可达范围内：落点算得出来、而且从安全点走得到。
+        // 不满足的只报错、不加进 targets —— 免得白走一趟再报一次「走不到」。
         for (MineStationPart part : CONTAINER_PARTS) {
             for (MinePlace place : manager.positions(part)) {
-                BlockPos access = MineStationAccess.findAccess(occupied, place.dimension(),
-                    place.pos(), offsets);
-                if (access == null) {
-                    place.access(null);
-                    addProblem(describe(part, place) + " 周围 " + format(PlayerUtils.reach())
-                        + " 格内既没有路径点也没有边，生不成落点");
-                    continue;
-                }
-
-                place.access(MineAccessPos.of(place.dimension(), access));
-                Waypoint node = MineStationAccess.waypointAt(place.dimension(), access);
-                if (node == null) {
-                    addProblem(describe(part, place) + " 的落点 " + access.toShortString() + " 建不成路径点");
-                    continue;
-                }
-                if (graph.shortestPath(safeNode.id(), node.id()) == null) {
-                    addProblem(describe(part, place) + " 的落点 " + access.toShortString()
-                        + " 从安全点走不到");
-                }
+                if (!resolveAccess(part, place, occupied, offsets, safeNode, graph)) continue;
+                targets.add(new Target(part, place, place.pos(), place.access().pos()));
             }
         }
 
@@ -224,14 +208,39 @@ public class MineStationCheckAction extends Action {
         manager.save();
         WaypointManager.get().save();
 
-        for (MineStationPart part : CONTAINER_PARTS) {
-            for (MinePlace place : manager.positions(part)) {
-                if (place.access() == null) continue;
-                targets.add(new Target(part, place, place.pos(), place.access().pos()));
-            }
+        ChatUtils.debug("挖掘站检查：落点算完，要开 " + targets.size() + " 个容器；问题 " + problems.size() + " 条");
+    }
+
+    /**
+     * 给一个容器算落点并检查可达性。
+     *
+     * <p>有问题（周围没有路径点 / 边、建不成路径点、从安全点走不到）就记一条问题并返回 false，
+     * 这个容器后面就不去开了。
+     */
+    private boolean resolveAccess(MineStationPart part, MinePlace place,
+                                  Map<String, Set<Long>> occupied, List<BlockPos> offsets,
+                                  Waypoint safeNode, WaypointGraph graph) {
+        BlockPos access = MineStationAccess.findAccess(occupied, place.dimension(),
+            place.pos(), offsets);
+        if (access == null) {
+            place.access(null);
+            addProblem(describe(part, place) + " 周围 " + format(PlayerUtils.reach())
+                + " 格内既没有路径点也没有边 —— 不在路径点的可达范围内");
+            return false;
         }
 
-        ChatUtils.debug("挖掘站检查：落点算完，要开 " + targets.size() + " 个容器；问题 " + problems.size() + " 条");
+        place.access(MineAccessPos.of(place.dimension(), access));
+        Waypoint node = MineStationAccess.waypointAt(place.dimension(), access);
+        if (node == null) {
+            addProblem(describe(part, place) + " 的落点 " + access.toShortString() + " 建不成路径点");
+            return false;
+        }
+        if (graph.shortestPath(safeNode.id(), node.id()) == null) {
+            addProblem(describe(part, place) + " 的落点 " + access.toShortString()
+                + " 从安全点走不到 —— 不在路径点的可达范围内");
+            return false;
+        }
+        return true;
     }
 
     // ------------------------------------------------------------------
@@ -487,15 +496,23 @@ public class MineStationCheckAction extends Action {
         validateToolCaches();
         validateSlimeCaches();
 
-        // 配置了却没数到的（大半是上面「走不到 / 打不开」）—— 这里只补一句「没数到」
-        for (MineStationPart part : List.of(MineStationPart.FOOD_PROVIDER,
-            MineStationPart.TOTEM_PROVIDER)) {
-            if (MineStationManager.get().single(part) != null && firstSurvey(part) == null) {
-                addProblem(part.display() + " 没有数到（没走到或者没打开）");
-            }
+        // 该开的容器有没有真的数到（没数到的大半是上面「打不开 / 半路失败」）：
+        // 凡是配了而且可达的都要数到，一条没数到就报一条
+        for (Target target : targets) {
+            if (surveyed(target)) continue;
+            addProblem(describe(target.part(), target.place()) + " 没有数到（没走到或者没打开）");
         }
     }
 
+    /** 这个目标开过箱、数到过内容没有。 */
+    private boolean surveyed(Target target) {
+        for (Survey survey : surveys) {
+            if (survey.part() == target.part() && survey.pos().equals(target.pos())) return true;
+        }
+        return false;
+    }
+
+    /** 产物收集是可选的：没配就一个都不查。 */
     private void validateCollectors() {
         for (Survey survey : surveysOf(MineStationPart.ITEM_COLLECTOR)) {
             String itemId = survey.itemId();

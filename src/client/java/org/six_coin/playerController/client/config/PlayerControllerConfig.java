@@ -39,7 +39,8 @@ import java.nio.file.Path;
  *     "mine_simple_wall_range": 4.0,
  *     "mine_simple_max_blocks_per_tick": 40,
  *     "mine_tool_switch_interval_ticks": 4,
- *     "mine_max_vertical_speed_blocks_per_tick": 1.0
+ *     "mine_max_vertical_speed_blocks_per_tick": 0.1,
+ *     "mine_max_horizontal_speed_blocks_per_tick": 0.1
  *   }
  * }
  * </pre>
@@ -163,12 +164,22 @@ public final class PlayerControllerConfig {
     /**
      * 挖掘：纵向速度上限（格 / tick，默认 {@value #DEFAULT_MINE_MAX_VERTICAL_SPEED_PER_TICK}）。
      *
-     * <p>只有纵向速度**小于**这个值的时候才动手：掉得太快 / 升得太快先暂停。
+     * <p>纵向速度的绝对值**不超过**这个值的时候才动手：掉得太快 / 升得太快先暂停。
      * 0 表示要求纵向速度正好是 0。
      */
-    public static final double DEFAULT_MINE_MAX_VERTICAL_SPEED_PER_TICK = 1.0;
+    public static final double DEFAULT_MINE_MAX_VERTICAL_SPEED_PER_TICK = 0.1;
     public static final double MIN_MINE_MAX_VERTICAL_SPEED_PER_TICK = 0.0;
     public static final double MAX_MINE_MAX_VERTICAL_SPEED_PER_TICK = 64.0;
+
+    /**
+     * 挖掘：水平速度上限（格 / tick，默认 {@value #DEFAULT_MINE_MAX_HORIZONTAL_SPEED_PER_TICK}）。
+     *
+     * <p>x、z 两个方向的水平速度要**分别**不超过这个值才动手（不是看合速度）：
+     * 配成 0 就要求两个方向的速度都正好是 0。
+     */
+    public static final double DEFAULT_MINE_MAX_HORIZONTAL_SPEED_PER_TICK = 0.1;
+    public static final double MIN_MINE_MAX_HORIZONTAL_SPEED_PER_TICK = 0.0;
+    public static final double MAX_MINE_MAX_HORIZONTAL_SPEED_PER_TICK = 64.0;
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -318,10 +329,18 @@ public final class PlayerControllerConfig {
         /**
          * 挖掘：纵向速度上限（格 / tick）。
          *
-         * <p>纵向速度小于它才动手；0 表示要求纵向速度正好是 0。
+         * <p>纵向速度的绝对值不超过它才动手；0 表示要求纵向速度正好是 0。
          */
         @SerializedName("mine_max_vertical_speed_blocks_per_tick")
         private double mineMaxVerticalSpeedPerTick = DEFAULT_MINE_MAX_VERTICAL_SPEED_PER_TICK;
+
+        /**
+         * 挖掘：水平速度上限（格 / tick）。
+         *
+         * <p>x、z 两个方向的水平速度要分别不超过它才动手（不看合速度）。
+         */
+        @SerializedName("mine_max_horizontal_speed_blocks_per_tick")
+        private double mineMaxHorizontalSpeedPerTick = DEFAULT_MINE_MAX_HORIZONTAL_SPEED_PER_TICK;
 
         public double moveSpeed() {
             return moveSpeed;
@@ -460,6 +479,15 @@ public final class PlayerControllerConfig {
         public void mineMaxVerticalSpeedPerTick(double value) {
             mineMaxVerticalSpeedPerTick = Math.min(MAX_MINE_MAX_VERTICAL_SPEED_PER_TICK,
                 Math.max(MIN_MINE_MAX_VERTICAL_SPEED_PER_TICK, value));
+        }
+
+        public double mineMaxHorizontalSpeedPerTick() {
+            return mineMaxHorizontalSpeedPerTick;
+        }
+
+        public void mineMaxHorizontalSpeedPerTick(double value) {
+            mineMaxHorizontalSpeedPerTick = Math.min(MAX_MINE_MAX_HORIZONTAL_SPEED_PER_TICK,
+                Math.max(MIN_MINE_MAX_HORIZONTAL_SPEED_PER_TICK, value));
         }
     }
 
@@ -647,6 +675,16 @@ public final class PlayerControllerConfig {
         instance.save();
     }
 
+    /** 挖掘：水平速度上限（格 / tick），x、z 两个方向分别判。 */
+    public static double getMineMaxHorizontalSpeedPerTick() {
+        return instance.actions.mineMaxHorizontalSpeedPerTick();
+    }
+
+    public static void setMineMaxHorizontalSpeedPerTick(double value) {
+        instance.actions.mineMaxHorizontalSpeedPerTick(value);
+        instance.save();
+    }
+
     /** 配置目录：config/player-controller/ */
     public static Path configDir() {
         return FabricLoader.getInstance()
@@ -700,7 +738,9 @@ public final class PlayerControllerConfig {
                 + ", mine_simple_max_blocks_per_tick=" + instance.actions.mineSimpleMaxBlocksPerTick()
                 + ", mine_tool_switch_interval_ticks=" + instance.actions.mineToolSwitchIntervalTicks()
                 + ", mine_max_vertical_speed_blocks_per_tick="
-                + instance.actions.mineMaxVerticalSpeedPerTick() + ")");
+                + instance.actions.mineMaxVerticalSpeedPerTick()
+                + ", mine_max_horizontal_speed_blocks_per_tick="
+                + instance.actions.mineMaxHorizontalSpeedPerTick() + ")");
         } catch (Exception e) {
             instance = new PlayerControllerConfig();
             ChatUtils.error("读取配置文件失败，已使用默认值: " + e.getMessage());
