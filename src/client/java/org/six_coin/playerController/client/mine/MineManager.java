@@ -46,8 +46,11 @@ import java.util.List;
  *
  * <p>另外：**x / z 两个方向的水平速度分别超过上限、或者纵向速度超过上限**的时候一概暂停
  * （在走、在飞、被推、掉得太快 / 升得太快都不发破坏包），站定了才动手。
- * 水平上限是 {@code mine_max_horizontal_speed_blocks_per_tick}、纵向上限是
- * {@code mine_max_vertical_speed_blocks_per_tick}（默认都是 0.1 格/tick）。
+ * 水平上限是 {@code mine_max_horizontal_speed_blocks_per_tick}（默认 0）、纵向上限是
+ * {@code mine_max_vertical_speed_blocks_per_tick}（默认 0.08 格/tick）。
+ *
+ * <p>**玩家沾水的时候也一概不挖**（{@link ClientPlayerEntity#isTouchingWater()}）：水里游泳 / 漂浮
+ * 会让客户端和服务端的挖掘状态对不上，所以哪怕速度满足条件也先停着，出水再继续。
  *
  * <p>和攻击的关系：切快捷栏、转头都走 {@link HotbarManager} / {@link RotateManager}，
  * {@link Owner#MINE} 的优先级比攻击低：攻击正在打的时候不抢快捷栏、也不抢朝向
@@ -74,6 +77,7 @@ public final class MineManager {
         ROTATE_DENIED("朝向被别的功能占着，这次没挖"),
         SWITCH_WAIT("刚换完工具，等一会儿再挖"),
         MOVING("玩家在动 / 掉得太快，先暂停"),
+        IN_WATER("玩家沾水，先暂停"),
         MINING("正在挖");
 
         private final String text;
@@ -243,6 +247,14 @@ public final class MineManager {
             return;
         }
 
+        // 玩家沾水就一概不挖：水里游泳 / 漂浮会让客户端和服务端的挖掘状态对不上，
+        // 而且水里掉得慢，速度判定的余量很容易被绕过
+        if (player.isTouchingWater()) {
+            lastTickCount = 0;
+            setState(State.IN_WATER);
+            return;
+        }
+
         // 玩家还在走，或者掉 / 升得太快：一概暂停，一个破坏包都不发
         if (!isStill(player)) {
             lastTickCount = 0;
@@ -366,8 +378,8 @@ public final class MineManager {
 
     /**
      * 玩家现在是不是「站定了」：x、z 两个方向的水平速度分别不超过
-     * {@code mine_max_horizontal_speed_blocks_per_tick}，而且纵向速度不超过
-     * {@code mine_max_vertical_speed_blocks_per_tick}（两个默认都是 0.1 格/tick）。
+     * {@code mine_max_horizontal_speed_blocks_per_tick}（默认 0），而且纵向速度不超过
+     * {@code mine_max_vertical_speed_blocks_per_tick}（默认 0.08 格/tick）。
      *
      * <p>站着不动的时候原版算出来就是 (0, 0, 0)，所以默认值下照常挖；
      * 某一个上限配成 0 就要求那个方向的速度正好是 0。

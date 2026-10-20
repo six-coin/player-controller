@@ -39,8 +39,8 @@ import java.nio.file.Path;
  *     "mine_simple_wall_range": 4.0,
  *     "mine_simple_max_blocks_per_tick": 40,
  *     "mine_tool_switch_interval_ticks": 4,
- *     "mine_max_vertical_speed_blocks_per_tick": 0.1,
- *     "mine_max_horizontal_speed_blocks_per_tick": 0.1
+ *     "mine_max_vertical_speed_blocks_per_tick": 0.08,
+ *     "mine_max_horizontal_speed_blocks_per_tick": 0.0
  *   }
  * }
  * </pre>
@@ -167,7 +167,7 @@ public final class PlayerControllerConfig {
      * <p>纵向速度的绝对值**不超过**这个值的时候才动手：掉得太快 / 升得太快先暂停。
      * 0 表示要求纵向速度正好是 0。
      */
-    public static final double DEFAULT_MINE_MAX_VERTICAL_SPEED_PER_TICK = 0.1;
+    public static final double DEFAULT_MINE_MAX_VERTICAL_SPEED_PER_TICK = 0.08;
     public static final double MIN_MINE_MAX_VERTICAL_SPEED_PER_TICK = 0.0;
     public static final double MAX_MINE_MAX_VERTICAL_SPEED_PER_TICK = 64.0;
 
@@ -175,9 +175,9 @@ public final class PlayerControllerConfig {
      * 挖掘：水平速度上限（格 / tick，默认 {@value #DEFAULT_MINE_MAX_HORIZONTAL_SPEED_PER_TICK}）。
      *
      * <p>x、z 两个方向的水平速度要**分别**不超过这个值才动手（不是看合速度）：
-     * 配成 0 就要求两个方向的速度都正好是 0。
+     * 默认 0 就是要求两个方向的速度都正好是 0（完全站定）。
      */
-    public static final double DEFAULT_MINE_MAX_HORIZONTAL_SPEED_PER_TICK = 0.1;
+    public static final double DEFAULT_MINE_MAX_HORIZONTAL_SPEED_PER_TICK = 0.0;
     public static final double MIN_MINE_MAX_HORIZONTAL_SPEED_PER_TICK = 0.0;
     public static final double MAX_MINE_MAX_HORIZONTAL_SPEED_PER_TICK = 64.0;
 
