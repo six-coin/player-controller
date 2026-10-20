@@ -21,6 +21,7 @@ import org.six_coin.playerController.client.mending.MendingConfig;
 import org.six_coin.playerController.client.mending.MendingManager;
 import org.six_coin.playerController.client.mine.MineFilterConfig;
 import org.six_coin.playerController.client.mine.MineManager;
+import org.six_coin.playerController.client.mine.complex.MineComplexManager;
 import org.six_coin.playerController.client.mine.station.MineStationManager;
 import org.six_coin.playerController.client.mine.station.MineStationRenderer;
 import org.six_coin.playerController.client.recipe.LocalRecipes;
@@ -46,6 +47,7 @@ public class PlayerControllerClient implements ClientModInitializer {
         MendingConfig.get().load();
         MineFilterConfig.get().load();
         MineStationManager.get().load();
+        MineComplexManager.get().load();
         PcCommand.register();
         WaypointRenderer.register();
         ContainerCacheRenderer.register();
@@ -100,6 +102,11 @@ public class PlayerControllerClient implements ClientModInitializer {
 
             // 挖掘的过滤列表是可以手改的 json，进世界时重新读一遍
             MineFilterConfig.get().load();
+
+            // mine.json（任务清单 + simple 缓存）也重读一遍，然后把上次的 simple 任务接回来：
+            // 重新进世界之后挖掘区不会丢，站着不动就会接着挖（要停就 /pc mine cancel）
+            MineComplexManager.get().load();
+            MineManager.get().resumeSaved();
         });
 
         // /pc account：换账户是分 tick 做的（先换身份下线，再自动重连），这里驱动它

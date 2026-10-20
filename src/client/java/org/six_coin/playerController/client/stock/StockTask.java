@@ -61,9 +61,10 @@ public final class StockTask extends Action {
     @Override
     protected void onStart() {
         // 备货自己会挖方块（见 MineBlockAction），先把挖掘任务收掉：
-        // 两边都要切快捷栏、都要动服务端那边的朝向，一起跑会互相抢
-        if (MineManager.get().cancel()) {
-            ChatUtils.info("备货开始，先取消了正在跑的挖掘任务");
+        // 两边都要切快捷栏、都要动服务端那边的朝向，一起跑会互相抢。
+        // 用 stop() 而不是 cancel()：mine.json 里缓存的 simple 范围留着，别因为备货把它丢了
+        if (MineManager.get().stop()) {
+            ChatUtils.info("备货开始，先停下了正在跑的挖掘任务（/pc mine 的范围还留着）");
         }
 
         MinecraftClient mc = MinecraftClient.getInstance();

@@ -1,6 +1,7 @@
 package org.six_coin.playerController.client.commands;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -21,8 +22,12 @@ import org.six_coin.playerController.client.mine.MineFilter;
 import org.six_coin.playerController.client.mine.MineFilterConfig;
 import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.mine.MineRegion;
+import org.six_coin.playerController.client.mine.complex.MineBeaconPlanner;
+import org.six_coin.playerController.client.mine.complex.MineComplexManager;
+import org.six_coin.playerController.client.mine.complex.MineTaskRegion;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -48,8 +53,16 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
  * /pc mine list whitelist del &lt;block_id&gt;
  * /pc mine list blacklist list|add|del …     黑名单同理
  *
+ * /pc mine complex add_task &lt;task_name&gt;      建一个复杂挖掘任务（mine.json + mine/&lt;task&gt;/region.json）
+ * /pc mine complex del_task &lt;task_name&gt;      删任务（整个 mine/&lt;task&gt;/ 目录一起删）
+ * /pc mine complex task &lt;task_name&gt; a_set_region &lt;x1&gt; &lt;y1&gt; &lt;z1&gt; &lt;x2&gt; &lt;y2&gt; &lt;z2&gt; &lt;dim&gt;
+ *                                            写 region.json（范围 + 信标位置）
  * /pc mine complex station ...               挖掘站（见 MineStationCommand）
  * </pre>
+ *
+ * <p>simple 的范围会记进 {@code world_<n>/mine.json}，重新进世界自动接回来
+ * （见 {@link MineManager#resumeSaved()}）。复杂任务的清单也在这个文件里，
+ * 每个任务的挖掘区 / 信标单独放在 {@code world_<n>/mine/<task>/region.json}。
  *
  * <p>过滤器是三份文件（{@link MineFilterConfig}）：{@code mine/mode.json} 决定用哪张表，
  * {@code whitelist.json} / {@code blacklist.json} 是方块 id 数组。开任务时取一份快照，
@@ -71,6 +84,9 @@ public final class MineCommand {
             .then(lists())
             .then(ClientCommandManager.literal("complex")
                 .executes(MineCommand::complexStatus)
+                .then(addTask())
+                .then(delTask())
+                .then(taskCommand())
                 .then(MineStationCommand.build()));
     }
 
@@ -369,7 +385,12 @@ public final class MineCommand {
             + "simple <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 在框里挖方块"));
         source.sendFeedback(Text.literal("§7  §f" + ROOT + "cancel§7 - 取消所有挖掘任务"));
         source.sendFeedback(Text.literal("§7  §f" + ROOT + "list ...§7 - 白名单 / 黑名单（mode、add、del、list）"));
+        source.sendFeedback(Text.literal("§7  §f" + ROOT
+            + "complex add_task|del_task <task_name>§7 - 建 / 删复杂挖掘任务"));
+        source.sendFeedback(Text.literal("§7  §f" + ROOT
+            + "complex task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区 + 算信标"));
         source.sendFeedback(Text.literal("§7  §f" + ROOT + "complex station ...§7 - 挖掘站（list / check / show / 各处坐标）"));
+        source.sendFeedback(Text.literal("§7  范围记在 mine.json 里，重新进世界会接着挖（/pc mine cancel 才会清掉）"));
         return 1;
     }
 
@@ -384,7 +405,219 @@ public final class MineCommand {
     }
 
     private static int complexStatus(CommandContext<FabricClientCommandSource> context) {
-        MineStationCommand.showStatus(context.getSource());
+        FabricClientCommandSource source = context.getSource();
+        showTasks(source);
+        MineStationCommand.showStatus(source);
         return 1;
+    }
+
+    // ------------------------------------------------------------------
+    // complex：任务清单
+    // ------------------------------------------------------------------
+
+    private static void showTasks(FabricClientCommandSource source) {
+        MineComplexManager manager = MineComplexManager.get();
+        List<String> tasks = manager.tasks();
+
+        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7复杂挖掘任务（" + tasks.size() + " 个）："
+            + (tasks.isEmpty() ? "§8（空）" : String.join("、", tasks))));
+        source.sendFeedback(Text.literal("§7  §f" + ROOT
+            + "complex add_task|del_task <task_name>§7 - 建 / 删任务"));
+        source.sendFeedback(Text.literal("§7  §f" + ROOT
+            + "complex task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区"));
+        source.sendFeedback(Text.literal("  文件: " + manager.currentFile()));
+    }
+
+    private static LiteralArgumentBuilder<FabricClientCommandSource> addTask() {
+        return ClientCommandManager.literal("add_task")
+            .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
+                .executes(MineCommand::addTask));
+    }
+
+    private static int addTask(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        String name = StringArgumentType.getString(context, "task_name");
+
+        MineComplexManager manager = MineComplexManager.get();
+        String error = manager.addTask(name);
+        if (error != null) {
+            source.sendError(Text.literal(error));
+            return 0;
+        }
+
+        source.sendFeedback(Text.literal("已创建挖掘任务 §f" + name + "§r（现在一共 "
+            + manager.taskCount() + " 个）"));
+        source.sendFeedback(Text.literal("  目录: " + manager.currentTaskDir(name)
+            + "（region.json 现在是空的 {}）"));
+        source.sendFeedback(Text.literal("§7  下一步：§f" + ROOT + "complex task " + name
+            + " a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>"));
+        return 1;
+    }
+
+    private static LiteralArgumentBuilder<FabricClientCommandSource> delTask() {
+        return ClientCommandManager.literal("del_task")
+            .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
+                .executes(MineCommand::delTask));
+    }
+
+    private static int delTask(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        String name = StringArgumentType.getString(context, "task_name");
+
+        MineComplexManager manager = MineComplexManager.get();
+        Path dir = manager.currentTaskDir(name);
+        String error = manager.delTask(name);
+        if (error != null) {
+            source.sendError(Text.literal(error));
+            return 0;
+        }
+
+        source.sendFeedback(Text.literal("已删除挖掘任务 §f" + name + "§r（目录整个删掉了："
+            + dir + "），现在还剩 " + manager.taskCount() + " 个"));
+        return 1;
+    }
+
+    /**
+     * {@code /pc mine complex task <task_name> ...}：不带子命令看这个任务的区域，
+     * 带 {@code a_set_region} 就重写 region.json。
+     */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> taskCommand() {
+        // brigadier 的 then(builder) 会立刻 build 出节点，所以要从里往外挂
+        RequiredArgumentBuilder<FabricClientCommandSource, Identifier> dim =
+            ClientCommandManager.argument("dim", IdentifierArgumentType.identifier())
+                .suggests(DimensionSuggestions::suggest)
+                .executes(MineCommand::setRegion);
+
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> z2 =
+            ClientCommandManager.argument("z2", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
+        z2.then(dim);
+
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> y2 =
+            ClientCommandManager.argument("y2", IntegerArgumentType.integer()).suggests(LookSuggestions::y);
+        y2.then(z2);
+
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> x2 =
+            ClientCommandManager.argument("x2", IntegerArgumentType.integer()).suggests(LookSuggestions::x);
+        x2.then(y2);
+
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> z1 =
+            ClientCommandManager.argument("z1", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
+        z1.then(x2);
+
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> y1 =
+            ClientCommandManager.argument("y1", IntegerArgumentType.integer()).suggests(LookSuggestions::y);
+        y1.then(z1);
+
+        RequiredArgumentBuilder<FabricClientCommandSource, Integer> x1 =
+            ClientCommandManager.argument("x1", IntegerArgumentType.integer()).suggests(LookSuggestions::x);
+        x1.then(y1);
+
+        return ClientCommandManager.literal("task")
+            .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
+                .executes(MineCommand::taskStatus)
+                .then(ClientCommandManager.literal("a_set_region").then(x1)));
+    }
+
+    private static int taskStatus(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        String name = StringArgumentType.getString(context, "task_name");
+
+        MineComplexManager manager = MineComplexManager.get();
+        if (!manager.has(name)) {
+            source.sendError(Text.literal("没有这个挖掘任务：" + name
+                + "（先 " + ROOT + "complex add_task " + name + "）"));
+            return 0;
+        }
+
+        MineTaskRegion region = manager.region(name);
+        if (region == null) {
+            source.sendFeedback(Text.literal("挖掘任务 " + name + " 还没设区域（"
+                + ROOT + "complex task " + name + " a_set_region …）"));
+            source.sendFeedback(Text.literal("  文件: " + manager.currentRegionFile(name)));
+            return 1;
+        }
+
+        source.sendFeedback(Text.literal("挖掘任务 " + name + "：" + region.describe()));
+        printBeacons(source, region.beacons());
+        source.sendFeedback(Text.literal("  文件: " + manager.currentRegionFile(name)));
+        return 1;
+    }
+
+    private static int setRegion(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        String name = StringArgumentType.getString(context, "task_name");
+
+        MineComplexManager manager = MineComplexManager.get();
+        if (!manager.has(name)) {
+            source.sendError(Text.literal("没有这个挖掘任务：" + name
+                + "（先 " + ROOT + "complex add_task " + name + "）"));
+            return 0;
+        }
+
+        Identifier dimension = context.getArgument("dim", Identifier.class);
+        if (dimension == null) {
+            source.sendError(Text.literal("没有写维度"));
+            return 0;
+        }
+
+        int x1 = IntegerArgumentType.getInteger(context, "x1");
+        int y1 = IntegerArgumentType.getInteger(context, "y1");
+        int z1 = IntegerArgumentType.getInteger(context, "z1");
+        int x2 = IntegerArgumentType.getInteger(context, "x2");
+        int y2 = IntegerArgumentType.getInteger(context, "y2");
+        int z2 = IntegerArgumentType.getInteger(context, "z2");
+
+        int spanX = Math.abs(x2 - x1);
+        int spanY = Math.abs(y2 - y1);
+        int spanZ = Math.abs(z2 - z1);
+        if (spanX < MineTaskRegion.MIN_XZ_SPAN || spanZ < MineTaskRegion.MIN_XZ_SPAN
+            || spanY < MineTaskRegion.MIN_Y_SPAN) {
+            source.sendError(Text.literal("区域太小：要求 |x1-x2| >= "
+                + MineTaskRegion.MIN_XZ_SPAN + "、|z1-z2| >= " + MineTaskRegion.MIN_XZ_SPAN
+                + "、|y1-y2| >= " + MineTaskRegion.MIN_Y_SPAN
+                + "（你现在是 " + spanX + " / " + spanZ + " / " + spanY + "）"));
+            return 0;
+        }
+
+        // 用户写的两个角谁大谁小都行：落盘前统一排成 min / max
+        BlockPos min = new BlockPos(Math.min(x1, x2), Math.min(y1, y2), Math.min(z1, z2));
+        BlockPos max = new BlockPos(Math.max(x1, x2), Math.max(y1, y2), Math.max(z1, z2));
+
+        List<BlockPos> beacons = MineBeaconPlanner.plan(min, max);
+        MineTaskRegion region = MineTaskRegion.of(dimension.toString(), min, max, beacons);
+
+        Path file = manager.currentRegionFile(name);
+        try {
+            region.save(file);
+        } catch (IOException e) {
+            source.sendError(Text.literal("写 region.json 失败：" + e.getMessage()));
+            return 0;
+        }
+
+        source.sendFeedback(Text.literal("已更新任务 §f" + name + "§r 的挖掘区：" + region.describe()));
+        printBeacons(source, beacons);
+        source.sendFeedback(Text.literal("§e支持钻石工具 / 下界合金工具，但这两个效率几乎一致。"));
+        source.sendFeedback(Text.literal("§7  信标记的是塔底（9x9 那层）的坐标，信标方块本身在 y+"
+            + MineBeaconPlanner.TOWER_HEIGHT + "；文件：" + file));
+        return 1;
+    }
+
+    /** 把信标坐标打到聊天栏（太多就只打前 30 个，剩下的在 region.json 里）。 */
+    private static void printBeacons(FabricClientCommandSource source, List<BlockPos> beacons) {
+        int shown = Math.min(beacons.size(), 30);
+        for (int start = 0; start < shown; start += 5) {
+            StringBuilder line = new StringBuilder("  §8");
+            for (int i = start; i < Math.min(start + 5, shown); i++) {
+                BlockPos pos = beacons.get(i);
+                if (i > start) line.append(' ');
+                line.append('(').append(pos.getX()).append(',').append(pos.getY()).append(',')
+                    .append(pos.getZ()).append(')');
+            }
+            source.sendFeedback(Text.literal(line.toString()));
+        }
+        if (beacons.size() > shown) {
+            source.sendFeedback(Text.literal("  §8…… 还有 " + (beacons.size() - shown)
+                + " 个，全部写在 region.json 的 beacon 里"));
+        }
     }
 }

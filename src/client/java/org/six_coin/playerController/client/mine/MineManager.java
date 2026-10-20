@@ -18,6 +18,8 @@ import net.minecraft.world.RaycastContext;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
+import org.six_coin.playerController.client.mine.complex.MineComplexData;
+import org.six_coin.playerController.client.mine.complex.MineComplexManager;
 import org.six_coin.playerController.client.mixin.ClientPlayerInteractionManagerAccessor;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.rotate.RotateManager;
@@ -61,7 +63,10 @@ import java.util.List;
  * （这一 tick 就先不挖，等攻击打完再继续）。
  *
  * <p>一直挖到 {@code /pc mine cancel} 为止（nuker 是常驻的，附近没方块了也只是停着）。
- * 备货开始前会先把挖掘任务取消掉（见 {@code StockTask}）。
+ * 备货开始前会先把挖掘任务停下来（见 {@code StockTask}，用 {@link #stop()}，缓存留着）。
+ *
+ * <p>范围会记进 {@code world_<n>/mine/mine.json}，重新进世界之后由 {@link #resumeSaved()}
+ * 接回来（{@code /pc mine cancel} 才会把缓存一起清掉）。
  */
 public final class MineManager {
 
@@ -157,7 +162,7 @@ public final class MineManager {
     // 开始 / 取消
     // ------------------------------------------------------------------
 
-    /** 开一个新任务（原来有任务的话直接换掉）。 */
+    /** 开一个新任务（原来有任务的话直接换掉）。范围会顺手记进 mine.json，重进世界还在。 */
     public void start(MineRegion region) {
         release();
         this.region = region;
@@ -166,14 +171,27 @@ public final class MineManager {
         this.targetTool = null;
         this.lastTickCount = 0;
         this.switchCooldown = 0;
+        MineComplexManager.get().setSimple(MineComplexData.SimpleRegion.of(region));
         ChatUtils.debug("开始挖掘任务：" + region.describe());
     }
 
-    /** 取消所有挖掘任务（simple / complex）。有没有任务被取消掉。 */
+    /** 取消所有挖掘任务（simple / complex），mine.json 里的 simple 缓存也一起清掉。有没有东西被取消掉。 */
     public boolean cancel() {
+        boolean hadSaved = MineComplexManager.get().clearSimple();
+        boolean stopped = stop();
+        return hadSaved || stopped;
+    }
+
+    /**
+     * 只停掉正在跑的任务，<b>不动</b> mine.json 里的缓存。
+     *
+     * <p>给「临时让一让」的场景用（比如备货要自己挖方块，见 {@code StockTask}）：
+     * 停完范围还留着，重新进世界照样能接回来。
+     */
+    public boolean stop() {
         if (region == null) return false;
 
-        ChatUtils.debug("取消挖掘任务：" + region.describe());
+        ChatUtils.debug("停下挖掘任务：" + region.describe());
         region = null;
         state = State.IDLE;
         target = null;
@@ -184,7 +202,7 @@ public final class MineManager {
         return true;
     }
 
-    /** 进世界 / 断线的时候清一下（不发任何包）。 */
+    /** 进世界 / 断线的时候清一下（不发任何包）。mine.json 里的缓存不动。 */
     public void reset() {
         region = null;
         state = State.IDLE;
@@ -194,6 +212,24 @@ public final class MineManager {
         switchCooldown = 0;
         MineTools.clearCache();
         release();
+    }
+
+    /**
+     * 把 mine.json 里缓存的 simple 任务接回来（重新进世界 / 换世界配置之后用）。
+     *
+     * <p>缓存里有就接着挖；没有的话把当前这个任务收掉 —— 换世界配置时不能让上一个世界的任务
+     * 继续跑、还往新的 mine.json 里写。
+     */
+    public void resumeSaved() {
+        MineComplexData.SimpleRegion saved = MineComplexManager.get().simple();
+        if (saved == null || saved.dimension() == null) {
+            if (region != null) cancel();
+            return;
+        }
+
+        MineRegion restored = saved.toRegion(MineFilterConfig.get().filter());
+        start(restored);
+        ChatUtils.debug("挖掘：已接回 mine.json 里缓存的 simple 任务 " + restored.describe());
     }
 
     /** 把快捷栏 / 朝向还回去（不是我们占着的时候什么都不做）。 */
