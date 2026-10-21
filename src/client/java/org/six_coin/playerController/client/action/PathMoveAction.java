@@ -369,8 +369,8 @@ public class PathMoveAction extends Action {
                     // 从末地回来必须落在当前出生点，否则直接停下
                     fail("从末地回来没有落在当前出生点（实际 " + actual.toShortString()
                         + "，当前出生点 " + step.to().coordString() + "），已停止任务；"
-                        + "请在落点用 /pc waypoints add_waypoint here 建一个路径点，"
-                        + "再用 /pc waypoints set_spawn here 把它设为出生点后重试");
+                        + "请在落点用 /pc waypoint add_waypoint here 建一个路径点，"
+                        + "再用 /pc waypoint set_spawn here 把它设为出生点后重试");
                 } else {
                     fail("落点 " + actual.toShortString() + " 和记录的路径点 "
                         + step.to().pos().toShortString() + " 对不上");

@@ -29,18 +29,18 @@ import static org.six_coin.playerController.client.commands.CommandStyle.fillBut
 import static org.six_coin.playerController.client.commands.CommandStyle.runButton;
 
 /**
- * {@code /pc mending ...} —— 靠刷经验把带经验修补的东西修满。
+ * {@code /pc mend ...} —— 靠刷经验把带经验修补的东西修满。
  *
  * <pre>
- * /pc mending                                       看在跑没跑、站立点 / 末影箱、配置
- * /pc mending start                                 开始（先走去站立点，再开攻击，然后一直检测）
+ * /pc mend                                       看在跑没跑、站立点 / 末影箱、配置
+ * /pc mend start                                 开始（先走去站立点，再开攻击，然后一直检测）
  *
- * /pc mending station                               两个位置
- * /pc mending station stand_point set_here          站立点设在脚下
- * /pc mending station stand_point set &lt;x&gt; &lt;y&gt; &lt;z&gt; [dim]
- * /pc mending station ender_chest set_target        末影箱（准星指着的方块）
- * /pc mending station ender_chest set &lt;x&gt; &lt;y&gt; &lt;z&gt; [dim]
- * /pc mending station ender_chest del               不打开末影箱了
+ * /pc mend station                               两个位置
+ * /pc mend station stand_point set_here          站立点设在脚下
+ * /pc mend station stand_point set &lt;x&gt; &lt;y&gt; &lt;z&gt; [dim]
+ * /pc mend station ender_chest set_target        末影箱（准星指着的方块）
+ * /pc mend station ender_chest set &lt;x&gt; &lt;y&gt; &lt;z&gt; [dim]
+ * /pc mend station ender_chest del               不打开末影箱了
  * </pre>
  *
  * <p>坐标都带维度：set / set_here / set_target 用当前维度，也可以补一个 [dim] 直接写别的维度。
@@ -53,13 +53,13 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
  */
 public final class MendingCommand {
 
-    private static final String ROOT = "/pc mending ";
+    private static final String ROOT = "/pc mend ";
 
     private MendingCommand() {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("mending")
+        return ClientCommandManager.literal("mend")
             .executes(MendingCommand::status)
             .then(ClientCommandManager.literal("start")
                 .executes(MendingCommand::start))
@@ -86,7 +86,7 @@ public final class MendingCommand {
         }
         state.append(Text.literal("§8（上次：" + manager.lastResult() + "） "));
         if (manager.stage() == MendingManager.Stage.IDLE) {
-            state.append(runButton("[开始]", ROOT + "start", "直接执行 /pc mending start"));
+            state.append(runButton("[开始]", ROOT + "start", "直接执行 /pc mend start"));
         }
         source.sendFeedback(state);
 

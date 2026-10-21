@@ -82,7 +82,7 @@ public final class PathPlanner {
         Waypoint from = WaypointManager.get().playerStartWaypoint();
         if (from == null) {
             return new Plan(null, to, "你现在所在的 " + here.toShortString()
-                + " 既不是路径点，也不在任何边上，先用 /pc waypoints add_waypoint here 加一个", null);
+                + " 既不是路径点，也不在任何边上，先用 /pc waypoint add_waypoint here 加一个", null);
         }
 
         if (from.id() == to.id()) {

@@ -265,8 +265,8 @@ public final class WaypointManager {
             if (to == null) {
                 ChatUtils.error("末地祭坛 + " + endPos.toShortString()
                     + " 需要连到出生点，但你还没有设置出生点；"
-                    + "请先用 /pc waypoints set_spawn id <id> 或者在出生点的路径点上用 "
-                    + "/pc waypoints set_spawn here");
+                    + "请先用 /pc waypoint set_spawn id <id> 或者在出生点的路径点上用 "
+                    + "/pc waypoint set_spawn here");
                 return false;
             }
         } else {

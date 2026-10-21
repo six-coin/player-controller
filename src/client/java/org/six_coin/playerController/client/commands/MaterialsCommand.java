@@ -31,29 +31,29 @@ import static org.six_coin.playerController.client.commands.CommandStyle.gray;
 import static org.six_coin.playerController.client.commands.CommandStyle.runButton;
 
 /**
- * {@code /pc materials ...} —— 材料清单的配置，以及生成材料清单。
+ * {@code /pc material ...} —— 材料清单的配置，以及生成材料清单。
  *
  * <pre>
- * /pc materials                                                  看这几份配置在哪、各有多少条
- * /pc materials terminal_items                                   列出「到此为止」的物品
- * /pc materials terminal_items add|del &lt;item&gt;
- * /pc materials blacklist                                        列出不要的最终产物（只滤最外层）
- * /pc materials blacklist add|del &lt;item&gt;
- * /pc materials recipe_preferences                               列出所有配方偏好
- * /pc materials recipe_preferences show &lt;result_item&gt;            看这个产物有哪些做法可以选
- * /pc materials recipe_preferences add &lt;result_item&gt; &lt;recipe&gt;
- * /pc materials recipe_preferences del &lt;result_item&gt;
- * /pc materials tag_preferences                                  列出所有标签偏好
- * /pc materials tag_preferences show &lt;tag&gt;                       看这个标签里有哪些物品可以选
- * /pc materials tag_preferences add &lt;tag&gt; &lt;item&gt;
- * /pc materials tag_preferences del &lt;tag&gt;
- * /pc materials ingredient_preferences                           列出所有「一串可选物品」的偏好
- * /pc materials ingredient_preferences show &lt;key&gt;                看这一处有哪些物品可以选
- * /pc materials ingredient_preferences add &lt;key&gt; &lt;item&gt;
- * /pc materials ingredient_preferences del &lt;key&gt;
- * /pc materials replace_materials                                列出所有替换
- * /pc materials replace_materials add &lt;被替换的物品&gt; &lt;换成什么&gt;
- * /pc materials replace_materials del &lt;被替换的物品&gt;
+ * /pc material                                                  看这几份配置在哪、各有多少条
+ * /pc material terminal_items                                   列出「到此为止」的物品
+ * /pc material terminal_items add|del &lt;item&gt;
+ * /pc material blacklist                                        列出不要的最终产物（只滤最外层）
+ * /pc material blacklist add|del &lt;item&gt;
+ * /pc material recipe_preferences                               列出所有配方偏好
+ * /pc material recipe_preferences show &lt;result_item&gt;            看这个产物有哪些做法可以选
+ * /pc material recipe_preferences add &lt;result_item&gt; &lt;recipe&gt;
+ * /pc material recipe_preferences del &lt;result_item&gt;
+ * /pc material tag_preferences                                  列出所有标签偏好
+ * /pc material tag_preferences show &lt;tag&gt;                       看这个标签里有哪些物品可以选
+ * /pc material tag_preferences add &lt;tag&gt; &lt;item&gt;
+ * /pc material tag_preferences del &lt;tag&gt;
+ * /pc material ingredient_preferences                           列出所有「一串可选物品」的偏好
+ * /pc material ingredient_preferences show &lt;key&gt;                看这一处有哪些物品可以选
+ * /pc material ingredient_preferences add &lt;key&gt; &lt;item&gt;
+ * /pc material ingredient_preferences del &lt;key&gt;
+ * /pc material replace_materials                                列出所有替换
+ * /pc material replace_materials add &lt;被替换的物品&gt; &lt;换成什么&gt;
+ * /pc material replace_materials del &lt;被替换的物品&gt;
  * </pre>
  *
  * <p>生成材料清单的入口在 {@code /pc stock task <名字> generate_materials_list}（见 {@link StockCommand}），
@@ -62,7 +62,7 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
 public final class MaterialsCommand {
 
     /** 拼「点了会填什么命令」用的前缀。 */
-    private static final String ROOT = "/pc materials ";
+    private static final String ROOT = "/pc material ";
 
     /** 一个列表最多列几行，免得刷屏。 */
     private static final int MAX_LINES = 80;
@@ -71,7 +71,7 @@ public final class MaterialsCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("materials")
+        return ClientCommandManager.literal("material")
             .executes(MaterialsCommand::status)
             .then(terminalItems())
             .then(blacklist())
@@ -448,7 +448,7 @@ public final class MaterialsCommand {
                 .anyMatch(candidate -> candidate.id().equals(recipe));
             if (!known) {
                 source.sendError(Text.literal(recipe + " 做不出 "
-                    + MaterialsConfig.itemId(result) + "（/pc materials recipe_preferences show "
+                    + MaterialsConfig.itemId(result) + "（/pc material recipe_preferences show "
                     + MaterialsConfig.itemId(result) + " 看有哪些）"));
                 return 0;
             }
@@ -556,7 +556,7 @@ public final class MaterialsCommand {
         List<Item> items = MaterialsRecipes.tagItems(tag);
         if (!items.isEmpty() && !items.contains(item)) {
             source.sendError(Text.literal(MaterialsConfig.itemId(item) + " 不在 "
-                + MaterialsConfig.tagId(tag) + " 里（/pc materials tag_preferences show "
+                + MaterialsConfig.tagId(tag) + " 里（/pc material tag_preferences show "
                 + MaterialsConfig.tagId(tag) + " 看有哪些）"));
             return 0;
         }
@@ -649,7 +649,7 @@ public final class MaterialsCommand {
         List<Item> items = choiceItems(key);
         if (!items.isEmpty() && !items.contains(item)) {
             source.sendError(Text.literal(MaterialsConfig.itemId(item) + " 不在 " + key
-                + " 这一格里（/pc materials ingredient_preferences show " + key + " 看有哪些）"));
+                + " 这一格里（/pc material ingredient_preferences show " + key + " 看有哪些）"));
             return 0;
         }
 

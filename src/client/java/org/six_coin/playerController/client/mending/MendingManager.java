@@ -41,7 +41,7 @@ import java.util.List;
 /**
  * mending：站在末影箱旁边，把要修的东西一件一件换到副手，靠 {@code /pc attack} 刷经验喂经验修补。
  *
- * <p>{@code /pc mending start} 的顺序（就是代码里的顺序）：
+ * <p>{@code /pc mend start} 的顺序（就是代码里的顺序）：
  *
  * <ol>
  *   <li>检查 attack 里有 {@link #PROFILE} 这份 profile（没有就报错，让用户自己建）；</li>
@@ -102,7 +102,7 @@ public final class MendingManager {
 
     private static final MendingManager INSTANCE = new MendingManager();
 
-    /** 现在跑到哪一步了（{@code /pc mending} 会显示）。 */
+    /** 现在跑到哪一步了（{@code /pc mend} 会显示）。 */
     public enum Stage {
 
         IDLE("没在跑"),
@@ -141,7 +141,7 @@ public final class MendingManager {
 
     private Stage stage = Stage.IDLE;
 
-    /** 上一次是怎么结束的（{@code /pc mending} 会显示）。 */
+    /** 上一次是怎么结束的（{@code /pc mend} 会显示）。 */
     private String lastResult = "还没跑过";
 
     /** 出发的位置（收尾时走回来）。 */
@@ -230,7 +230,7 @@ public final class MendingManager {
     }
 
     /**
-     * 快捷栏第一位那把剑合不合用（{@code /pc mending} 和 {@code start} 都用它）。
+     * 快捷栏第一位那把剑合不合用（{@code /pc mend} 和 {@code start} 都用它）。
      *
      * @return null = 没问题；否则是一句为什么不行
      */
@@ -256,7 +256,7 @@ public final class MendingManager {
     }
 
     // ------------------------------------------------------------------
-    // /pc mending start
+    // /pc mend start
     // ------------------------------------------------------------------
 
     /**
@@ -293,13 +293,13 @@ public final class MendingManager {
         if (WaypointManager.get().playerStartWaypoint() == null) {
             BlockPos here = PlayerUtils.currentBlockPos();
             return "你现在所在的 " + (here == null ? "?" : here.toShortString())
-                + " 既不是路径点，也不在任何边上，先用 /pc waypoints add_waypoint here 加一个";
+                + " 既不是路径点，也不在任何边上，先用 /pc waypoint add_waypoint here 加一个";
         }
 
         // 4) 站立点
         MendingPos stand = MendingConfig.get().standPoint();
         if (stand == null) {
-            return "还没设站立点：/pc mending station stand_point set_here";
+            return "还没设站立点：/pc mend station stand_point set_here";
         }
 
         // 5) 别的任务在跑就不掺和（移动和容器都是共用的）

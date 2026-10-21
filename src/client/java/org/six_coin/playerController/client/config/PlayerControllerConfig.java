@@ -220,7 +220,7 @@ public final class PlayerControllerConfig {
          * 触及距离，单位：方块。
          *
          * <p>用来判断方块在不在「够得着」的范围内（例如 {@code /pc container} 打开容器、
-         * {@code /pc waypoints del_waypoint target} 取准星看到的方块）。默认值和原版一样是 4.5。
+         * {@code /pc waypoint del_waypoint target} 取准星看到的方块）。默认值和原版一样是 4.5。
          *
          * <p>注意：这只是本模组自己的判断标准；服务端还有它自己的一套距离检查，
          * 调大之后对服务端不认的交互依然会被服务端拒绝。

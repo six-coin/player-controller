@@ -206,7 +206,7 @@ final class Part1Stage3Pack extends StockStep {
         collectPositions();
 
         if (WaypointManager.get().isEditMode()) {
-            ChatUtils.error("路径点编辑模式开着：阶段3 的移动会顺手记路径点，建议先关掉（/pc waypoints edit）");
+            ChatUtils.error("路径点编辑模式开着：阶段3 的移动会顺手记路径点，建议先关掉（/pc waypoint edit）");
         }
 
         if (placementIds.size() < 2) {

@@ -43,8 +43,14 @@ import java.util.Set;
  * <p>「通」的判定：这条路经过的每一格方块、以及它上面那一格，都必须是空气
  * （人高 2 格，所以要看上面一格）。起点自己那一格不看（玩家就站在那儿，可能是草 / 雪片），
  * 但起点头顶那一格还是要空。
+ *
+ * <p>目的地必须在**已加载**的区块里（不然读不到方块、也飞不过去），否则直接拒绝。
+ * {@code network} 只在 1000 格半径内找，而且只找已加载区块里的坐标。
  */
 public final class SnapCommand {
+
+    /** {@code network} 的搜索半径（格）。 */
+    private static final int NETWORK_SEARCH_RADIUS = 1000;
 
     /** 6 种轴顺序，按这个顺序试，第一个通的就用。 */
     private static final Direction.Axis[][] ORDERS = {
@@ -98,8 +104,9 @@ public final class SnapCommand {
         source.sendFeedback(Text.literal("§8[§bPC§8]§r §7snap：沿轴三段直线贴到某个坐标（先试 6 种轴顺序，取第一种通的）"));
         source.sendFeedback(Text.literal("  §f/pc snap absolute <x> <y> <z>§7 - 去这个坐标（当前维度）"));
         source.sendFeedback(Text.literal("  §f/pc snap relative <dx> <dy> <dz>§7 - 去当前坐标 + 偏移"));
-        source.sendFeedback(Text.literal("  §f/pc snap network§7 - 去最近的路径点 / 边上的坐标"));
-        source.sendFeedback(Text.literal("  §7经过的每一格和它上面一格都必须是空气"));
+        source.sendFeedback(Text.literal("  §f/pc snap network§7 - 去最近的路径点 / 边上的坐标（"
+            + NETWORK_SEARCH_RADIUS + " 格内，只找已加载的区块）"));
+        source.sendFeedback(Text.literal("  §7经过的每一格和它上面一格都必须是空气；目的地不在已加载范围内直接拒绝"));
     }
 
     // ------------------------------------------------------------------
@@ -116,7 +123,7 @@ public final class SnapCommand {
         BlockPos target = nearestNetwork();
         if (target == null) {
             source.sendError(Text.literal("当前维度（" + DimensionUtils.display(DimensionUtils.current())
-                + "）里还没有任何路径点 / 边，没法 snap"));
+                + "）" + NETWORK_SEARCH_RADIUS + " 格内没有已加载的路径点 / 边，没法 snap"));
             return 0;
         }
         return snap(source, target, "network");
@@ -143,6 +150,14 @@ public final class SnapCommand {
         if (from.equals(target)) {
             source.sendFeedback(Text.literal("你已经站在 " + target.toShortString() + " 了（" + how + "）"));
             return 1;
+        }
+
+        // 目的地不在已加载的区块里就直接拒绝：读不到方块、也不该往没加载的地方飞
+        if (!isLoaded(mc, target)) {
+            source.sendError(Text.literal("目的地 " + target.toShortString()
+                + " 不在当前已加载的区块里（离你 " + format(distanceTo(player, target))
+                + " 格），先走近一点再 snap"));
+            return 0;
         }
 
         Plan plan = plan(mc, from, target);
@@ -230,7 +245,7 @@ public final class SnapCommand {
     // network：最近的路径点 / 边上的坐标
     // ------------------------------------------------------------------
 
-    /** 当前维度里离玩家最近的「路径点或者某条边上的方块」；一个都没有返回 null。 */
+    /** 当前维度里离玩家最近的「路径点或者某条边上的方块」；{@link #NETWORK_SEARCH_RADIUS} 内找不到返回 null。 */
     @Nullable
     private static BlockPos nearestNetwork() {
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -241,18 +256,35 @@ public final class SnapCommand {
         Set<Long> positions = occupied.get(DimensionUtils.current());
         if (positions == null || positions.isEmpty()) return null;
 
+        double limit = (double) NETWORK_SEARCH_RADIUS * NETWORK_SEARCH_RADIUS;
         Vec3d here = player.getEntityPos();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (long packed : positions) {
             BlockPos pos = BlockPos.fromLong(packed);
             double distance = here.squaredDistanceTo(Vec3d.ofCenter(pos));
+            if (distance > limit) continue;         // 超出搜索半径
+            if (!isLoaded(mc, pos)) continue;       // 没加载的区块不进去（进了也读不到方块）
+
             if (distance < bestDistance) {
                 bestDistance = distance;
                 best = pos;
             }
         }
         return best;
+    }
+
+    /** 这个坐标所在的区块加载了没有。 */
+    private static boolean isLoaded(MinecraftClient mc, BlockPos pos) {
+        return mc.world != null && mc.world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4);
+    }
+
+    private static String format(double value) {
+        return String.format("%.1f", value);
+    }
+
+    private static double distanceTo(ClientPlayerEntity player, BlockPos pos) {
+        return player.getEntityPos().distanceTo(Vec3d.ofCenter(pos));
     }
 
     // ------------------------------------------------------------------

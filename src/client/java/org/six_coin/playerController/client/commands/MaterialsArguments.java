@@ -22,7 +22,7 @@ import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * {@code /pc materials ...} 专用的三个参数类型。
+ * {@code /pc material ...} 专用的三个参数类型。
  *
  * <p>都属于「一直读到空格为止」（配方 id、标签、{@code 配方#第几处} 里都有冒号、井号这种
  * brigadier 自带参数类型不认的字符），而且都带自动填充。

@@ -136,7 +136,7 @@ public final class MaterialsGenerator {
         }
         if (kept.isEmpty()) {
             throw new IOException("黑名单把 " + skipped.size()
-                + " 种最终产物全滤掉了，没有东西要备货（/pc materials blacklist 看看是不是写多了）");
+                + " 种最终产物全滤掉了，没有东西要备货（/pc material blacklist 看看是不是写多了）");
         }
         return new Blacklisted(kept, skipped);
     }

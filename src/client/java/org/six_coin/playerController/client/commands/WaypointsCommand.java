@@ -31,34 +31,34 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * {@code /pc waypoints ...} —— 路径点、边、出生点，全部走这一套命令。
+ * {@code /pc waypoint ...} —— 路径点、边、出生点，全部走这一套命令。
  *
  * <pre>
- * /pc waypoints show
- * /pc waypoints edit
- * /pc waypoints list
- * /pc waypoints optimize                          两条子命令的使用说明
- * /pc waypoints optimize default                  合并中间点，并重新编号
- * /pc waypoints optimize radical                  先备份，再删掉走不到的点和边，然后做一次 default
- * /pc waypoints add_edge &lt;id1&gt; &lt;id2&gt;
- * /pc waypoints add_waypoint here
- * /pc waypoints add_waypoint target
- * /pc waypoints add_waypoint position &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; [name]
- * /pc waypoints name_waypoint here [name]
- * /pc waypoints name_waypoint id &lt;id&gt; [name]
- * /pc waypoints name_waypoint target [name]
- * /pc waypoints del_edge &lt;id&gt;                     id 必须是负数（边都是负数编号）
- * /pc waypoints del_waypoint id &lt;id&gt;
- * /pc waypoints del_waypoint here
- * /pc waypoints del_waypoint target
- * /pc waypoints del_waypoint position &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt;
- * /pc waypoints del_waypoint name &lt;name&gt;
- * /pc waypoints set_spawn id &lt;id&gt;
- * /pc waypoints set_spawn here
- * /pc waypoints set_spawn target
- * /pc waypoints set_spawn position &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt;
- * /pc waypoints set_spawn name &lt;name&gt;
- * /pc waypoints del_spawn
+ * /pc waypoint show
+ * /pc waypoint edit
+ * /pc waypoint list
+ * /pc waypoint optimize                          两条子命令的使用说明
+ * /pc waypoint optimize default                  合并中间点，并重新编号
+ * /pc waypoint optimize radical                  先备份，再删掉走不到的点和边，然后做一次 default
+ * /pc waypoint add_edge &lt;id1&gt; &lt;id2&gt;
+ * /pc waypoint add_waypoint here
+ * /pc waypoint add_waypoint target
+ * /pc waypoint add_waypoint position &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; [name]
+ * /pc waypoint name_waypoint here [name]
+ * /pc waypoint name_waypoint id &lt;id&gt; [name]
+ * /pc waypoint name_waypoint target [name]
+ * /pc waypoint del_edge &lt;id&gt;                     id 必须是负数（边都是负数编号）
+ * /pc waypoint del_waypoint id &lt;id&gt;
+ * /pc waypoint del_waypoint here
+ * /pc waypoint del_waypoint target
+ * /pc waypoint del_waypoint position &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt;
+ * /pc waypoint del_waypoint name &lt;name&gt;
+ * /pc waypoint set_spawn id &lt;id&gt;
+ * /pc waypoint set_spawn here
+ * /pc waypoint set_spawn target
+ * /pc waypoint set_spawn position &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt;
+ * /pc waypoint set_spawn name &lt;name&gt;
+ * /pc waypoint del_spawn
  * </pre>
  *
  * <p>几个统一的地方：
@@ -73,7 +73,7 @@ import java.util.List;
 public final class WaypointsCommand {
 
     /** 点击事件里补全命令用的前缀。 */
-    private static final String ROOT = "/pc waypoints ";
+    private static final String ROOT = "/pc waypoint ";
 
     /** list 每段最多列多少行。 */
     private static final int LIST_LIMIT = 80;
@@ -82,7 +82,7 @@ public final class WaypointsCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("waypoints")
+        return ClientCommandManager.literal("waypoint")
             .executes(WaypointsCommand::status)
             .then(literal("show")
                 .executes(WaypointsCommand::toggleShow))

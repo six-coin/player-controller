@@ -47,14 +47,14 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " stock station ... §8- §7工作站配置（各部分的 set/set_target/add/del/list、show 高亮、check 检查并导出报告）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " stock add_task|del_task <名字>、/" + name + " stock task <名字> generate_materials_list|start_collect"));
                 source.sendFeedback(Text.literal("§7    §7generate_materials_list 把 litematica 导出的 original.json 处理成 materials.json；start_collect 开始备货（预检查 → 取货 → 分盒重装 → 合成）"));
-                source.sendFeedback(Text.literal("§7  /" + name + " materials ... §8- §7材料清单配置（terminal_items、blacklist、recipe_preferences、tag_preferences、ingredient_preferences、replace_materials）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " material ... §8- §7材料清单配置（terminal_items、blacklist、recipe_preferences、tag_preferences、ingredient_preferences、replace_materials）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " dump all_items|inventory|all_tags §8- §7把物品 / 物品栏 / minecraft 物品标签导成 json（config/player-controller/dump/）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " attack ... §8- §7攻击（一直监听，按 profile 挑该打谁）：toggle、profile、show_all_mobs"));
-                source.sendFeedback(Text.literal("§7  /" + name + " mending ... §8- §7经验修补：start；station stand_point|ender_chest set|set_here|set_target|del"));
+                source.sendFeedback(Text.literal("§7  /" + name + " mend ... §8- §7经验修补：start；station stand_point|ender_chest set|set_here|set_target|del"));
                 source.sendFeedback(Text.literal("§7  /" + name + " mine ... §8- §7挖掘：cancel；simple <x1> <y1> <z1> <x2> <y2> <z2> <dim>（按 mine/ 下的白/黑名单挖框里的方块）；list mode|whitelist|blacklist list|add|del"));
                 source.sendFeedback(Text.literal("§7  /" + name + " mine complex add_task|del_task <名字>、/" + name + " mine complex task <名字> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim> §8- §7复杂挖掘任务（记在 mine/mine.json，范围 + 信标写在 mine/<名字>/region.json）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " mine complex station ... §8- §7挖掘站：list、check（算落点 + 走过去开箱检查）、show、safe_point / food_provider / totem_provider / item_collector / tool_cache / slime_cache"));
-                source.sendFeedback(Text.literal("§7  /" + name + " waypoints ... §8- §7路径点 / 边 / 出生点"));
+                source.sendFeedback(Text.literal("§7  /" + name + " waypoint ... §8- §7路径点 / 边 / 出生点"));
                 source.sendFeedback(Text.literal("§7    §7子命令：show、edit、list、optimize default|radical"));
                 source.sendFeedback(Text.literal("§7    §7  add_waypoint here|target|position <x> <y> <z> <dim> [name]"));
                 source.sendFeedback(Text.literal("§7    §7  name_waypoint here|target|id <id> [name]（不写名字就是删掉名字）"));

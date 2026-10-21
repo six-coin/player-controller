@@ -197,16 +197,16 @@ public final class RecipePlanner {
             return "本地配方表里没有能用" + station + "做出 " + name(target) + " 的配方";
         }
         return switch (problem.kind()) {
-            case AMBIGUOUS -> name(target) + " 有好几种" + station + "的做法，先选一条：/pc materials "
+            case AMBIGUOUS -> name(target) + " 有好几种" + station + "的做法，先选一条：/pc material "
                 + "recipe_preferences show " + name(target);
             case BAD_PREFERENCE -> "recipe_preferences 里把 " + name(target) + " 定成了 "
-                + problem.recipe() + "，但这条配方做不出它、也不是" + station + "配方（/pc materials "
+                + problem.recipe() + "，但这条配方做不出它、也不是" + station + "配方（/pc material "
                 + "recipe_preferences show " + name(target) + " 看有哪些）";
             case UNDECIDED_TAG -> "配方里的标签 " + MaterialsConfig.tagId(problem.tag())
-                + " 还没定用哪个物品（/pc materials tag_preferences show "
+                + " 还没定用哪个物品（/pc material tag_preferences show "
                 + MaterialsConfig.tagId(problem.tag()) + "）";
             case UNDECIDED_INGREDIENT -> "配方里的 " + problem.slotKey()
-                + " 这一格有好几种可选物品，还没定用哪个（/pc materials ingredient_preferences show "
+                + " 这一格有好几种可选物品，还没定用哪个（/pc material ingredient_preferences show "
                 + problem.slotKey() + "）";
         };
     }
