@@ -37,6 +37,14 @@ public final class StationManager {
 
     private static final String FILE_NAME = "station.json";
 
+    /**
+     * 最终产物暂存盒固定用的潜影盒摆放处编号。
+     *
+     * <p>这个盒子里的东西算「已经收好的成品」（check.json 的 {@code already_collected}），
+     * <b>不算</b>普通的潜影盒库存（不进 {@code shulker_box_placement}）。
+     */
+    public static final int STAGING_PLACEMENT_ID = 1;
+
     private static final StationManager INSTANCE = new StationManager();
 
     private StationData data = new StationData();

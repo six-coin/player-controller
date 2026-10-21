@@ -2,6 +2,7 @@ package org.six_coin.playerController.client.stock;
 
 import net.minecraft.client.MinecraftClient;
 import org.six_coin.playerController.client.action.Action;
+import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.container.ContainerCacheTracker;
 import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -108,6 +109,15 @@ public final class StockTask extends Action {
     protected void onEnd() {
         // 不管成功、失败还是被取消，都要把自动刷新放开（不然以后开箱子都不写缓存了）
         ContainerCacheTracker.setSuspended(false);
+
+        // 失败了就把物品栏收拾一下：除了快捷栏第一格的钻石镐，其余全放回 item_storage。
+        // 不收拾的话，中途剩下的过程材料会一直占着 27 格，下次一开始就「物品栏满了」。
+        if (failureReason() != null) {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (mc.player != null && mc.world != null) {
+                ActionManager.get().submit(new StockCleanupAction());
+            }
+        }
     }
 
     /** 打进度 / 失败信息用的名字：流水线的步骤就是它的阶段名。 */

@@ -86,16 +86,17 @@ public final class StockMaterials {
             throw new IOException("找不到材料清单 " + material
                 + "（先跑 /pc stock task " + task + " generate_materials_list）");
         }
-        // 最终产物地里已经有的东西：某种东西够数了，materials.json 里对应的那个根节点整个不要
-        Map<Item, Integer> itemFinal = readFinalItems(world);
+        // 已经收好的成品（最终产物地 + 最终产物暂存盒）：某种东西够数了，
+        // materials.json 里对应的那个根节点整个不要
+        Map<Item, Integer> collected = readCollectedItems(world);
         List<String> coveredByFinal = new ArrayList<>();
 
-        Map<Item, Integer> clean = readMaterial(material, itemFinal, coveredByFinal);
+        Map<Item, Integer> clean = readMaterial(material, collected, coveredByFinal);
         Path cleanFile = manager.currentCleanFile(task);
         writeItems(cleanFile, clean);
         ChatUtils.debug("1_1 材料清单：" + clean.size() + " 种 -> " + cleanFile);
         if (!coveredByFinal.isEmpty()) {
-            ChatUtils.info("最终产物地里已经够了，这次不备：" + String.join("、", coveredByFinal));
+            ChatUtils.info("已经收好了，这次不备：" + String.join("、", coveredByFinal));
         }
 
         // 第二步：用仓库（item_storage）和容器（overall）算出还要去取的量
@@ -169,11 +170,11 @@ public final class StockMaterials {
     /**
      * 读 {@code materials.json} 的最外层：物品 -> 数量（重复的会加在一起，嵌套的 sub_materials 不看）。
      *
-     * <p>另外按需求做一次「最终产物地已经够了就不备」的过滤：某个根节点的物品在 item_final 里
-     * 已经**不少于**这个根节点要的数量，那这个根节点整个删掉（不备这种了），删掉的记进
-     * {@code coveredByFinal} 给聊天栏汇总。
+     * <p>另外按需求做一次「已经收好了就不备」的过滤：某个根节点的物品在 {@code already_collected}
+     * （最终产物地 + 最终产物暂存盒）里已经**不少于**这个根节点要的数量，那这个根节点整个删掉
+     * （不备这种了），删掉的记进 {@code coveredByFinal} 给聊天栏汇总。
      */
-    private static Map<Item, Integer> readMaterial(Path file, Map<Item, Integer> itemFinal,
+    private static Map<Item, Integer> readMaterial(Path file, Map<Item, Integer> collected,
                                                    List<String> coveredByFinal) throws IOException {
         String raw = Files.readString(file, StandardCharsets.UTF_8);
         JsonElement root = JsonParser.parseString(raw);
@@ -192,9 +193,9 @@ public final class StockMaterials {
             int count = object.get("count").getAsInt();
             if (count <= 0) continue;
 
-            int already = itemFinal.getOrDefault(item, 0);
+            int already = collected.getOrDefault(item, 0);
             if (already >= count) {
-                coveredByFinal.add(id(item) + "（要 " + count + "，最终产物地已有 " + already + "）");
+                coveredByFinal.add(id(item) + "（要 " + count + "，已经有 " + already + "）");
                 continue;
             }
             items.merge(item, count, Integer::sum);
@@ -202,9 +203,9 @@ public final class StockMaterials {
         return items;
     }
 
-    /** check.json 里的 {@code item_final}：最终产物地所有物品及其数量（没有就按空的算）。 */
-    private static Map<Item, Integer> readFinalItems(int world) {
-        return readItems(readObject(StationManager.checkFile(world), "item_final"));
+    /** check.json 里的 {@code already_collected}：已经收好的成品（最终产物地 + 暂存盒里那些）。 */
+    private static Map<Item, Integer> readCollectedItems(int world) {
+        return readItems(readObject(StationManager.checkFile(world), "already_collected"));
     }
 
     /** 从某个 json 文件里取一个对象出来（比如 check.json 的 item_storage）；没有就当空的。 */

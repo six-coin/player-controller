@@ -57,7 +57,12 @@ public class ContainerPutAction extends Action {
         /** 什么都放，**连快捷栏也放**（备货阶段1 把物品栏清空用）。 */
         EVERYTHING_INCLUDE_HOTBAR,
         /** 只放快捷栏连续几格（备货阶段3 把合成出来的成品倒进暂存盒用，见 {@link #hotbarRange}）。 */
-        HOTBAR_RANGE
+        HOTBAR_RANGE,
+        /**
+         * 什么都放，**除了** {@link #wanted} 里的东西和 {@link #skipIndex} 那一格
+         * （备货失败收尾、物品栏满了腾地方用，见 {@link #everythingExcept}）。
+         */
+        EVERYTHING_EXCEPT
     }
 
     /** 主背包（27 格，不含快捷栏）在玩家背包里的起始下标。 */
@@ -81,6 +86,10 @@ public class ContainerPutAction extends Action {
     /** 只有 {@link Mode#HOTBAR_RANGE} 用：源格范围（玩家背包下标，含两端）。 */
     private final int hotbarFrom;
     private final int hotbarTo;
+    /** 只有 {@link Mode#EVERYTHING_EXCEPT} 用：动不动快捷栏（true = 连快捷栏一起放）。 */
+    private final boolean includeHotbar;
+    /** 只有 {@link Mode#EVERYTHING_EXCEPT} 用：跳过哪一格（背包下标；-1 = 不跳）。 */
+    private final int skipIndex;
 
     private final ContainerSession session;
     /** 搬运本身（一轮点一遍 → 核对 → 判定满没满）。 */
@@ -104,17 +113,19 @@ public class ContainerPutAction extends Action {
      * @param wanted 只有 {@link Mode#WANTED} 用：只放「这个 item_list 还要的」物品
      */
     public ContainerPutAction(BlockPos pos, Mode mode, boolean wantDetail, @Nullable ItemList wanted) {
-        this(pos, mode, wantDetail, wanted, 0, 0);
+        this(pos, mode, wantDetail, wanted, 0, 0, false, -1);
     }
 
     private ContainerPutAction(BlockPos pos, Mode mode, boolean wantDetail, @Nullable ItemList wanted,
-                               int hotbarFrom, int hotbarTo) {
+                               int hotbarFrom, int hotbarTo, boolean includeHotbar, int skipIndex) {
         this.pos = pos.toImmutable();
         this.mode = mode;
         this.wantDetail = wantDetail;
         this.wanted = wanted;
         this.hotbarFrom = Math.min(hotbarFrom, hotbarTo);
         this.hotbarTo = Math.max(hotbarFrom, hotbarTo);
+        this.includeHotbar = includeHotbar;
+        this.skipIndex = skipIndex;
         this.session = new ContainerSession(this.pos);
         this.stash = new ContainerStash(this.session);
     }
@@ -126,7 +137,21 @@ public class ContainerPutAction extends Action {
      * 盒子是不是真的满也由它说了算。
      */
     public static ContainerPutAction hotbarRange(BlockPos pos, int from, int to, boolean wantDetail) {
-        return new ContainerPutAction(pos, Mode.HOTBAR_RANGE, wantDetail, null, from, to);
+        return new ContainerPutAction(pos, Mode.HOTBAR_RANGE, wantDetail, null, from, to, false, -1);
+    }
+
+    /**
+     * 什么都放，**除了** {@code keep} 里的物品、以及背包下标为 {@code skipIndex} 的那一格。
+     *
+     * @param keep          这些不放（null / 空表 = 什么都放）
+     * @param includeHotbar true = 连快捷栏 9 格一起放（备货失败收尾时用，配合 skipIndex 留住钻石镐）
+     * @param skipIndex     跳过这一格（背包下标，-1 = 不跳）
+     */
+    public static ContainerPutAction everythingExcept(BlockPos pos, @Nullable ItemList keep,
+                                                     boolean includeHotbar, int skipIndex,
+                                                     boolean wantDetail) {
+        return new ContainerPutAction(pos, Mode.EVERYTHING_EXCEPT, wantDetail, keep,
+            0, 0, includeHotbar, skipIndex);
     }
 
     @Override
@@ -162,11 +187,30 @@ public class ContainerPutAction extends Action {
             case WANTED -> "item_list 里还要的东西";
             case EVERYTHING_INCLUDE_HOTBAR -> "everything_include_hotbar";
             case HOTBAR_RANGE -> rangeName();
+            case EVERYTHING_EXCEPT -> keepName();
         };
+    }
+
+    /** {@link Mode#EVERYTHING_EXCEPT} 的一句话说明。 */
+    private String keepName() {
+        StringBuilder sb = new StringBuilder("除了 ");
+        boolean any = false;
+        if (wanted != null && !wanted.isEmpty()) {
+            sb.append("item_list 里那些");
+            any = true;
+        }
+        if (skipIndex >= 0) {
+            if (any) sb.append("、");
+            sb.append("背包下标 ").append(skipIndex).append(" 那一格");
+            any = true;
+        }
+        if (!any) return "everything";
+        return sb.toString();
     }
 
     /** 这个模式动不动快捷栏。 */
     public boolean includesHotbar() {
+        if (mode == Mode.EVERYTHING_EXCEPT) return includeHotbar;
         return mode == Mode.EVERYTHING_INCLUDE_HOTBAR;
     }
 
@@ -188,6 +232,9 @@ public class ContainerPutAction extends Action {
             return hotbarFrom == hotbarTo
                 ? "快捷栏第 " + (hotbarFrom + 1) + " 格"
                 : "快捷栏第 " + (hotbarFrom + 1) + "~" + (hotbarTo + 1) + " 格";
+        }
+        if (mode == Mode.EVERYTHING_EXCEPT && includeHotbar) {
+            return "整个物品栏（27 格主背包 + 快捷栏 9 格）";
         }
         return includesHotbar() ? "整个物品栏（27 格主背包 + 快捷栏 9 格）"
             : "物品栏（27 格，不含快捷栏）";
@@ -322,7 +369,7 @@ public class ContainerPutAction extends Action {
             if (index < rangeStart() || index >= rangeEnd()) continue;
 
             ItemStack stack = slot.getStack();
-            if (stack.isEmpty() || !matches(stack)) continue;
+            if (stack.isEmpty() || !matches(index, stack)) continue;
             result.add(slot);
         }
         return result;
@@ -335,16 +382,20 @@ public class ContainerPutAction extends Action {
         int total = 0;
         for (int i = rangeStart(); i < rangeEnd(); i++) {
             ItemStack stack = player.getInventory().getStack(i);
-            if (stack.isEmpty() || !matches(stack)) continue;
+            if (stack.isEmpty() || !matches(i, stack)) continue;
             total += stack.getCount();
         }
         return total;
     }
 
     /** 这一叠算不算「要放的东西」：潜影盒不算物品，everything 什么都算，wanted 只认 item_list。 */
-    private boolean matches(ItemStack stack) {
+    private boolean matches(int index, ItemStack stack) {
         if (mode == Mode.HOTBAR_RANGE) return true;
         if (mode == Mode.WANTED) return wanted != null && wanted.wants(stack.getItem());
+        if (mode == Mode.EVERYTHING_EXCEPT) {
+            if (index == skipIndex) return false;
+            return wanted == null || !wanted.wants(stack.getItem());
+        }
         if (mode == Mode.EVERYTHING || mode == Mode.EVERYTHING_INCLUDE_HOTBAR) return true;
 
         boolean shulker = ShulkerUtils.isShulkerBox(stack);

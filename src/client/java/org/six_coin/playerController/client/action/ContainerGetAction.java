@@ -332,6 +332,15 @@ public class ContainerGetAction extends Action {
         return !stoppedForInventory && (scannedAll || itemList.isEmpty());
     }
 
+    /**
+     * 是不是因为「主背包 27 格没有空位」才停下的。
+     *
+     * <p>备货流程用它决定「先把物品栏腾一下再接着取」，而不是直接判失败。
+     */
+    public boolean stoppedForInventory() {
+        return stoppedForInventory;
+    }
+
     // ------------------------------------------------------------------
     // 打开容器
     // ------------------------------------------------------------------

@@ -75,7 +75,7 @@ import java.util.function.Supplier;
 final class Part2Stage3Craft extends StockStep {
 
     /** 最终产物暂存处固定用摆放处 id 1。 */
-    static final int STAGING_ID = 1;
+    static final int STAGING_ID = StationManager.STAGING_PLACEMENT_ID;
 
     /** 挖盒子用快捷栏第一格的钻石镐。 */
     private static final int PICKAXE_HOTBAR = StockTask.PICKAXE_HOTBAR;
@@ -94,6 +94,9 @@ final class Part2Stage3Craft extends StockStep {
 
     /** 往暂存盒放成品时，「物品栏放不下 → 先放进暂存盒腾地方 → 接着取」最多来回几次。 */
     private static final int MAX_STAGING_FLUSHES = 8;
+
+    /** 取材料时物品栏满了，「先倒一批用不上的东西回 item_storage → 接着取」最多来回几次。 */
+    private static final int MAX_INVENTORY_DUMPS = 6;
 
     private static final int MAX_TOTAL_TICKS = 20 * 60 * 60;
 
@@ -729,11 +732,12 @@ final class Part2Stage3Craft extends StockStep {
     /** 从 item_storage 把材料取到物品栏（只拿物品形态的）。 */
     private void pushFetchFromStorage(ItemList fetch, Map<String, Integer> need, Runnable next) {
         pushSync("从 item_storage 取材料 " + need, () -> {
-            fetchFromStorage(fetch, state.storageIds(), 0, next);
+            fetchFromStorage(fetch, need, state.storageIds(), 0, 0, next);
         });
     }
 
-    private void fetchFromStorage(ItemList fetch, List<Integer> ids, int index, Runnable next) {
+    private void fetchFromStorage(ItemList fetch, Map<String, Integer> need,
+                                  List<Integer> ids, int index, int dumps, Runnable next) {
         if (fetch.isEmpty()) {
             next.run();
             return;
@@ -746,13 +750,13 @@ final class Part2Stage3Craft extends StockStep {
 
         int id = ids.get(index);
         if (!storageHasLoose(id, fetch)) {
-            fetchFromStorage(fetch, ids, index + 1, next);
+            fetchFromStorage(fetch, need, ids, index + 1, dumps, next);
             return;
         }
 
         StationPos pos = stationPos(StationPart.ITEM_STORAGE, id);
         if (pos == null) {
-            fetchFromStorage(fetch, ids, index + 1, next);
+            fetchFromStorage(fetch, need, ids, index + 1, dumps, next);
             return;
         }
 
@@ -761,12 +765,70 @@ final class Part2Stage3Craft extends StockStep {
             action -> {
                 ContainerGetAction get = (ContainerGetAction) action;
                 if (get.detail() != null) state.setStorage(id, get.detail(), get.freeSlots());
-                if (!get.allCleared()) {
-                    fail("物品栏放不下这些材料了（应该在 27 格以内的）");
+
+                if (get.allCleared()) {
+                    ChatUtils.debug("取完还差 " + fetch.describe());
+                    fetchFromStorage(fetch, need, ids, index + 1, dumps, next);
                     return;
                 }
-                ChatUtils.debug("取完还差 " + fetch.describe());
-                fetchFromStorage(fetch, ids, index + 1, next);
+
+                // 物品栏 27 格塞满了：先把手边「这一步用不上的东西」倒回 item_storage 腾地方，再接着取。
+                // 这一步要用的材料（need）留着，不然又得重新去仓库拿一遍。
+                if (!get.stoppedForInventory() || dumps >= MAX_INVENTORY_DUMPS) {
+                    ChatUtils.error("物品栏放不下这些材料了（还差 " + fetch.describe()
+                        + "），先去手动清一下物品栏");
+                    fetchFromStorage(fetch, need, ids, index + 1, dumps, next);
+                    return;
+                }
+                ChatUtils.info("物品栏满了，先把用不上的东西倒回 item_storage 再接着取材料");
+                pushDumpInventoryExcept(need, () ->
+                    fetchFromStorage(fetch, need, ids, index, dumps + 1, next));
+            });
+    }
+
+    /**
+     * 把物品栏 27 格里「这一步用不上的东西」倒回 item_storage，腾出空位。
+     *
+     * <p>{@code keep} 里的材料不动（那是这一步马上要用的）。
+     */
+    private void pushDumpInventoryExcept(Map<String, Integer> keep, Runnable next) {
+        pushSync("物品栏满了：把用不上的东西倒回 item_storage 腾地方", () -> {
+            List<Integer> ids = new ArrayList<>(state.storageTargets());
+            if (ids.isEmpty()) {
+                fail("物资存储地都满了，物品栏里的东西倒不回去");
+                return;
+            }
+            dumpInventoryExcept(keep, ids, 0, next);
+        });
+    }
+
+    private void dumpInventoryExcept(Map<String, Integer> keep, List<Integer> ids, int index, Runnable next) {
+        if (index >= ids.size()) {
+            ChatUtils.error("item_storage 都塞满了，物品栏里的东西倒不回去（先清一下仓库）");
+            next.run();
+            return;
+        }
+
+        int id = ids.get(index);
+        StationPos pos = stationPos(StationPart.ITEM_STORAGE, id);
+        if (pos == null) {
+            dumpInventoryExcept(keep, ids, index + 1, next);
+            return;
+        }
+
+        ItemList keepList = keep.isEmpty() ? ItemList.empty() : itemList(keep);
+        pushChild("把物品栏里用不上的东西放进 item_storage #" + id,
+            () -> ContainerPutAction.everythingExcept(pos.pos(), keepList, false, -1, true),
+            action -> {
+                ContainerPutAction put = (ContainerPutAction) action;
+                if (put.detail() != null) state.setStorage(id, put.detail(), put.freeSlots());
+
+                if (put.allCleared()) {
+                    next.run();
+                    return;
+                }
+                ChatUtils.info("item_storage #" + id + " 也装不下了，换下一个");
+                dumpInventoryExcept(keep, ids, index + 1, next);
             });
     }
 
@@ -843,11 +905,41 @@ final class Part2Stage3Craft extends StockStep {
         // 多出来的那部分**先回 item_storage**，然后才往暂存盒里放：
         // 暂存盒只收到「要交付的」那些，不会先把整批塞进去再往外掏
         // （那样要求暂存盒先装得下全部，多绕一趟，而且中途还会短暂多占格子）。
+        //
+        // 放完再把物品栏 27 格里剩下的东西（过程材料、合多了的中间产物）倒回 item_storage：
+        // 这一步是某个最终产物的收尾，手边剩下的都不再需要了，留着只会把 27 格占满。
         if (surplus > 0) {
-            pushStoreThenStaging(step.itemId(), requested, next);
+            pushStoreThenStaging(step.itemId(), requested, () -> pushDumpInventory(next));
             return;
         }
-        pushPutResultToStaging(next);
+        pushPutResultToStaging(() -> pushDumpInventory(next));
+    }
+
+    /** 把物品栏 27 格里剩下的东西（过程材料、多合出来的中间产物）倒回 item_storage。 */
+    private void pushDumpInventory(Runnable next) {
+        pushSync("把物品栏里剩下的东西倒回 item_storage", () -> {
+            if (!hasMainInventoryItems()) {
+                next.run();
+                return;
+            }
+            List<Integer> ids = new ArrayList<>(state.storageTargets());
+            if (ids.isEmpty()) {
+                ChatUtils.error("物资存储地都满了，物品栏里剩下的东西先留着");
+                next.run();
+                return;
+            }
+            dumpInventoryExcept(Map.of(), ids, 0, next);
+        });
+    }
+
+    /** 物品栏 27 格（不含快捷栏）里有没有东西。 */
+    private static boolean hasMainInventoryItems() {
+        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        if (player == null) return false;
+        for (int i = 9; i < 36; i++) {
+            if (!player.getInventory().getStack(i).isEmpty()) return true;
+        }
+        return false;
     }
 
     /**
@@ -906,7 +998,8 @@ final class Part2Stage3Craft extends StockStep {
                     return;
                 }
 
-                // 物品栏塞不下要交付的全部：先把已经取到的放进暂存盒腾地方，再从同一个容器接着取。
+                // 物品栏塞不下要交付的全部：先把手边**用不上的**东西倒回 item_storage
+                // （过程材料、合多了的中间产物），再把已经取到的放进暂存盒，然后从同一个容器接着取。
                 // 最多来回 MAX_STAGING_FLUSHES 次，免得「取不到又放不出去」的时候空转。
                 if (flushes >= MAX_STAGING_FLUSHES) {
                     fail("物品栏放不下要交付的 " + want.describe() + " 了");
@@ -917,9 +1010,10 @@ final class Part2Stage3Craft extends StockStep {
                     fail("找不到摆放处 #" + STAGING_ID);
                     return;
                 }
-                ChatUtils.info("物品栏放不下更多了，先把已经取到的放进暂存盒，再接着取");
-                pushPutWantedToStaging(spot, itemListOf(itemId, requested), () ->
-                    fetchForStaging(want, itemId, requested, ids, index, flushes + 1, next));
+                ChatUtils.info("物品栏放不下更多了：先把用不上的东西倒回 item_storage，再接着取");
+                pushDumpInventoryExcept(Map.of(itemId, Math.max(1, requested)), () ->
+                    pushPutWantedToStaging(spot, itemListOf(itemId, requested), () ->
+                        fetchForStaging(want, itemId, requested, ids, index, flushes + 1, next)));
             });
     }
 

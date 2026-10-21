@@ -47,9 +47,10 @@ import java.util.TreeMap;
  *   <li>空潜影盒提供处：必须整桶都是空潜影盒；</li>
  *   <li>物资存储地：空闲格要够（9 个大箱子 = 486 格），顺手把里面的东西汇总；</li>
  *   <li>最终产物地：空闲格要够（同上），内容不再要求为空 —— 里面已有的成品会汇总进
- *       {@code item_final}，材料清单里已经够数的东西就不再去备了；</li>
+ *       {@code already_collected}，材料清单里已经够数的东西就不再去备了；</li>
  *   <li>潜影盒摆放处：摆着盒子的那几个也要打开数一遍（内容进 {@code shulker_box_placement}），
- *       空着的就跳过。</li>
+ *       空着的就跳过；其中<b>最终产物暂存盒</b>（摆放处 #1）例外 —— 那盒子里的东西算「已经收好的成品」，
+ *       并进 {@code already_collected}，不算普通潜影盒库存。</li>
  * </ul>
  *
  * <p>大箱子两半只开一次（配置里两半都写了也只算一个容器）。
@@ -406,11 +407,23 @@ public class StationCheckAction extends Action {
 
         // 摆放处上的潜影盒：每个盒子一份（没摆盒子的位置不出现）。
         // 里面的东西也算库存，stock 会把它读进 station_data（见 StationState#load）。
+        // 注意：最终产物暂存盒（摆放处 #STAGING_PLACEMENT_ID）不在这里 —— 那盒子里的东西是
+        // 「已经收好的成品」，算进下面的 already_collected，不算普通潜影盒库存。
         JsonObject placements = new JsonObject();
         List<Survey> placementSurveys = new ArrayList<>(
             surveys.getOrDefault(StationPart.SHULKER_BOX_PLACEMENT, List.of()));
         placementSurveys.sort(Comparator.comparingInt(Survey::stationId));
+
+        Survey staging = null;
+        Map<String, Integer> placementItems = new TreeMap<>();
         for (Survey survey : placementSurveys) {
+            if (survey.stationId() == StationManager.STAGING_PLACEMENT_ID) {
+                staging = survey;
+                continue;
+            }
+            for (Map.Entry<String, Integer> item : survey.items().entrySet()) {
+                placementItems.merge(item.getKey(), item.getValue(), Integer::sum);
+            }
             JsonObject entry = new JsonObject();
             entry.addProperty("id", survey.stationId());
             entry.add("items", itemsJson(survey.items()));
@@ -419,8 +432,16 @@ public class StationCheckAction extends Action {
         }
         report.add("shulker_box_placement", placements);
 
-        // 最终产物地：只记「所有物品及其数量」（不分具体箱子、也不分潜影盒）
-        report.add("item_final", itemsJson(aggregate(StationPart.ITEM_FINAL)));
+        // already_collected：最终产物地所有物品及数量（不分具体箱子、也不分潜影盒），
+        // 再加上最终产物暂存盒里已经装好的那些。
+        // 材料清单里某种东西这里已经够数了，那个根节点整个不备（见 StockMaterials / StockProcessMaterials）。
+        Map<String, Integer> collected = new TreeMap<>(aggregate(StationPart.ITEM_FINAL));
+        if (staging != null) {
+            for (Map.Entry<String, Integer> item : staging.items().entrySet()) {
+                collected.merge(item.getKey(), item.getValue(), Integer::sum);
+            }
+        }
+        report.add("already_collected", itemsJson(collected));
 
         report.addProperty("free_storage_slots", freeStorage);
         report.addProperty("free_final_slots", freeFinal);
@@ -440,9 +461,11 @@ public class StationCheckAction extends Action {
         output().info("工作站检查通过，报告已写到 " + file);
         output().info("物资存储地 " + freeStorage + " 格空位（物品 " + describe(aggregate(StationPart.ITEM_STORAGE))
             + "）；最终产物地 " + freeFinal + " 格空位（物品 " + describe(aggregate(StationPart.ITEM_FINAL)) + "）");
-        if (!placementSurveys.isEmpty()) {
-            output().info("潜影盒摆放处上有 " + placementSurveys.size() + " 个盒子（"
-                + describe(aggregate(StationPart.SHULKER_BOX_PLACEMENT)) + "）");
+        if (!placementItems.isEmpty()) {
+            output().info("潜影盒摆放处上有盒子（" + describe(placementItems) + "）");
+        }
+        if (staging != null && !staging.items().isEmpty()) {
+            output().info("最终产物暂存盒里还有（" + describe(staging.items()) + "），这些算「已经收好了」");
         }
     }
 

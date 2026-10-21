@@ -17,7 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * mending 的两个位置，记在 {@code config/player-controller/world_<n>/mending.json}：
+ * mending 的两个位置，记在 {@code config/player-controller/world_<n>/mend.json}：
  *
  * <pre>
  * {
@@ -36,7 +36,7 @@ public final class MendingConfig {
         .disableHtmlEscaping()
         .create();
 
-    private static final String FILE_NAME = "mending.json";
+    private static final String FILE_NAME = "mend.json";
 
     private static final MendingConfig INSTANCE = new MendingConfig();
 

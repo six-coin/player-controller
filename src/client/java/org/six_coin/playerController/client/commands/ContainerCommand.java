@@ -315,6 +315,7 @@ public final class ContainerCommand {
             case EVERYTHING_INCLUDE_HOTBAR -> "把整个物品栏（27 格主背包 + 快捷栏 9 格）里的东西";
             case WANTED -> "把物品栏里 item_list 还要的东西";
             case HOTBAR_RANGE -> "把快捷栏指定几格里的东西";
+            case EVERYTHING_EXCEPT -> "把物品栏里的东西（除了指定的那几种 / 那一格）";
         };
     }
 

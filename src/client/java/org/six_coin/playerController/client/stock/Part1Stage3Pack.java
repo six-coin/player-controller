@@ -78,7 +78,7 @@ import java.util.function.Supplier;
 final class Part1Stage3Pack extends StockStep {
 
     /** 最终产物暂存处固定用摆放处 id 1。 */
-    static final int STAGING_ID = 1;
+    static final int STAGING_ID = StationManager.STAGING_PLACEMENT_ID;
 
     /** 挖盒子用的是快捷栏第一格的钻石镐（准备阶段放进去的）。 */
     private static final int PICKAXE_HOTBAR = StockTask.PICKAXE_HOTBAR;

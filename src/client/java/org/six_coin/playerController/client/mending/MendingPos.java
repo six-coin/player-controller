@@ -4,7 +4,7 @@ import net.minecraft.util.math.BlockPos;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
 /**
- * mending.json 里的一个坐标：{@code {"dimension": "..", "x": .., "y": .., "z": ..}}。
+ * mend.json 里的一个坐标：{@code {"dimension": "..", "x": .., "y": .., "z": ..}}。
  *
  * <p>和 {@code stock.station.StationPos} 存的内容一样，但这里没有「编号」那套东西：
  * mending 只有两个固定的位置（站立点、末影箱），不需要排序。
