@@ -34,6 +34,9 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7    §7也可以写 to_name <名字> / to_id <编号> / to_position <x> <y> <z> [dim]"));
                 source.sendFeedback(Text.literal("§7    §7终点坐标在边上会先在那边建个路径点；起点在边上也会先建点，都不在就报错"));
                 source.sendFeedback(Text.literal("§7  /" + name + " move cancel §8- §7取消所有移动任务"));
+                source.sendFeedback(Text.literal("§7  /" + name + " snap absolute <x> <y> <z> §8- §7沿轴三段直线贴到这个坐标（先试 6 种轴顺序，取第一种通的）"));
+                source.sendFeedback(Text.literal("§7    §7也可以写 relative <dx> <dy> <dz>（当前坐标 + 偏移）/ network（最近的路径点或边上的坐标）"));
+                source.sendFeedback(Text.literal("§7    §7判定：经过的每一格和它上面一格都必须是空气"));
                 source.sendFeedback(Text.literal("§7  /" + name + " container get from_target|from_position|from_id ... <item_list> §8- §7打开容器取物品（输出 item_list + all_cleared，并刷新缓存）"));
                 source.sendFeedback(Text.literal("§7    §7两个特殊模式：/" + name + " container special_get from_* §fonly_item§7|§fonly_one_shulker§7 <item_list>"));
                 source.sendFeedback(Text.literal("§7    §7only_item 只拿物品形态的（潜影盒无视）；only_one_shulker 只取一个装着所需东西的潜影盒放进快捷栏第三格"));
@@ -63,6 +66,7 @@ public final class PcCommand {
                 return 1;
             })
             .then(MoveCommand.build())
+            .then(SnapCommand.build())
             .then(ContainerCommand.build())
             .then(RecipeCommand.build())
             .then(StockCommand.build())

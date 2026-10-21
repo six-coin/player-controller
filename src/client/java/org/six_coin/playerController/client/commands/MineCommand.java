@@ -457,6 +457,7 @@ public final class MineCommand {
     private static LiteralArgumentBuilder<FabricClientCommandSource> delTask() {
         return ClientCommandManager.literal("del_task")
             .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
+                .suggests(MineCommand::suggestTasks)
                 .executes(MineCommand::delTask));
     }
 
@@ -514,8 +515,15 @@ public final class MineCommand {
 
         return ClientCommandManager.literal("task")
             .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
+                .suggests(MineCommand::suggestTasks)
                 .executes(MineCommand::taskStatus)
                 .then(ClientCommandManager.literal("a_set_region").then(x1)));
+    }
+
+    /** 补全 mine.json 里现有的任务名。 */
+    private static CompletableFuture<Suggestions> suggestTasks(
+        CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
+        return CommandSource.suggestMatching(MineComplexManager.get().tasks(), builder);
     }
 
     private static int taskStatus(CommandContext<FabricClientCommandSource> context) {
