@@ -64,13 +64,8 @@ public class MoveAction extends Action {
 
         dimension = DimensionUtils.current();
 
-        // 1. 先把身体转过去（好看，也让服务端朝向合理）
-        float yaw = switch (axis) {
-            case X -> blocks > 0 ? -90.0f : 90.0f;
-            case Z -> blocks > 0 ? 0.0f : 180.0f;
-            case Y -> player.getYaw();
-        };
-        player.setYaw(yaw);
+        // 1. 不动朝向：move 只改位置，rotation 保持玩家原来的样子
+        //    （飞行用的是 velocity，和 yaw 无关；服务端那边要朝向的话由 RotateManager 单独发包）
 
         // 2. 对齐到所在方块的中心
         BlockPos block = BlockPos.ofFloored(player.getEntityPos());

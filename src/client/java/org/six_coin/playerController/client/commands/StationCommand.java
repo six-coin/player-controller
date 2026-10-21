@@ -403,7 +403,8 @@ public final class StationCommand {
 
         ActionManager.get().submit(new StationCheckAction());
         source.sendFeedback(Text.literal("方块都对了，开始逐个打开容器数内容"
-            + "（物品暂存处、空潜影盒提供处、存储区、产物区；不显示界面，要几秒）"));
+            + "（物品暂存处、空潜影盒提供处、存储区、产物区，以及摆放处上已经放着的潜影盒；"
+            + "不显示界面，要几秒）"));
         return 1;
     }
 

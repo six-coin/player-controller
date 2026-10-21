@@ -153,7 +153,6 @@ public class PathMoveAction extends Action {
             + PlayerControllerConfig.getMoveMaxDescentSpeedBlocksPerTick() + ")），中途不取消飞行");
 
         index = 0;
-        player.setYaw(yawFor(steps.get(0)));
     }
 
     private WaypointGraph graph() {
@@ -203,18 +202,6 @@ public class PathMoveAction extends Action {
             }
             i = j;
         }
-    }
-
-    private float yawFor(Step step) {
-        if (step.kind() != StepKind.MOVE) {
-            ClientPlayerEntity player = PlayerUtils.player();
-            return player == null ? 0.0f : player.getYaw();
-        }
-        return switch (step.axis()) {
-            case X -> step.blocks() > 0 ? -90.0f : 90.0f;
-            case Z -> step.blocks() > 0 ? 0.0f : 180.0f;
-            case Y -> PlayerUtils.player() == null ? 0.0f : PlayerUtils.player().getYaw();
-        };
     }
 
     // ------------------------------------------------------------------
@@ -552,9 +539,7 @@ public class PathMoveAction extends Action {
             return;
         }
 
-        ClientPlayerEntity player = PlayerUtils.player();
-        if (player != null) player.setYaw(yawFor(steps.get(0)));
-
+        // 不动朝向：重新规划只换路线，rotation 保持玩家原来的样子
         ChatUtils.info("已重新规划：到 " + DimensionUtils.display(destination.dimension()) + " "
             + destination.coordString() + " 还剩 " + steps.size() + " 步");
     }

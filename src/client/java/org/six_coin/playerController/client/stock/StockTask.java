@@ -2,6 +2,7 @@ package org.six_coin.playerController.client.stock;
 
 import net.minecraft.client.MinecraftClient;
 import org.six_coin.playerController.client.action.Action;
+import org.six_coin.playerController.client.container.ContainerCacheTracker;
 import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -72,6 +73,12 @@ public final class StockTask extends Action {
             fail("没有玩家或世界");
             return;
         }
+
+        // 备货期间挂起「开关容器就自动刷新缓存」：这套流程自己开箱子、自己点格子，
+        // 客户端视角不动（转头只是给服务端发包），自动刷新会认错容器、把缓存写坏。
+        // 缓存改由每次取完货之后的主动刷新来更新（见 ContainerSession#refreshCache）。
+        ContainerCacheTracker.setSuspended(true);
+
         ChatUtils.info("备货 " + task + "：一共 " + steps.total() + " 步");
     }
 
@@ -95,6 +102,12 @@ public final class StockTask extends Action {
             ChatUtils.info("备货 " + task + " 全部完成");
             finish();
         }
+    }
+
+    @Override
+    protected void onEnd() {
+        // 不管成功、失败还是被取消，都要把自动刷新放开（不然以后开箱子都不写缓存了）
+        ContainerCacheTracker.setSuspended(false);
     }
 
     /** 打进度 / 失败信息用的名字：流水线的步骤就是它的阶段名。 */

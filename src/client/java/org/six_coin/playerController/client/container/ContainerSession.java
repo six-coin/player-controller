@@ -174,11 +174,25 @@ public final class ContainerSession {
         return handler == null ? null : ContainerCacheManager.breakdown(handler);
     }
 
+    /**
+     * 主动把这次打开的容器的内容写回缓存。
+     *
+     * <p>备货任务期间 {@link ContainerCacheTracker} 的自动刷新是挂起的（见那边的说明），
+     * 缓存就靠这里更新：**每次取完货、界面还开着**的时候读一遍格子，把这一箱子的东西记下来。
+     * 取货的动作（{@code ContainerGetAction} / {@code TakeItemAction} …）收尾都会走 {@link #close}，
+     * 所以每取一次就刷新一次，不会攒到最后。
+     */
+    public void refreshCache(MinecraftClient mc) {
+        if (handler == null) return;
+        int changed = ContainerCacheUpdater.refresh(mc, pos, handler);
+        if (changed > 0) {
+            ChatUtils.debug("已把 " + pos.toShortString() + " 的内容主动写回容器缓存");
+        }
+    }
+
     /** 收尾：刷新容器缓存 → 关掉界面 → 解除「不显示界面」。 */
     public void close(MinecraftClient mc) {
-        if (handler != null) {
-            ContainerCacheUpdater.refresh(mc, pos, handler);
-        }
+        refreshCache(mc);
         if (mc.player != null && handler != null && mc.player.currentScreenHandler == handler) {
             mc.player.closeHandledScreen();
         }

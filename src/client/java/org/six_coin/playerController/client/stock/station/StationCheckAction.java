@@ -6,6 +6,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.util.math.BlockPos;
@@ -39,12 +40,16 @@ import java.util.TreeMap;
  * {@code /pc stock station check} 的执行体（分多 tick）：把工作站里那几个容器挨个打开数一遍，
  * 验证内容相关的硬性要求，全过了就把报告写到 {@code world_<n>/stock/station/check.json}。
  *
- * <p>同步能查的（方块类型、空气、路径点、触及范围、数量）都在命令里先查过了，
+ * <p>同步能查的（方块类型、路径点、触及范围、数量）都在命令里先查过了，
  * 这里只管必须要开箱才知道的东西：
  * <ul>
  *   <li>任务前物品暂存处：必须全空；</li>
  *   <li>空潜影盒提供处：必须整桶都是空潜影盒；</li>
- *   <li>物资存储地 / 最终产物地：空闲格要够（各 9 个大箱子 = 486 格），顺手把里面的东西汇总。</li>
+ *   <li>物资存储地：空闲格要够（9 个大箱子 = 486 格），顺手把里面的东西汇总；</li>
+ *   <li>最终产物地：空闲格要够（同上），内容不再要求为空 —— 里面已有的成品会汇总进
+ *       {@code item_final}，材料清单里已经够数的东西就不再去备了；</li>
+ *   <li>潜影盒摆放处：摆着盒子的那几个也要打开数一遍（内容进 {@code shulker_box_placement}），
+ *       空着的就跳过。</li>
  * </ul>
  *
  * <p>大箱子两半只开一次（配置里两半都写了也只算一个容器）。
@@ -127,6 +132,7 @@ public class StationCheckAction extends Action {
         collectTargets(mc.world, StationPart.SHULKER_BOX_PROVIDER);
         collectTargets(mc.world, StationPart.ITEM_STORAGE);
         collectTargets(mc.world, StationPart.ITEM_FINAL);
+        collectPlacementTargets(mc.world);
 
         ChatUtils.debug("工作站检查：要开 " + targets.size() + " 个容器（大箱子两半只算一个），"
             + "不显示界面");
@@ -205,7 +211,6 @@ public class StationCheckAction extends Action {
 
         // 内容相关的硬性要求
         checkItemTemp();
-        checkFinalEmpty();
         checkProvider();
 
         int freeStorage = freeSlots(StationPart.ITEM_STORAGE);
@@ -248,6 +253,21 @@ public class StationCheckAction extends Action {
             BlockPos canonical = other == null || configured.compareTo(other) <= 0 ? configured : other;
             if (!seen.add(canonical)) continue;
             targets.add(new Target(part, configured, stationPos.id()));
+        }
+    }
+
+    /**
+     * 潜影盒摆放处：只把「上面真的摆着潜影盒」的那些加进来。
+     *
+     * <p>摆放处不再要求是空气了（盒子里装着的东西也算库存），空着的位置没什么可数的，直接跳过；
+     * 摆着别的方块由预检查报错，这里不管。
+     */
+    private void collectPlacementTargets(World world) {
+        String dimension = DimensionUtils.current();
+        for (StationPos stationPos : StationManager.get().positions(StationPart.SHULKER_BOX_PLACEMENT)) {
+            if (!stationPos.dimension().equals(dimension)) continue;
+            if (!(world.getBlockState(stationPos.pos()).getBlock() instanceof ShulkerBoxBlock)) continue;
+            targets.add(new Target(StationPart.SHULKER_BOX_PLACEMENT, stationPos.pos(), stationPos.id()));
         }
     }
 
@@ -331,21 +351,6 @@ public class StationCheckAction extends Action {
         }
     }
 
-    /** 最终产物地必须全空（成品还没开始往里放）。 */
-    private void checkFinalEmpty() {
-        List<Survey> list = surveys.get(StationPart.ITEM_FINAL);
-        if (list == null || list.isEmpty()) {
-            addProblem("最终产物地没有检查到（没打开成功）");
-            return;
-        }
-        for (Survey survey : list) {
-            if (!survey.allEmpty()) {
-                addProblem("最终产物地 " + survey.pos().toShortString() + " 里还有东西（占用了 "
-                    + (survey.totalSlots() - survey.emptySlots()) + " 格），必须清空");
-            }
-        }
-    }
-
     private void checkProvider() {
         List<Survey> list = surveys.get(StationPart.SHULKER_BOX_PROVIDER);
         if (list == null || list.isEmpty()) {
@@ -399,6 +404,24 @@ public class StationCheckAction extends Action {
         }
         report.add("item_storage_detailed", detailed);
 
+        // 摆放处上的潜影盒：每个盒子一份（没摆盒子的位置不出现）。
+        // 里面的东西也算库存，stock 会把它读进 station_data（见 StationState#load）。
+        JsonObject placements = new JsonObject();
+        List<Survey> placementSurveys = new ArrayList<>(
+            surveys.getOrDefault(StationPart.SHULKER_BOX_PLACEMENT, List.of()));
+        placementSurveys.sort(Comparator.comparingInt(Survey::stationId));
+        for (Survey survey : placementSurveys) {
+            JsonObject entry = new JsonObject();
+            entry.addProperty("id", survey.stationId());
+            entry.add("items", itemsJson(survey.items()));
+            entry.addProperty("free_slots", survey.emptySlots());
+            placements.add(String.valueOf(survey.stationId()), entry);
+        }
+        report.add("shulker_box_placement", placements);
+
+        // 最终产物地：只记「所有物品及其数量」（不分具体箱子、也不分潜影盒）
+        report.add("item_final", itemsJson(aggregate(StationPart.ITEM_FINAL)));
+
         report.addProperty("free_storage_slots", freeStorage);
         report.addProperty("free_final_slots", freeFinal);
 
@@ -417,6 +440,10 @@ public class StationCheckAction extends Action {
         output().info("工作站检查通过，报告已写到 " + file);
         output().info("物资存储地 " + freeStorage + " 格空位（物品 " + describe(aggregate(StationPart.ITEM_STORAGE))
             + "）；最终产物地 " + freeFinal + " 格空位（物品 " + describe(aggregate(StationPart.ITEM_FINAL)) + "）");
+        if (!placementSurveys.isEmpty()) {
+            output().info("潜影盒摆放处上有 " + placementSurveys.size() + " 个盒子（"
+                + describe(aggregate(StationPart.SHULKER_BOX_PLACEMENT)) + "）");
+        }
     }
 
     /** 某一部分里所有容器数出来的东西的加和。 */

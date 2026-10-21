@@ -4,6 +4,7 @@ import net.minecraft.block.BarrelBlock;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ChestBlock;
 import net.minecraft.block.CraftingTableBlock;
+import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.block.StonecutterBlock;
 import net.minecraft.block.enums.ChestType;
 import net.minecraft.client.MinecraftClient;
@@ -144,9 +145,10 @@ public final class StationPrecheck {
         for (StationPos stationPos : placements) {
             BlockPos pos = stationPos.pos();
             BlockState state = mc.world.getBlockState(pos);
-            if (!state.isAir()) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 本身不是空气（现在是 "
-                    + ContainerTypes.idOf(state) + "）");
+            // 摆放处可以空着，也可以已经放着一个潜影盒（盒子里的东西 check 会数进 check.json）
+            if (!state.isAir() && !(state.getBlock() instanceof ShulkerBoxBlock)) {
+                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上是别的方块（现在是 "
+                    + ContainerTypes.idOf(state) + "），只能空着或者放一个潜影盒");
             }
             if (!mc.world.getBlockState(pos.up()).isAir()) {
                 problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面不是空气（那里应该是能站人的地方）");

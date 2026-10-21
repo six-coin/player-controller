@@ -92,6 +92,9 @@ final class Part2Stage3Craft extends StockStep {
 
     private static final int PICKUP_WAIT_TICKS = 20 * 15;
 
+    /** 往暂存盒放成品时，「物品栏放不下 → 先放进暂存盒腾地方 → 接着取」最多来回几次。 */
+    private static final int MAX_STAGING_FLUSHES = 8;
+
     private static final int MAX_TOTAL_TICKS = 20 * 60 * 60;
 
     // ------------------------------------------------------------------
@@ -804,9 +807,10 @@ final class Part2Stage3Craft extends StockStep {
     /**
      * 把快捷栏 4~9 格的成品放进目标容器。
      *
-     * <p>{@code final=true} 的步骤：先把整叠都放进最终产物暂存盒，再把**多出来的**
-     * （{@code crafted - requested}，因为数量不是单次产量整数倍时会多合一点）拿回来放 item_storage。
-     * 这样暂存盒里最终就正好是要求的数量。
+     * <p>{@code final=true} 的步骤：这次合多了（{@code crafted > requested}，数量不是单次产量整数倍时
+     * 就会这样）的话，<b>先</b>把成品整批放进 item_storage（多出来的就留在仓库里），<b>再</b>把要交付的
+     * {@code requested} 个取回来放进最终产物暂存盒 —— 暂存盒里从头到尾都只有要求的数量，
+     * 不会「先塞进去再往外掏」。见 {@link #pushStoreThenStaging}。
      *
      * <p>{@code final=false} 的步骤有个特判：这一步做出来的东西要是<b>后面的步骤马上要用</b>
      * （在它们的 {@code sub_materials} 里），就<b>不</b>整批塞进 item_storage，而是把多出来的那部分
@@ -835,13 +839,120 @@ final class Part2Stage3Craft extends StockStep {
         }
 
         int surplus = crafted - requested;
-        pushPutResultToStaging(() -> {
-            if (surplus <= 0) {
-                next.run();
+
+        // 多出来的那部分**先回 item_storage**，然后才往暂存盒里放：
+        // 暂存盒只收到「要交付的」那些，不会先把整批塞进去再往外掏
+        // （那样要求暂存盒先装得下全部，多绕一趟，而且中途还会短暂多占格子）。
+        if (surplus > 0) {
+            pushStoreThenStaging(step.itemId(), requested, next);
+            return;
+        }
+        pushPutResultToStaging(next);
+    }
+
+    /**
+     * {@code final=true} 且这次合多了：快捷栏 4~9 格的成品整批 QuickMove 进 item_storage
+     * （多出来的自然就留在仓库里），再把要交付的 {@code requested} 个取回来放进暂存盒。
+     */
+    private void pushStoreThenStaging(String itemId, int requested, Runnable next) {
+        pushSync("先把这次合出来的 " + itemId + " 放进 item_storage（多出来的留在仓库里）", () -> {
+            List<Integer> ids = new ArrayList<>(state.storageTargets());
+            if (ids.isEmpty()) {
+                fail("物资存储地都满了，多出来的成品没地方放");
                 return;
             }
-            pushTakeBackSurplus(step.itemId(), surplus, next);
+            putHotbarToStorage(ids, 0, () -> pushFetchForStaging(itemId, requested, next));
         });
+    }
+
+    /** 从 item_storage 把要交付的那部分取回物品栏（下一步就放进暂存盒）。 */
+    private void pushFetchForStaging(String itemId, int requested, Runnable next) {
+        ItemList want = itemListOf(itemId, requested);
+        pushSync("把要交付的 " + requested + " 个 " + itemId + " 从 item_storage 取回来", () ->
+            fetchForStaging(want, itemId, requested, new ArrayList<>(state.storageIds()), 0, 0, next));
+    }
+
+    private void fetchForStaging(ItemList want, String itemId, int requested,
+                                 List<Integer> ids, int index, int flushes, Runnable next) {
+        if (want.isEmpty()) {
+            pushPutRequestedToStaging(itemId, requested, next);
+            return;
+        }
+        if (index >= ids.size()) {
+            fail("item_storage 里没找到刚放进去的 " + want.describe() + "，没法往暂存盒里放");
+            return;
+        }
+
+        int id = ids.get(index);
+        if (!storageHasLoose(id, want)) {
+            fetchForStaging(want, itemId, requested, ids, index + 1, flushes, next);
+            return;
+        }
+
+        StationPos pos = stationPos(StationPart.ITEM_STORAGE, id);
+        if (pos == null) {
+            fetchForStaging(want, itemId, requested, ids, index + 1, flushes, next);
+            return;
+        }
+
+        pushChild("从 item_storage #" + id + " 把 " + want.describe() + " 取回来（only_item）",
+            () -> new ContainerGetAction(pos.pos(), want, true, ContainerGetAction.Mode.ONLY_ITEM),
+            action -> {
+                ContainerGetAction get = (ContainerGetAction) action;
+                if (get.detail() != null) state.setStorage(id, get.detail(), get.freeSlots());
+
+                if (get.allCleared()) {
+                    fetchForStaging(want, itemId, requested, ids, index + 1, flushes, next);
+                    return;
+                }
+
+                // 物品栏塞不下要交付的全部：先把已经取到的放进暂存盒腾地方，再从同一个容器接着取。
+                // 最多来回 MAX_STAGING_FLUSHES 次，免得「取不到又放不出去」的时候空转。
+                if (flushes >= MAX_STAGING_FLUSHES) {
+                    fail("物品栏放不下要交付的 " + want.describe() + " 了");
+                    return;
+                }
+                StationPos spot = placement(STAGING_ID);
+                if (spot == null) {
+                    fail("找不到摆放处 #" + STAGING_ID);
+                    return;
+                }
+                ChatUtils.info("物品栏放不下更多了，先把已经取到的放进暂存盒，再接着取");
+                pushPutWantedToStaging(spot, itemListOf(itemId, requested), () ->
+                    fetchForStaging(want, itemId, requested, ids, index, flushes + 1, next));
+            });
+    }
+
+    /** 把物品栏里那部分成品放进暂存盒（只放 item_list 要的，放完正好是 requested 个）。 */
+    private void pushPutRequestedToStaging(String itemId, int requested, Runnable next) {
+        pushSync("把要交付的 " + requested + " 个 " + itemId + " 放进最终产物暂存盒", () -> {
+            StationPos spot = placement(STAGING_ID);
+            if (spot == null) {
+                fail("找不到摆放处 #" + STAGING_ID);
+                return;
+            }
+            pushPutWantedToStaging(spot, itemListOf(itemId, requested), next);
+        });
+    }
+
+    private void pushPutWantedToStaging(StationPos spot, ItemList want, Runnable next) {
+        pushChild("把物品栏里的成品放进暂存盒（只要 item_list 里的）",
+            () -> new ContainerPutAction(spot.pos(), ContainerPutAction.Mode.WANTED, true, want),
+            action -> {
+                ContainerPutAction put = (ContainerPutAction) action;
+                if (put.detail() != null) state.setPlacement(STAGING_ID, put.detail().all());
+
+                if (put.allCleared()) {
+                    next.run();
+                    return;
+                }
+
+                ChatUtils.info("暂存盒满了，先把它送去 item_final，再换一个空盒");
+                pushMineAndCollect(spot, STAGING_ID, PutTarget.FINAL);
+                pushTakeProviderBox();
+                pushPlaceHeldBox(STAGING_ID, Map.of());
+                pushPutWantedToStaging(spot, want, next);
+            });
     }
 
     /**
@@ -946,26 +1057,6 @@ final class Part2Stage3Craft extends StockStep {
             });
     }
 
-    /** 把暂存盒里多出来的那点成品拿回来，然后存进 item_storage。 */
-    private void pushTakeBackSurplus(String itemId, int surplus, Runnable next) {
-        pushSync("把多出来的 " + surplus + " 个 " + itemId + " 放回 item_storage", () -> {
-            StationPos spot = placement(STAGING_ID);
-            if (spot == null) {
-                fail("找不到摆放处 #" + STAGING_ID);
-                return;
-            }
-
-            ItemList want = itemListOf(itemId, surplus);
-            pushChild("从暂存盒把多出来的 " + surplus + " 个 " + itemId + " 拿回来",
-                () -> new ContainerGetAction(spot.pos(), want, true),
-                action -> {
-                    ContainerGetAction get = (ContainerGetAction) action;
-                    if (get.detail() != null) state.setPlacement(STAGING_ID, get.detail().all());
-                    pushStoreInventoryToStorage(next);
-                });
-        });
-    }
-
     private void putHotbarToStorage(List<Integer> ids, int index, Runnable next) {
         if (index >= ids.size()) {
             fail("物资存储地的几个容器都放不下这些成品了");
@@ -1067,46 +1158,6 @@ final class Part2Stage3Craft extends StockStep {
                 } else {
                     ChatUtils.info("item_storage #" + id + " 满了，换下一个");
                     storeItemToStorage(ids, index + 1, itemId, next);
-                }
-            });
-    }
-
-    /** 把物品栏 27 格里剩下的东西都存进 item_storage（一个满了换下一个）。 */
-    private void pushStoreInventoryToStorage(Runnable next) {
-        pushSync("把物品栏里的东西存进 item_storage", () -> {
-            List<Integer> ids = new ArrayList<>(state.storageTargets());
-            if (ids.isEmpty()) {
-                fail("物资存储地都满了，放不下了");
-                return;
-            }
-            storeToStorage(ids, 0, next);
-        });
-    }
-
-    private void storeToStorage(List<Integer> ids, int index, Runnable next) {
-        if (index >= ids.size()) {
-            fail("物资存储地的几个容器都放不下了");
-            return;
-        }
-
-        int id = ids.get(index);
-        StationPos pos = stationPos(StationPart.ITEM_STORAGE, id);
-        if (pos == null) {
-            storeToStorage(ids, index + 1, next);
-            return;
-        }
-
-        pushChild("把物品栏里的东西放进 item_storage #" + id,
-            () -> new ContainerPutAction(pos.pos(), ContainerPutAction.Mode.EVERYTHING, true),
-            action -> {
-                ContainerPutAction put = (ContainerPutAction) action;
-                if (put.detail() != null) state.setStorage(id, put.detail(), put.freeSlots());
-
-                if (put.allCleared()) {
-                    next.run();
-                } else {
-                    ChatUtils.info("item_storage #" + id + " 满了，换下一个");
-                    storeToStorage(ids, index + 1, next);
                 }
             });
     }

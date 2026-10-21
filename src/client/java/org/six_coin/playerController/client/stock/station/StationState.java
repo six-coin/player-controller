@@ -90,7 +90,8 @@ public final class StationState {
         for (StationPos pos : StationManager.get().list(StationPart.ITEM_STORAGE)) {
             state.itemStorage.put(pos.id(), new Storage(pos.id()));
         }
-        // 检查要求最终产物地全空，所以一开始都是没满
+        // 最终产物地不再要求全空，但具体哪一格满了 check 里没记（只记总量），所以先都按「没满」算，
+        // 真放不进去的时候 PutHotbarItemAction 会把 containerFull 报回来
         for (StationPos pos : StationManager.get().list(StationPart.ITEM_FINAL)) {
             state.itemFinalFull.put(pos.id(), false);
         }
@@ -119,6 +120,22 @@ public final class StationState {
                 storage.set(readItems(object.get("items")), readBoxes(object.get("shulker_boxes")), freeSlots);
             }
             ChatUtils.debug("station_data：从 check.json 读到 " + state.itemStorage.size() + " 个存储容器");
+
+            // 摆放处上摆着的潜影盒：盒子里有什么也一起读进来（check 时逐个打开数过）
+            JsonElement placementElement = root.getAsJsonObject().get("shulker_box_placement");
+            if (placementElement != null && placementElement.isJsonObject()) {
+                for (Map.Entry<String, JsonElement> entry
+                    : placementElement.getAsJsonObject().entrySet()) {
+                    if (!entry.getValue().isJsonObject()) continue;
+                    JsonObject object = entry.getValue().getAsJsonObject();
+
+                    int id = object.has("id") ? object.get("id").getAsInt() : parseInt(entry.getKey());
+                    if (id <= 0) continue;
+                    state.setPlacement(id, readItems(object.get("items")));
+                }
+                ChatUtils.debug("station_data：从 check.json 读到摆放处上的 "
+                    + state.placements().size() + " 个潜影盒");
+            }
         } catch (Exception e) {
             ChatUtils.error("读 " + checkFile + " 失败：" + e.getMessage());
         }

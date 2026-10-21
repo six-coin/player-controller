@@ -25,6 +25,11 @@ import java.util.List;
  *
  * <p>内容是从「界面里的容器格子」读的，因为客户端拿不到箱子方块自己同步过来的内容
  * （原版是把槽位数据发给界面处理器的）。
+ *
+ * <p><b>可以整体挂起</b>（{@link #setSuspended(boolean)}）：备货任务期间必须挂起 ——
+ * 那套流程是自己开箱子、自己点格子，而且客户端视角不动（转头只是给服务端发包），
+ * 这里「看准星指着哪一格」会认错容器，把不相干的缓存写坏。备货改用
+ * {@link ContainerSession#close} 里那次**主动刷新**（拿完东西、界面还开着的时候读一遍）。
  */
 public final class ContainerCacheTracker {
 
@@ -36,10 +41,32 @@ public final class ContainerCacheTracker {
     @Nullable
     private static BlockPos viewingPos;
 
+    /** 是不是被挂起了（备货任务期间是 true：不跟踪、也不自动刷新）。 */
+    private static boolean suspended;
+
     private ContainerCacheTracker() {
     }
 
+    /** 挂起 / 恢复「开关容器时自动刷新缓存」。 */
+    public static void setSuspended(boolean value) {
+        if (suspended == value) return;
+        suspended = value;
+        reset();
+        ChatUtils.debug(value ? "容器缓存的自动刷新已挂起（备货流程会自己主动刷新）"
+            : "容器缓存的自动刷新已恢复");
+    }
+
+    public static boolean isSuspended() {
+        return suspended;
+    }
+
     public static void tick(MinecraftClient client) {
+        if (suspended) {
+            // 挂起期间连「这次开的是哪个容器」都不记：恢复的时候不会拿旧界面去刷新
+            if (openHandler != null) reset();
+            return;
+        }
+
         ClientPlayerEntity player = client.player;
         if (player == null || client.world == null) {
             reset();

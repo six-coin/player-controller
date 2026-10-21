@@ -10,6 +10,7 @@ import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
+import org.six_coin.playerController.client.stock.station.StationManager;
 import org.six_coin.playerController.client.util.ChatUtils;
 
 import java.io.IOException;
@@ -153,19 +154,33 @@ public final class StockProcessMaterials {
         ChatUtils.debug("第二部分：final_pack 里有 " + collected.size() + " 种第一部分已经处理过的最终产物");
 
         // 第一步：去掉 final_pack 里已经有的（那些第一部分已经装盒了，不用再做）
+        // 以及「最终产物地已经够数」的（item_final 里那种东西不少于这个根节点要的数量 → 整个根节点不要）
+        Map<String, Integer> itemFinal = readItemList(StationManager.get().currentCheckFile(), "item_final");
         JsonArray raw = new JsonArray();
         List<String> droppedAtStep1 = new ArrayList<>();
+        List<String> droppedAtFinal = new ArrayList<>();
         for (JsonElement element : tree) {
             String id = itemOf(element);
             if (id != null && collected.containsKey(id)) {
                 droppedAtStep1.add(id);
                 continue;
             }
+            if (id != null && element.isJsonObject()) {
+                int need = countOf(element.getAsJsonObject());
+                int already = itemFinal.getOrDefault(id, 0);
+                if (need > 0 && already >= need) {
+                    droppedAtFinal.add(id + "（要 " + need + "，最终产物地已有 " + already + "）");
+                    continue;
+                }
+            }
             raw.add(element);
         }
         writeTree(files.processRaw(), raw);
         ChatUtils.debug("2_1 去掉 final_pack 里已经有的 " + droppedAtStep1.size() + " 个最终产物："
             + describeList(droppedAtStep1) + " -> " + files.processRaw());
+        if (!droppedAtFinal.isEmpty()) {
+            ChatUtils.info("最终产物地里已经够了，这次不做：" + String.join("、", droppedAtFinal));
+        }
 
         // 第二步：摊平成原材料
         Map<String, Integer> materialRaw = new LinkedHashMap<>();
@@ -254,6 +269,7 @@ public final class StockProcessMaterials {
         for (Map.Entry<String, Integer> entry : wantAll.entrySet()) {
             if (collected.containsKey(entry.getKey())) continue;          // 第一部分已经装盒了
             if (rootItems(clean).contains(entry.getKey())) continue;      // 第二部分会合成出来
+            if (itemFinal.getOrDefault(entry.getKey(), 0) >= entry.getValue()) continue;  // 最终产物地已经够了
             unreachable.put(entry.getKey(), entry.getValue());
         }
         writeItemList(files.unreachable(), unreachable);

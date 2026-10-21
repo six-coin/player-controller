@@ -22,7 +22,9 @@ import org.six_coin.playerController.client.util.ShulkerUtils;
 /**
  * 把**快捷栏指定格**里的潜影盒放到某个潜影盒摆放处（放成方块）。
  *
- * <p>摆放处本身必须是空气、下面那格不是空气（见 {@code StationPrecheck}），
+ * <p>摆放处本身必须是空气、下面那格不是空气（见 {@code StationPrecheck}）——
+ * 摆放处上要是已经有盒子了，由调用方先挖走（{@code pushPlaceHeldBox} 里就是先挖再放），
+ * 这里只负责「往空着的位置放」。
  * 所以这里的做法是对着**下面那格**的上面右键：潜影盒就会被放到摆放处那一格。
  *
  * <p>放之前会通过 {@link HotbarManager} 把手上那一格切过去、通过 {@link RotateManager}
