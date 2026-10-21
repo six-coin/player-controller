@@ -10,8 +10,11 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.chunk.ChunkStatus;
+import net.minecraft.world.chunk.WorldChunk;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.action.MoveAction;
@@ -52,6 +55,9 @@ public final class SnapCommand {
     /** {@code network} 的搜索半径（格）。 */
     private static final int NETWORK_SEARCH_RADIUS = 1000;
 
+    /** 坐标的合理上限（原版世界边界是 ±29999984，这里留点余量）。 */
+    private static final long MAX_COORDINATE = 30_000_000L;
+
     /** 6 种轴顺序，按这个顺序试，第一个通的就用。 */
     private static final Direction.Axis[][] ORDERS = {
         {Direction.Axis.X, Direction.Axis.Y, Direction.Axis.Z},
@@ -85,16 +91,24 @@ public final class SnapCommand {
                 })))
             .then(ClientCommandManager.literal("relative").then(deltas(
                 context -> {
+                    FabricClientCommandSource source = context.getSource();
                     BlockPos from = PlayerUtils.currentBlockPos();
                     if (from == null) {
-                        context.getSource().sendError(Text.literal("拿不到玩家位置"));
+                        source.sendError(Text.literal("拿不到玩家位置"));
                         return 0;
                     }
-                    BlockPos target = from.add(
-                        IntegerArgumentType.getInteger(context, "dx"),
-                        IntegerArgumentType.getInteger(context, "dy"),
-                        IntegerArgumentType.getInteger(context, "dz"));
-                    return snap(context.getSource(), target, "relative");
+
+                    // 用 long 加：int 直接加会溢出回绕（比如 dx = 20 亿），绕回玩家附近反而能通过检查
+                    long x = (long) from.getX() + IntegerArgumentType.getInteger(context, "dx");
+                    long y = (long) from.getY() + IntegerArgumentType.getInteger(context, "dy");
+                    long z = (long) from.getZ() + IntegerArgumentType.getInteger(context, "dz");
+                    if (Math.abs(x) > MAX_COORDINATE || Math.abs(y) > MAX_COORDINATE
+                        || Math.abs(z) > MAX_COORDINATE) {
+                        source.sendError(Text.literal("目的地 (" + x + ", " + y + ", " + z
+                            + ") 已经超出世界范围（±" + MAX_COORDINATE + "）了"));
+                        return 0;
+                    }
+                    return snap(source, new BlockPos((int) x, (int) y, (int) z), "relative");
                 })))
             .then(ClientCommandManager.literal("network")
                 .executes(context -> network(context.getSource())));
@@ -274,9 +288,40 @@ public final class SnapCommand {
         return best;
     }
 
-    /** 这个坐标所在的区块加载了没有。 */
+    /**
+     * 这个坐标所在的区块，客户端上到底加载了没有。
+     *
+     * <p><b>不能用 {@code mc.world.isChunkLoaded(x, z)}</b>：这个版本里
+     * {@code ClientWorld.isChunkLoaded(int, int)} 是写死的 {@code return true;}，
+     * 拿它判断等于没判断（目的地填到一千万格之外照样放行）。
+     *
+     * <p>所以分两步：
+     * <ol>
+     *   <li>先按视距粗筛：区块坐标离玩家超过 {@code options.viewDistance + 2} 的一定没加载；</li>
+     *   <li>再问客户端要这块区块（{@code ClientChunkManager.getChunk(..., false)}）：
+     *       没加载时它直接返回 null，拿到了才算加载。</li>
+     * </ol>
+     */
     private static boolean isLoaded(MinecraftClient mc, BlockPos pos) {
-        return mc.world != null && mc.world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4);
+        if (mc.world == null) return false;
+
+        int chunkX = pos.getX() >> 4;
+        int chunkZ = pos.getZ() >> 4;
+
+        ClientPlayerEntity player = mc.player;
+        if (player != null) {
+            BlockPos here = player.getBlockPos();
+            // 粗筛：只用来挡「明显远得离谱」的坐标（区块图半径一般是视距 + 1~2，这里再放宽一点，
+            // 真正算不算加载由下面的 getChunk 说了算）
+            int limit = mc.options.getViewDistance().getValue() + 2;
+            if (Math.abs(chunkX - (here.getX() >> 4)) > limit
+                || Math.abs(chunkZ - (here.getZ() >> 4)) > limit) {
+                return false;
+            }
+        }
+
+        WorldChunk chunk = mc.world.getChunkManager().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
+        return chunk != null && chunk.getPos().toLong() == ChunkPos.toLong(chunkX, chunkZ);
     }
 
     private static String format(double value) {
