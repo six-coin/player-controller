@@ -1,5 +1,6 @@
 package org.six_coin.playerController.client.action;
 
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -10,7 +11,9 @@ import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.PortalUtils;
+import org.six_coin.playerController.client.util.SnapUtils;
 import org.six_coin.playerController.client.waypoint.Edge;
+import org.six_coin.playerController.client.waypoint.PathPlanner;
 import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointGraph;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
@@ -31,6 +34,11 @@ import java.util.List;
  * <p><b>move to 不记录任何东西</b>：它走的全是图上已经有的边，所以既不会记普通边，
  * 也不会记末地 / 下界传送门边（编辑模式下要记路，用 {@code /pc move <轴>} 或
  * {@code /pc move face}）。
+ *
+ * <p><b>自动恢复</b>：中途出问题（某一步超时 / 卡住、传送门等不到传送、传送落点对不上、
+ * 传送后不在路径点体系里……）不会立刻失败，而是先 snap 回最近的路径点（等价于
+ * {@code /pc snap network}，见 {@link SnapUtils}），再从那里重新规划到原目的地接着走；
+ * 最多试 {@value #MAX_RECOVERIES} 次，还不行才真的失败。
  */
 public class PathMoveAction extends Action {
 
@@ -55,7 +63,14 @@ public class PathMoveAction extends Action {
     /** 落点偏差超过这个值就认为传送门对不上了。 */
     private static final int ARRIVAL_TOLERANCE = 2;
 
-    private final List<Waypoint> path;
+    /** 自动恢复最多试几次（snap 回路径点 + 重新规划）。 */
+    private static final int MAX_RECOVERIES = 3;
+
+    private List<Waypoint> path;
+
+    /** 最终目的地（自动恢复时重新规划用）。 */
+    private Waypoint destination;
+
     private final List<Step> steps = new ArrayList<>();
 
     private int index;
@@ -67,6 +82,14 @@ public class PathMoveAction extends Action {
     private boolean portalEntered;
     private int portalWaitTicks;
     private int arrivalTicks = -1;
+
+    // 自动恢复的状态
+    private int recoveries;
+    private String lastProblem = "";
+    private boolean snapping;
+    private List<SnapUtils.Segment> snapSegments = List.of();
+    private int snapIndex;
+    private MoveAction snapAction;
 
     public PathMoveAction(List<Waypoint> path) {
         this.path = path;
@@ -112,6 +135,8 @@ public class PathMoveAction extends Action {
             return;
         }
 
+        destination = path.get(path.size() - 1);
+
         buildSteps();
         if (steps.isEmpty()) {
             ChatUtils.debug("起点和终点相同，不需要移动");
@@ -137,6 +162,8 @@ public class PathMoveAction extends Action {
 
     /** 把连续的、同一维度同一个轴向上的段合并成一步；跨维度的那一跳单独成一步。 */
     private void buildSteps() {
+        steps.clear();
+
         int i = 0;
         while (i < path.size() - 1) {
             Waypoint a = path.get(i);
@@ -199,6 +226,12 @@ public class PathMoveAction extends Action {
             return;
         }
 
+        // 自动恢复中：先跑 snap 的那几段，跑完再重新规划
+        if (snapping) {
+            tickSnap();
+            return;
+        }
+
         if (index >= steps.size()) {
             if (!finishedAll) {
                 finishedAll = true;
@@ -231,7 +264,7 @@ public class PathMoveAction extends Action {
                 index++;
                 return;
             }
-            fail("移动过程中维度变了（应该在 " + DimensionUtils.display(step.from().dimension()) + "）");
+            recover("移动过程中维度变了（应该在 " + DimensionUtils.display(step.from().dimension()) + "）");
             return;
         }
 
@@ -260,7 +293,7 @@ public class PathMoveAction extends Action {
                 driver = null;
                 index++;
             }
-            case FAILED -> fail("第 " + (index + 1) + " 步失败: " + driver.failure()
+            case FAILED -> recover("第 " + (index + 1) + " 步失败: " + driver.failure()
                 + "（停在 " + String.format("%.3f", coord) + "）");
             case MOVING -> {
                 // 继续
@@ -307,7 +340,7 @@ public class PathMoveAction extends Action {
                 portalPos = PortalUtils.endPortalFor(source);
             }
             if (portalPos == null) {
-                fail("传送门点 " + DimensionUtils.display(fromDimension) + " " + source.toShortString()
+                recover("传送门点 " + DimensionUtils.display(fromDimension) + " " + source.toShortString()
                     + (nether ? " 不是下界传送门方块" : " 及其下方都不是末地传送门方块")
                     + "（该处是 " + PortalUtils.blockId(source)
                     + "，下方是 " + PortalUtils.blockId(source.down()) + "）");
@@ -336,7 +369,7 @@ public class PathMoveAction extends Action {
                 return;
             }
             if (portalWaitTicks > MAX_PORTAL_WAIT_TICKS) {
-                fail("等待传送超时（" + portalWaitTicks + " tick）");
+                recover("等待传送超时（" + portalWaitTicks + " tick）");
             }
             return;
         }
@@ -348,7 +381,7 @@ public class PathMoveAction extends Action {
 
         String nowDimension = DimensionUtils.current();
         if (!nowDimension.equals(step.to().dimension())) {
-            fail("传送后到了 " + DimensionUtils.display(nowDimension)
+            recover("传送后到了 " + DimensionUtils.display(nowDimension)
                 + "，期望 " + DimensionUtils.display(step.to().dimension()));
             return;
         }
@@ -366,13 +399,13 @@ public class PathMoveAction extends Action {
             int dz = Math.abs(actual.getZ() - step.to().pos().getZ());
             if (Math.max(dx, Math.max(dy, dz)) > ARRIVAL_TOLERANCE) {
                 if (step.to().isSpawn()) {
-                    // 从末地回来必须落在当前出生点，否则直接停下
-                    fail("从末地回来没有落在当前出生点（实际 " + actual.toShortString()
-                        + "，当前出生点 " + step.to().coordString() + "），已停止任务；"
-                        + "请在落点用 /pc waypoint add_waypoint here 建一个路径点，"
-                        + "再用 /pc waypoint set_spawn here 把它设为出生点后重试");
+                    // 从末地回来必须落在当前出生点；先试着自动恢复，恢复不了再让用户去修出生点
+                    recover("从末地回来没有落在当前出生点（实际 " + actual.toShortString()
+                        + "，当前出生点 " + step.to().coordString() + "）；"
+                        + "如果一直失败，请在落点用 /pc waypoint add_waypoint here 建一个路径点，"
+                        + "再用 /pc waypoint set_spawn here 把它设为出生点");
                 } else {
-                    fail("落点 " + actual.toShortString() + " 和记录的路径点 "
+                    recover("落点 " + actual.toShortString() + " 和记录的路径点 "
                         + step.to().pos().toShortString() + " 对不上");
                 }
                 return;
@@ -382,12 +415,148 @@ public class PathMoveAction extends Action {
             PlayerUtils.snapToBlockCenter(step.to().pos());
         }
 
+        // 传送落点如果不在路径点体系里（比如这一头连到了别的地方），先 snap 回 network 再继续
+        if (WaypointManager.get().playerStartWaypoint() == null) {
+            recover("传送落点 " + actual.toShortString() + " 不在路径点体系里");
+            return;
+        }
+
         portalEntered = false;
         arrivalTicks = -1;
         portalWaitTicks = 0;
         driver = null;
         index++;
         ChatUtils.debug("传送完成，继续走剩下的路");
+    }
+
+    // ------------------------------------------------------------------
+    // 自动恢复：snap 回 network，再重新规划
+    // ------------------------------------------------------------------
+
+    /**
+     * 出问题的时候先别失败：试着 snap 回最近的路径点，再重新规划到原目的地接着走。
+     *
+     * <p>最多试 {@value #MAX_RECOVERIES} 次，还不行才带着「最后一次的问题 + 恢复过程」一起失败。
+     */
+    private void recover(String reason) {
+        if (recoveries >= MAX_RECOVERIES) {
+            fail(reason + "（自动恢复试了 " + recoveries + " 次也没成功）");
+            return;
+        }
+
+        recoveries++;
+        lastProblem = reason;
+        ChatUtils.info("移动出问题：" + reason + " —— 第 " + recoveries + " 次自动恢复：先 snap 回路径点体系");
+
+        driver = null;
+        portalEntered = false;
+        arrivalTicks = -1;
+        portalWaitTicks = 0;
+        beginSnap();
+    }
+
+    /** 已经在路径点体系里就跳过 snap，否则飞到最近的能走通的路径点。 */
+    private void beginSnap() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        ClientPlayerEntity player = mc.player;
+        if (player == null || mc.world == null) {
+            fail(lastProblem + "；自动恢复时玩家或世界不存在");
+            return;
+        }
+
+        if (WaypointManager.get().playerStartWaypoint() != null) {
+            replan();
+            return;
+        }
+
+        BlockPos from = PlayerUtils.currentBlockPos();
+        if (from == null) {
+            fail(lastProblem + "；自动恢复时拿不到玩家位置");
+            return;
+        }
+
+        SnapUtils.Snap snap = SnapUtils.findSnap(mc, from);
+        if (snap == null) {
+            fail(lastProblem + "；自动 snap 也失败了（" + SnapUtils.SEARCH_RADIUS
+                + " 格内没有能直线飞过去的路径点）");
+            return;
+        }
+
+        ChatUtils.info("snap 到最近的路径点 " + snap.target().toShortString()
+            + "（" + snap.plan().describeOrder() + "：" + snap.plan().describeSegments() + "）");
+        snapSegments = snap.plan().segments();
+        snapIndex = 0;
+        snapping = true;
+    }
+
+    /** 恢复过程中一段一段跑 snap 的 {@link MoveAction}（内嵌跑，不经过队列）。 */
+    private void tickSnap() {
+        if (snapAction != null) {
+            snapAction.update();
+            if (!snapAction.isFinished()) return;
+
+            String reason = snapAction.failureReason();
+            snapAction.cleanup();
+            snapAction = null;
+            if (reason != null) {
+                snapping = false;
+                fail(lastProblem + "；自动 snap 中途失败：" + reason);
+                return;
+            }
+            snapIndex++;
+        }
+
+        if (snapIndex >= snapSegments.size()) {
+            snapping = false;
+            replan();
+            return;
+        }
+
+        SnapUtils.Segment segment = snapSegments.get(snapIndex);
+        snapAction = new MoveAction(segment.axis(), segment.blocks());
+        snapAction.start();
+    }
+
+    /** 从当前位置重新规划到原目的地，然后接着走。 */
+    private void replan() {
+        if (destination == null) {
+            fail(lastProblem + "；没有目的地，没法重新规划");
+            return;
+        }
+
+        PathPlanner.Plan plan = PathPlanner.toPosition(destination.pos(), destination.dimension());
+        if (!plan.ok()) {
+            fail(lastProblem + "；自动 snap 之后重新规划到 "
+                + DimensionUtils.display(destination.dimension()) + " " + destination.coordString()
+                + " 还是失败：" + plan.error());
+            return;
+        }
+        if (plan.alreadyThere()) {
+            ChatUtils.info("已经站在目的地 " + destination.coordString() + " 了");
+            finish();
+            return;
+        }
+
+        path = plan.path();
+        buildSteps();
+
+        index = 0;
+        driver = null;
+        portalEntered = false;
+        arrivalTicks = -1;
+        portalWaitTicks = 0;
+        finishedAll = false;
+
+        if (steps.isEmpty()) {
+            finish();
+            return;
+        }
+
+        ClientPlayerEntity player = PlayerUtils.player();
+        if (player != null) player.setYaw(yawFor(steps.get(0)));
+
+        ChatUtils.info("已重新规划：到 " + DimensionUtils.display(destination.dimension()) + " "
+            + destination.coordString() + " 还剩 " + steps.size() + " 步");
     }
 
     // ------------------------------------------------------------------

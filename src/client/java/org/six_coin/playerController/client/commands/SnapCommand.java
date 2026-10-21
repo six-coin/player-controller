@@ -10,25 +10,14 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.chunk.ChunkStatus;
-import net.minecraft.world.chunk.WorldChunk;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.action.MoveAction;
-import org.six_coin.playerController.client.mine.station.MineStationAccess;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
-import org.six_coin.playerController.client.waypoint.WaypointGraph;
+import org.six_coin.playerController.client.util.SnapUtils;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
-
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * {@code /pc snap ...} —— 把玩家「贴」到某个坐标上（只用沿轴的三段直线飞过去）。
@@ -39,38 +28,13 @@ import java.util.Set;
  * /pc snap network                   目的地是当前维度里最近的「路径点 / 边上的坐标」
  * </pre>
  *
- * <p>走法：把「先走哪个轴」的 6 种排列都试一遍 —— x→y→z、x→z→y、y→x→z、y→z→x、z→x→y、z→y→x，
- * 取第一种通的，然后按 {@code /pc move x/y/z <格数>} 那样三段飞过去（就是排队三个
- * {@link MoveAction}，所以会先对齐方块中心、速度也用 {@code actions.move_speed}）。
+ * <p>走法和判定都在 {@link SnapUtils} 里：6 种轴顺序挨个试，经过的每一格和它上面一格都得是空气；
+ * 目的地必须已经加载；{@code network} 只在 1000 格内找，而且最近的不可达会继续试次近的。
  *
- * <p>「通」的判定：这条路经过的每一格方块、以及它上面那一格，都必须是空气
- * （人高 2 格，所以要看上面一格）。起点自己那一格不看（玩家就站在那儿，可能是草 / 雪片），
- * 但起点头顶那一格还是要空。
- *
- * <p>目的地必须在**已加载**的区块里（不然读不到方块、也飞不过去），否则直接拒绝。
- * {@code network} 只在 1000 格半径内找，而且只找已加载区块里的坐标。
+ * <p>执行方式和 {@code /pc move x/y/z <格数>} 一样：每段提交一个 {@link MoveAction}
+ * （会先对齐方块中心、速度用 {@code actions.move_speed}）。
  */
 public final class SnapCommand {
-
-    /** {@code network} 的搜索半径（格）。 */
-    private static final int NETWORK_SEARCH_RADIUS = 1000;
-
-    /** 坐标的合理上限（原版世界边界是 ±29999984，这里留点余量）。 */
-    private static final long MAX_COORDINATE = 30_000_000L;
-
-    /** 6 种轴顺序，按这个顺序试，第一个通的就用。 */
-    private static final Direction.Axis[][] ORDERS = {
-        {Direction.Axis.X, Direction.Axis.Y, Direction.Axis.Z},
-        {Direction.Axis.X, Direction.Axis.Z, Direction.Axis.Y},
-        {Direction.Axis.Y, Direction.Axis.X, Direction.Axis.Z},
-        {Direction.Axis.Y, Direction.Axis.Z, Direction.Axis.X},
-        {Direction.Axis.Z, Direction.Axis.X, Direction.Axis.Y},
-        {Direction.Axis.Z, Direction.Axis.Y, Direction.Axis.X},
-    };
-
-    /** 算好的一条走法：轴顺序 + 途经的拐点（含起点、终点）。 */
-    private record Plan(Direction.Axis[] order, List<BlockPos> points) {
-    }
 
     private SnapCommand() {
     }
@@ -102,10 +66,10 @@ public final class SnapCommand {
                     long x = (long) from.getX() + IntegerArgumentType.getInteger(context, "dx");
                     long y = (long) from.getY() + IntegerArgumentType.getInteger(context, "dy");
                     long z = (long) from.getZ() + IntegerArgumentType.getInteger(context, "dz");
-                    if (Math.abs(x) > MAX_COORDINATE || Math.abs(y) > MAX_COORDINATE
-                        || Math.abs(z) > MAX_COORDINATE) {
+                    if (Math.abs(x) > SnapUtils.MAX_COORDINATE || Math.abs(y) > SnapUtils.MAX_COORDINATE
+                        || Math.abs(z) > SnapUtils.MAX_COORDINATE) {
                         source.sendError(Text.literal("目的地 (" + x + ", " + y + ", " + z
-                            + ") 已经超出世界范围（±" + MAX_COORDINATE + "）了"));
+                            + ") 已经超出世界范围（±" + SnapUtils.MAX_COORDINATE + "）了"));
                         return 0;
                     }
                     return snap(source, new BlockPos((int) x, (int) y, (int) z), "relative");
@@ -119,7 +83,7 @@ public final class SnapCommand {
         source.sendFeedback(Text.literal("  §f/pc snap absolute <x> <y> <z>§7 - 去这个坐标（当前维度）"));
         source.sendFeedback(Text.literal("  §f/pc snap relative <dx> <dy> <dz>§7 - 去当前坐标 + 偏移"));
         source.sendFeedback(Text.literal("  §f/pc snap network§7 - 去最近的路径点 / 边上的坐标（"
-            + NETWORK_SEARCH_RADIUS + " 格内，只找已加载的区块）"));
+            + SnapUtils.SEARCH_RADIUS + " 格内、已加载的，最近的不可达就试次近的）"));
         source.sendFeedback(Text.literal("  §7经过的每一格和它上面一格都必须是空气；目的地不在已加载范围内直接拒绝"));
     }
 
@@ -129,18 +93,42 @@ public final class SnapCommand {
 
     private static int network(FabricClientCommandSource source) {
         MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) {
+        ClientPlayerEntity player = source.getPlayer();
+        if (player == null || mc.world == null) {
             source.sendError(Text.literal("没有玩家或世界"));
             return 0;
         }
 
-        BlockPos target = nearestNetwork();
-        if (target == null) {
-            source.sendError(Text.literal("当前维度（" + DimensionUtils.display(DimensionUtils.current())
-                + "）" + NETWORK_SEARCH_RADIUS + " 格内没有已加载的路径点 / 边，没法 snap"));
+        BlockPos from = PlayerUtils.currentBlockPos();
+        if (from == null) {
+            source.sendError(Text.literal("拿不到玩家位置"));
             return 0;
         }
-        return snap(source, target, "network");
+
+        // 已经站在路径点体系里（路径点或者边上）就没必要再飞了
+        if (WaypointManager.get().playerStartWaypoint() != null) {
+            source.sendFeedback(Text.literal("你已经在路径点体系里了（" + from.toShortString() + "）"));
+            return 1;
+        }
+
+        SnapUtils.Snap snap = SnapUtils.findSnap(mc, from);
+        if (snap == null) {
+            source.sendError(Text.literal("当前维度（" + DimensionUtils.display(DimensionUtils.current())
+                + "）" + SnapUtils.SEARCH_RADIUS + " 格内没有能直线飞过去的路径点 / 边（已加载的都试过了）"));
+            return 0;
+        }
+
+        if (snap.target().equals(from)) {
+            source.sendFeedback(Text.literal("你已经在路径点上 " + from.toShortString() + " 了"));
+            return 1;
+        }
+
+        submit(snap.plan());
+        source.sendFeedback(Text.literal("已提交任务：snap 到 " + DimensionUtils.display(DimensionUtils.current())
+            + " " + snap.target().toShortString() + "（network）"));
+        source.sendFeedback(Text.literal("  走法 " + snap.plan().describeOrder()
+            + "：" + snap.plan().describeSegments()));
+        return 1;
     }
 
     /**
@@ -167,161 +155,32 @@ public final class SnapCommand {
         }
 
         // 目的地不在已加载的区块里就直接拒绝：读不到方块、也不该往没加载的地方飞
-        if (!isLoaded(mc, target)) {
+        if (!SnapUtils.isLoaded(mc, target)) {
             source.sendError(Text.literal("目的地 " + target.toShortString()
                 + " 不在当前已加载的区块里（离你 " + format(distanceTo(player, target))
                 + " 格），先走近一点再 snap"));
             return 0;
         }
 
-        Plan plan = plan(mc, from, target);
+        SnapUtils.Plan plan = SnapUtils.plan(mc, from, target);
         if (plan == null) {
             source.sendError(Text.literal("6 种走法都不通：从 " + from.toShortString() + " 到 "
                 + target.toShortString() + "，沿轴走的每一格和它上面一格都得是空气"));
             return 0;
         }
 
-        for (int i = 1; i < plan.points().size(); i++) {
-            BlockPos previous = plan.points().get(i - 1);
-            BlockPos next = plan.points().get(i);
-            Direction.Axis axis = WaypointGraph.sharedAxis(previous, next);
-            if (axis == null) continue;
-
-            int delta = coord(next, axis) - coord(previous, axis);
-            if (delta != 0) ActionManager.get().submit(new MoveAction(axis, delta));
-        }
-
+        submit(plan);
         source.sendFeedback(Text.literal("已提交任务：snap 到 " + DimensionUtils.display(DimensionUtils.current())
             + " " + target.toShortString() + "（" + how + "）"));
-        source.sendFeedback(Text.literal("  走法 " + describeOrder(plan.order())
-            + "：" + describeSegments(plan.points())));
+        source.sendFeedback(Text.literal("  走法 " + plan.describeOrder() + "：" + plan.describeSegments()));
         return 1;
     }
 
-    // ------------------------------------------------------------------
-    // 找走法
-    // ------------------------------------------------------------------
-
-    /** 6 种轴顺序里第一种通的；都不通返回 null。 */
-    @Nullable
-    private static Plan plan(MinecraftClient mc, BlockPos from, BlockPos to) {
-        for (Direction.Axis[] order : ORDERS) {
-            List<BlockPos> points = new ArrayList<>(4);
-            points.add(from);
-
-            BlockPos current = from;
-            for (Direction.Axis axis : order) {
-                BlockPos next = withAxis(current, axis, coord(to, axis));
-                if (!next.equals(current)) points.add(next);
-                current = next;
-            }
-            if (points.size() == 1) continue;   // 原地，上面已经处理过了
-
-            if (clear(mc, points)) return new Plan(order, points);
+    /** 每段一个 {@link MoveAction}（和 /pc move x|y|z 完全同一套）。 */
+    private static void submit(SnapUtils.Plan plan) {
+        for (SnapUtils.Segment segment : plan.segments()) {
+            ActionManager.get().submit(new MoveAction(segment.axis(), segment.blocks()));
         }
-        return null;
-    }
-
-    /**
-     * 这条路通不通：经过的每一格 + 它上面一格都是空气。
-     *
-     * <p>起点自己那一格不查（玩家就站在那儿），但起点头顶那一格要查。
-     */
-    private static boolean clear(MinecraftClient mc, List<BlockPos> points) {
-        BlockPos start = points.get(0);
-        if (!mc.world.getBlockState(start.up()).isAir()) return false;
-
-        Set<Long> checked = new HashSet<>();
-        checked.add(start.asLong());
-
-        for (int i = 1; i < points.size(); i++) {
-            BlockPos previous = points.get(i - 1);
-            BlockPos next = points.get(i);
-
-            Direction.Axis axis = WaypointGraph.sharedAxis(previous, next);
-            if (axis == null) return false;
-
-            int delta = coord(next, axis) - coord(previous, axis);
-            int step = Integer.signum(delta);
-
-            for (int moved = 1; moved <= Math.abs(delta); moved++) {
-                BlockPos pos = moveAlong(previous, axis, step * moved);
-                if (!checked.add(pos.asLong())) continue;      // 两段重叠的地方只查一次
-
-                if (!mc.world.getBlockState(pos).isAir()) return false;
-                if (!mc.world.getBlockState(pos.up()).isAir()) return false;
-            }
-        }
-        return true;
-    }
-
-    // ------------------------------------------------------------------
-    // network：最近的路径点 / 边上的坐标
-    // ------------------------------------------------------------------
-
-    /** 当前维度里离玩家最近的「路径点或者某条边上的方块」；{@link #NETWORK_SEARCH_RADIUS} 内找不到返回 null。 */
-    @Nullable
-    private static BlockPos nearestNetwork() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) return null;
-
-        Map<String, Set<Long>> occupied = MineStationAccess.buildOccupied(WaypointManager.get().graph());
-        Set<Long> positions = occupied.get(DimensionUtils.current());
-        if (positions == null || positions.isEmpty()) return null;
-
-        double limit = (double) NETWORK_SEARCH_RADIUS * NETWORK_SEARCH_RADIUS;
-        Vec3d here = player.getEntityPos();
-        BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
-        for (long packed : positions) {
-            BlockPos pos = BlockPos.fromLong(packed);
-            double distance = here.squaredDistanceTo(Vec3d.ofCenter(pos));
-            if (distance > limit) continue;         // 超出搜索半径
-            if (!isLoaded(mc, pos)) continue;       // 没加载的区块不进去（进了也读不到方块）
-
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = pos;
-            }
-        }
-        return best;
-    }
-
-    /**
-     * 这个坐标所在的区块，客户端上到底加载了没有。
-     *
-     * <p><b>不能用 {@code mc.world.isChunkLoaded(x, z)}</b>：这个版本里
-     * {@code ClientWorld.isChunkLoaded(int, int)} 是写死的 {@code return true;}，
-     * 拿它判断等于没判断（目的地填到一千万格之外照样放行）。
-     *
-     * <p>所以分两步：
-     * <ol>
-     *   <li>先按视距粗筛：区块坐标离玩家超过 {@code options.viewDistance + 2} 的一定没加载；</li>
-     *   <li>再问客户端要这块区块（{@code ClientChunkManager.getChunk(..., false)}）：
-     *       没加载时它直接返回 null，拿到了才算加载。</li>
-     * </ol>
-     */
-    private static boolean isLoaded(MinecraftClient mc, BlockPos pos) {
-        if (mc.world == null) return false;
-
-        int chunkX = pos.getX() >> 4;
-        int chunkZ = pos.getZ() >> 4;
-
-        ClientPlayerEntity player = mc.player;
-        if (player != null) {
-            BlockPos here = player.getBlockPos();
-            // 粗筛：只用来挡「明显远得离谱」的坐标（区块图半径一般是视距 + 1~2，这里再放宽一点，
-            // 真正算不算加载由下面的 getChunk 说了算）
-            int limit = mc.options.getViewDistance().getValue() + 2;
-            if (Math.abs(chunkX - (here.getX() >> 4)) > limit
-                || Math.abs(chunkZ - (here.getZ() >> 4)) > limit) {
-                return false;
-            }
-        }
-
-        WorldChunk chunk = mc.world.getChunkManager().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
-        return chunk != null && chunk.getPos().toLong() == ChunkPos.toLong(chunkX, chunkZ);
     }
 
     private static String format(double value) {
@@ -357,60 +216,5 @@ public final class SnapCommand {
             .then(ClientCommandManager.argument("dy", IntegerArgumentType.integer())
                 .then(ClientCommandManager.argument("dz", IntegerArgumentType.integer())
                     .executes(executor::run)));
-    }
-
-    // ------------------------------------------------------------------
-    // 小工具
-    // ------------------------------------------------------------------
-
-    private static int coord(BlockPos pos, Direction.Axis axis) {
-        return switch (axis) {
-            case X -> pos.getX();
-            case Y -> pos.getY();
-            case Z -> pos.getZ();
-        };
-    }
-
-    private static BlockPos withAxis(BlockPos pos, Direction.Axis axis, int value) {
-        return switch (axis) {
-            case X -> new BlockPos(value, pos.getY(), pos.getZ());
-            case Y -> new BlockPos(pos.getX(), value, pos.getZ());
-            case Z -> new BlockPos(pos.getX(), pos.getY(), value);
-        };
-    }
-
-    /** 沿某个轴走 {@code distance} 格（负数就是反方向）。 */
-    private static BlockPos moveAlong(BlockPos pos, Direction.Axis axis, int distance) {
-        return switch (axis) {
-            case X -> new BlockPos(pos.getX() + distance, pos.getY(), pos.getZ());
-            case Y -> new BlockPos(pos.getX(), pos.getY() + distance, pos.getZ());
-            case Z -> new BlockPos(pos.getX(), pos.getY(), pos.getZ() + distance);
-        };
-    }
-
-    private static String describeOrder(Direction.Axis[] order) {
-        StringBuilder text = new StringBuilder();
-        for (Direction.Axis axis : order) {
-            if (text.length() > 0) text.append("→");
-            text.append(MoveAction.axisName(axis));
-        }
-        return text.toString();
-    }
-
-    /** 「x +50、y -3、z +100」这种，按实际要走的段列出来。 */
-    private static String describeSegments(List<BlockPos> points) {
-        StringBuilder text = new StringBuilder();
-        for (int i = 1; i < points.size(); i++) {
-            BlockPos previous = points.get(i - 1);
-            BlockPos next = points.get(i);
-            Direction.Axis axis = WaypointGraph.sharedAxis(previous, next);
-            if (axis == null) continue;
-
-            int delta = coord(next, axis) - coord(previous, axis);
-            if (text.length() > 0) text.append("、");
-            text.append(MoveAction.axisName(axis)).append(' ')
-                .append(delta > 0 ? "+" : "").append(delta);
-        }
-        return text.toString();
     }
 }
