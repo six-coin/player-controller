@@ -443,7 +443,7 @@ public final class MendingManager {
             settleTicks--;
             return;
         }
-        if (waitTicks++ < PlayerControllerConfig.getMendingDetectIntervalTicks()) return;
+        if (waitTicks++ < PlayerControllerConfig.getMendDetectIntervalTicks()) return;
         waitTicks = 0;
         detect(mc, player, stand);
     }
@@ -504,7 +504,7 @@ public final class MendingManager {
         }
         lastDamageSum = scan.damageSum();
 
-        int maxWait = PlayerControllerConfig.getMendingMaxWaitExpSeconds();
+        int maxWait = PlayerControllerConfig.getMendMaxWaitExpSeconds();
         if (tickCount - lastProgressTick > maxWait * 20L) {
             exitLoop(maxWait + " 秒没有任何东西被修好（附近大概没有经验来源）");
             return;

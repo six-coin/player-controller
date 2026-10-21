@@ -87,7 +87,7 @@ public final class FlightVelocity {
     public static double speedFor(Direction.Axis axis, double step) {
         double speed = PlayerControllerConfig.getMoveSpeed();
         if (axis == Direction.Axis.Y && step < 0) {
-            speed = Math.min(speed, PlayerControllerConfig.getMaxDescentSpeed());
+            speed = Math.min(speed, PlayerControllerConfig.getMoveMaxDescentSpeedBlocksPerTick());
         }
         return speed;
     }

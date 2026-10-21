@@ -108,8 +108,8 @@ public final class AttackCommand {
             }
             source.sendFeedback(Text.literal("  状态：" + state));
         }
-        source.sendFeedback(Text.literal("  范围：" + PlayerControllerConfig.getAttackRange()
-            + " 格（看不见的时候 " + PlayerControllerConfig.getAttackWallRange() + " 格内也打）"));
+        source.sendFeedback(Text.literal("  范围：" + PlayerControllerConfig.getReach()
+            + " 格（/pc config actions reach，和挖方块、开容器共用）"));
         source.sendFeedback(Text.literal("§7  §f/pc attack toggle [true|false]§7 - 开 / 关（不带值 = 切换）"));
         source.sendFeedback(Text.literal("§7  §f/pc attack profile§7 - 有哪些 profile、切 / 增 / 删"));
         source.sendFeedback(Text.literal("§7  §f/pc attack profile current list§7 - 改当前这一份"));

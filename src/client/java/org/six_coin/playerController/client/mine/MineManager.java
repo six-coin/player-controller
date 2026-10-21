@@ -8,13 +8,10 @@ import net.minecraft.client.world.ClientWorld;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
@@ -310,8 +307,7 @@ public final class MineManager {
             return;
         }
 
-        double range = PlayerControllerConfig.getMineSimpleRange();
-        double wallRange = PlayerControllerConfig.getMineSimpleWallRange();
+        double reach = PlayerControllerConfig.getReach();
         Vec3d eye = player.getEyePos();
 
         MineTools.Kind held = heldTool(player);
@@ -377,7 +373,7 @@ public final class MineManager {
             targetTool = MineTools.required(mc.world.getBlockState(target));
         }
 
-        int limit = PlayerControllerConfig.getMineSimpleMaxBlocksPerTick();
+        int limit = PlayerControllerConfig.getMineMaxBlocksPerTick();
         int mined = 0;
         for (BlockPos pos : candidates) {
             if (mined >= limit) break;
@@ -389,7 +385,7 @@ public final class MineManager {
             // 只对手上这件工具挖得动的方块发包
             if (!suitable(state, held)) continue;
             // 再怎么也不能超出触及范围
-            if (!inRange(mc, player, eye, pos, range, wallRange)) continue;
+            if (!inRange(eye, pos, reach)) continue;
 
             if (!RotateManager.get().rotateTo(Owner.MINE, pos)) {
                 lastTickCount = mined;
@@ -489,9 +485,8 @@ public final class MineManager {
 
     /** 周边区域里这一 tick 能挖的方块，按离眼睛的距离从近到远排。 */
     private List<BlockPos> collect(MinecraftClient mc, ClientPlayerEntity player) {
-        double range = PlayerControllerConfig.getMineSimpleRange();
-        double wallRange = PlayerControllerConfig.getMineSimpleWallRange();
-        int radius = (int) Math.ceil(Math.max(range, wallRange)) + 1;
+        double reach = PlayerControllerConfig.getReach();
+        int radius = (int) Math.ceil(reach) + 1;
 
         BlockPos center = BlockPos.ofFloored(player.getEntityPos());
         Vec3d eye = player.getEyePos();
@@ -507,7 +502,7 @@ public final class MineManager {
                     BlockState state = mc.world.getBlockState(mutable);
                     if (!breakable(mc.world, mutable, state)) continue;
                     if (!region.filter().allows(state.getBlock())) continue;
-                    if (!inRange(mc, player, eye, mutable, range, wallRange)) continue;
+                    if (!inRange(eye, mutable, reach)) continue;
 
                     found.add(mutable.toImmutable());
                 }
@@ -526,33 +521,12 @@ public final class MineManager {
     }
 
     /**
-     * 这个方块够不够得着。
+     * 这个方块够不够得着：眼睛到方块中心的距离不超过 {@code actions.reach}。
      *
-     * <p>看得见的按 {@code mine_simple_range}，被别的方块挡住的按 {@code mine_simple_wall_range}；
-     * 两个范围里小的那个先判，用不着每次射线。
+     * <p>不再区分看不看得见 / 隔不隔墙（原来那套 range + wall_range 已经合并成 reach 了）。
      */
-    private static boolean inRange(MinecraftClient mc, ClientPlayerEntity player, Vec3d eye,
-                                   BlockPos pos, double range, double wallRange) {
-        Vec3d center = Vec3d.ofCenter(pos);
-        double distanceSq = eye.squaredDistanceTo(center);
-
-        double small = Math.min(range, wallRange);
-        if (distanceSq <= small * small) return true;
-
-        double large = Math.max(range, wallRange);
-        if (distanceSq > large * large) return false;
-
-        double limit = canSee(mc, player, eye, center, pos) ? range : wallRange;
-        return distanceSq <= limit * limit;
-    }
-
-    /** 眼睛到方块中心这条线有没有被别的方块挡住（穿过去的也算看得见）。 */
-    private static boolean canSee(MinecraftClient mc, ClientPlayerEntity player, Vec3d eye,
-                                  Vec3d center, BlockPos pos) {
-        BlockHitResult hit = mc.world.raycast(new RaycastContext(eye, center,
-            RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
-        if (hit == null || hit.getType() == HitResult.Type.MISS) return true;
-        return hit.getBlockPos().equals(pos);
+    private static boolean inRange(Vec3d eye, BlockPos pos, double reach) {
+        return eye.squaredDistanceTo(Vec3d.ofCenter(pos)) <= reach * reach;
     }
 
     // ------------------------------------------------------------------

@@ -63,7 +63,7 @@ final class MoveDriver {
             return Status.FAILED;
         }
 
-        // 速度：往下走的时候受配置里的 max_descent_speed 限制（下降太快会摔伤）
+        // 速度：往下走的时候受配置里的 move_max_descent_speed_blocks_per_tick 限制（下降太快会摔伤）
         double speed = FlightVelocity.speedFor(axis, remaining);
         double step = Math.min(speed, Math.abs(remaining)) * Math.signum(remaining);
         FlightVelocity.apply(FlightVelocity.velocityFor(axis, step));

@@ -22,7 +22,7 @@ import java.util.concurrent.CompletableFuture;
  * （brigadier 的建议替换范围是整个参数，所以一次就能把坐标填满）。
  *
  * <p>补全用的方块取准星看到的方块（{@link PlayerUtils#lookedAtBlock()}，距离用配置里的
- * {@code actions.interaction_range}），没看到就退而用玩家脚下那一格。
+ * {@code actions.reach}），没看到就退而用玩家脚下那一格。
  */
 public final class LookSuggestions {
 

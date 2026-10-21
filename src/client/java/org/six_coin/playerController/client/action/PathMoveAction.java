@@ -150,7 +150,7 @@ public class PathMoveAction extends Action {
 
         ChatUtils.debug("开始走路径，共 " + steps.size() + " 步（原始 " + (path.size() - 1)
             + " 段），速度 " + PlayerControllerConfig.getMoveSpeed() + " 格/tick（下降时取 min("
-            + PlayerControllerConfig.getMaxDescentSpeed() + ")），中途不取消飞行");
+            + PlayerControllerConfig.getMoveMaxDescentSpeedBlocksPerTick() + ")），中途不取消飞行");
 
         index = 0;
         player.setYaw(yawFor(steps.get(0)));

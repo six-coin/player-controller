@@ -115,15 +115,15 @@ public final class PlayerUtils {
     // ------------------------------------------------------------------
 
     /**
-     * 当前生效的方块触及距离，单位：方块。
+     * 当前生效的触及距离，单位：方块。
      *
-     * <p>取配置里的 {@code actions.interaction_range}（默认 4.5，和原版一样），
-     * 用 {@code /pc config actions interaction_range <小数>} 改。
+     * <p>取配置里的 {@code actions.reach}（默认 4.5）。开容器、挖方块、打怪、
+     * 算工作站 / 挖掘站落点用的都是这一个数，不区分看不看得见。
      *
      * <p>注意：这只是本模组自己的判断标准，服务端还有它自己的一套距离检查。
      */
     public static double reach() {
-        return PlayerControllerConfig.getInteractionRange();
+        return PlayerControllerConfig.getReach();
     }
 
     /** 玩家眼睛到方块中心的距离是否在触及范围内。 */

@@ -40,7 +40,7 @@ public final class DimensionWait {
 
         String now = DimensionUtils.current();
         if (lastDimension != null && !lastDimension.equals(now)) {
-            int wait = PlayerControllerConfig.getWaitTicksAfterDimensionTeleport();
+            int wait = PlayerControllerConfig.getMoveDimensionWaitTicks();
             waitTicksLeft = Math.max(0, wait);
             if (waitTicksLeft > 0) {
                 ChatUtils.debug("换维度了（" + DimensionUtils.display(lastDimension) + " → "

@@ -158,9 +158,8 @@ public final class MineCommand {
 
         source.sendFeedback(Text.literal("已开始挖掘：simple " + region.describe()
             + "，一共 " + region.volume() + " 格"));
-        source.sendFeedback(Text.literal("§7  看得见的 " + PlayerControllerConfig.getMineSimpleRange()
-            + " 格内、隔墙的 " + PlayerControllerConfig.getMineSimpleWallRange()
-            + " 格内；每 tick 最多 " + PlayerControllerConfig.getMineSimpleMaxBlocksPerTick()
+        source.sendFeedback(Text.literal("§7  触及 " + PlayerControllerConfig.getReach()
+            + " 格内；每 tick 最多 " + PlayerControllerConfig.getMineMaxBlocksPerTick()
             + " 个方块；取消：§f" + ROOT + "cancel"));
         if (filter.mode() == MineFilter.Mode.WHITELIST && filter.blocks().isEmpty()) {
             source.sendFeedback(Text.literal("§e  白名单现在是空的，什么都不会挖"
@@ -377,9 +376,9 @@ public final class MineCommand {
         source.sendFeedback(Text.literal("  过滤器：模式 " + config.mode().label()
             + "，白名单 " + config.blocks(MineFilter.Mode.WHITELIST).size() + " 种，黑名单 "
             + config.blocks(MineFilter.Mode.BLACKLIST).size() + " 种（/pc mine list）"));
-        source.sendFeedback(Text.literal("  范围：看得见的 " + PlayerControllerConfig.getMineSimpleRange()
-            + " 格 / 隔墙的 " + PlayerControllerConfig.getMineSimpleWallRange() + " 格；每 tick 最多 "
-            + PlayerControllerConfig.getMineSimpleMaxBlocksPerTick() + " 个方块；换工具后等 "
+        source.sendFeedback(Text.literal("  范围：触及 " + PlayerControllerConfig.getReach()
+            + " 格；每 tick 最多 "
+            + PlayerControllerConfig.getMineMaxBlocksPerTick() + " 个方块；换工具后等 "
             + PlayerControllerConfig.getMineToolSwitchIntervalTicks() + " tick"));
         source.sendFeedback(Text.literal("§7  §f" + ROOT
             + "simple <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 在框里挖方块"));

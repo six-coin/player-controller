@@ -17,11 +17,9 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.util.Hand;
-import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.feature.ServerTickRate;
@@ -34,9 +32,8 @@ import org.six_coin.playerController.client.util.ChatUtils;
  * 攻击：常驻扫描身边的生物，按当前 profile 挑一个最近的打。
  *
  * <p>和原版键位、和备货的动作队列都**无关**：它自己每 tick 跑一遍，不排队。
- * 挑目标的规则是「最近的优先，一次只打一个」，范围来自
- * {@code /pc config actions attack_range}（默认 4.5）和 {@code attack_wall_range}
- * （穿墙也够得着的范围，默认 4.5）。
+ * 挑目标的规则是「最近的优先，一次只打一个」，范围就是 {@code /pc config actions reach}
+ * （默认 4.5，和挖方块、开容器用的是同一个数，不区分看不看得见）。
  *
  * <p>固定开着的几件事（不给开关）：
  *
@@ -226,8 +223,7 @@ public final class AttackManager {
         ClientPlayerEntity player = mc.player;
         if (player == null || mc.world == null) return null;
 
-        double reach = Math.max(PlayerControllerConfig.getAttackRange(),
-            PlayerControllerConfig.getAttackWallRange());
+        double reach = PlayerControllerConfig.getReach();
 
         LivingEntity best = null;
         double bestDistance = Double.MAX_VALUE;
@@ -254,12 +250,8 @@ public final class AttackManager {
         AttackProfile.Rule rule = profile.rule(entity.getType());
         if (rule == null) return false;
 
-        double range = PlayerControllerConfig.getAttackRange();
-        if (!withinHitboxRange(player, entity, range)) return false;
-
-        // 看不见的时候，要求离得足够近（attack_wall_range）
-        double wallRange = PlayerControllerConfig.getAttackWallRange();
-        if (!canSee(mc, player, entity) && !withinFeetRange(player, entity, wallRange)) return false;
+        // 够不够得着：眼睛到最近命中点不超过 reach（不再区分看不看得见）
+        if (!withinHitboxRange(player, entity, PlayerControllerConfig.getReach())) return false;
 
         if (profile.effective(AttackProfile.Field.IGNORE_NAMED, rule) && entity.hasCustomName()) {
             return false;
@@ -283,7 +275,7 @@ public final class AttackManager {
     }
 
     // ------------------------------------------------------------------
-    // 距离 / 视线
+    // 距离
     // ------------------------------------------------------------------
 
     /** 眼睛到「离自己最近的那一点」的距离够不够得着（和原版打实体用的判定一样）。 */
@@ -293,29 +285,6 @@ public final class AttackManager {
         double y = MathHelper.clamp(player.getEyeY(), box.minY, box.maxY);
         double z = MathHelper.clamp(player.getZ(), box.minZ, box.maxZ);
         return player.getEyePos().squaredDistanceTo(x, y, z) <= range * range;
-    }
-
-    /** 脚到脚的距离够不够近（穿墙时用的那一条）。 */
-    private static boolean withinFeetRange(ClientPlayerEntity player, LivingEntity entity, double range) {
-        return player.squaredDistanceTo(entity) <= range * range;
-    }
-
-    /** 眼睛到这只生物的脸 / 脚之间有没有方块挡着。 */
-    private static boolean canSee(MinecraftClient mc, ClientPlayerEntity player, LivingEntity entity) {
-        if (mc.world == null) return false;
-
-        Vec3d eye = player.getEyePos();
-        Vec3d feet = new Vec3d(entity.getX(), entity.getY(), entity.getZ());
-        if (clear(mc, player, eye, feet)) return true;
-
-        Vec3d face = new Vec3d(entity.getX(), entity.getEyeY(), entity.getZ());
-        return clear(mc, player, eye, face);
-    }
-
-    private static boolean clear(MinecraftClient mc, ClientPlayerEntity player, Vec3d from, Vec3d to) {
-        return mc.world.raycast(new RaycastContext(from, to,
-            RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player)
-        ).getType() == HitResult.Type.MISS;
     }
 
     /**

@@ -104,8 +104,8 @@ public final class MendingCommand {
             + MendingManager.PROFILE + " 并打开，结束后还原）"));
 
         int orbs = manager.orbCount();
-        source.sendFeedback(Text.literal("  检测：每 " + PlayerControllerConfig.getMendingDetectIntervalTicks()
-            + " tick 一次；" + PlayerControllerConfig.getMendingMaxWaitExpSeconds() + " 秒没有任何东西被修好就退出"));
+        source.sendFeedback(Text.literal("  检测：每 " + PlayerControllerConfig.getMendDetectIntervalTicks()
+            + " tick 一次；" + PlayerControllerConfig.getMendMaxWaitExpSeconds() + " 秒没有任何东西被修好就退出"));
         source.sendFeedback(Text.literal("  经验球：站立点周围 " + MendingManager.ORB_RADIUS + " 格的球里超过 "
             + MendingManager.ORB_LIMIT + " 个就先关掉攻击"
             + (orbs < 0 ? "" : "（现在 " + orbs + " 个）")));

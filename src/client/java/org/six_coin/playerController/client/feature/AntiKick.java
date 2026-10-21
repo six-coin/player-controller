@@ -42,7 +42,7 @@ public final class AntiKick {
     private static final double DIP = 0.03130D;
 
     /** 距离下一次「往下补」还剩多少 tick。 */
-    private static int delayLeft = PlayerControllerConfig.DEFAULT_ANTI_KICK_DELAY;
+    private static int delayLeft = PlayerControllerConfig.DEFAULT_MOVE_ANTI_KICK_DELAY_TICKS;
 
     /** 这次「往下补」窗口还剩多少 tick。 */
     private static int offLeft;
@@ -68,7 +68,7 @@ public final class AntiKick {
             return;
         }
 
-        int delay = PlayerControllerConfig.getAntiKickDelay();
+        int delay = PlayerControllerConfig.getMoveAntiKickDelayTicks();
 
         if (delayLeft > 0) {
             delayLeft--;
@@ -77,7 +77,7 @@ public final class AntiKick {
                 lastPacketY = player.getY();
                 return;
             }
-            offLeft = PlayerControllerConfig.getAntiKickOffTime();
+            offLeft = PlayerControllerConfig.getMoveAntiKickOffTimeTicks();
         }
 
         if (offLeft > 0) {
@@ -125,7 +125,7 @@ public final class AntiKick {
     }
 
     private static void reset() {
-        delayLeft = PlayerControllerConfig.getAntiKickDelay();
+        delayLeft = PlayerControllerConfig.getMoveAntiKickDelayTicks();
         offLeft = 0;
         lastPacketY = Double.MAX_VALUE;
     }
