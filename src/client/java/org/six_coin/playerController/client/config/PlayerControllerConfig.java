@@ -136,6 +136,16 @@ public final class PlayerControllerConfig {
     public static final int MAX_MINE_TOOL_SWITCH_INTERVAL_TICKS = 200;
 
     /**
+     * 复杂挖掘（{@code /pc mine debug_chunk_miner}）：多久查一次手上工具的耐久（默认
+     * {@value #DEFAULT_MINE_COMPLEX_TOOL_DURABILITY_CHECK_INTERVAL_TICKS} tick）。
+     *
+     * <p>查的时候如果手上那件工具剩不到 100 耐久，就和背包里同种类的备用工具换一下。
+     */
+    public static final int DEFAULT_MINE_COMPLEX_TOOL_DURABILITY_CHECK_INTERVAL_TICKS = 20;
+    public static final int MIN_MINE_COMPLEX_TOOL_DURABILITY_CHECK_INTERVAL_TICKS = 1;
+    public static final int MAX_MINE_COMPLEX_TOOL_DURABILITY_CHECK_INTERVAL_TICKS = 200;
+
+    /**
      * 挖掘：纵向速度上限（格 / tick，默认 {@value #DEFAULT_MINE_MAX_VERTICAL_SPEED_PER_TICK}）。
      *
      * <p>纵向速度的绝对值**不超过**这个值的时候才动手：掉得太快 / 升得太快先暂停。
@@ -263,6 +273,15 @@ public final class PlayerControllerConfig {
         private int mineToolSwitchIntervalTicks = DEFAULT_MINE_TOOL_SWITCH_INTERVAL_TICKS;
 
         /**
+         * 复杂挖掘：多久查一次手上工具的耐久（tick）。
+         *
+         * <p>见 {@code mine/complex/single/SingleStageStage2}：剩不到 100 就换背包里同种类的备用工具。
+         */
+        @SerializedName("mine_complex_tool_durability_check_interval_ticks")
+        private int mineComplexToolDurabilityCheckIntervalTicks =
+            DEFAULT_MINE_COMPLEX_TOOL_DURABILITY_CHECK_INTERVAL_TICKS;
+
+        /**
          * 挖掘：纵向速度上限（格 / tick）。
          *
          * <p>纵向速度的绝对值不超过它才动手；0 表示要求纵向速度正好是 0。
@@ -373,6 +392,16 @@ public final class PlayerControllerConfig {
         public void mineToolSwitchIntervalTicks(int value) {
             mineToolSwitchIntervalTicks = Math.min(MAX_MINE_TOOL_SWITCH_INTERVAL_TICKS,
                 Math.max(MIN_MINE_TOOL_SWITCH_INTERVAL_TICKS, value));
+        }
+
+        public int mineComplexToolDurabilityCheckIntervalTicks() {
+            return mineComplexToolDurabilityCheckIntervalTicks;
+        }
+
+        public void mineComplexToolDurabilityCheckIntervalTicks(int value) {
+            mineComplexToolDurabilityCheckIntervalTicks = Math.min(
+                MAX_MINE_COMPLEX_TOOL_DURABILITY_CHECK_INTERVAL_TICKS,
+                Math.max(MIN_MINE_COMPLEX_TOOL_DURABILITY_CHECK_INTERVAL_TICKS, value));
         }
 
         public double mineMaxVerticalSpeedPerTick() {
@@ -526,6 +555,16 @@ public final class PlayerControllerConfig {
 
     public static void setMineToolSwitchIntervalTicks(int value) {
         instance.actions.mineToolSwitchIntervalTicks(value);
+        instance.save();
+    }
+
+    /** 复杂挖掘：多久查一次手上工具的耐久（tick）。 */
+    public static int getMineComplexToolDurabilityCheckIntervalTicks() {
+        return instance.actions.mineComplexToolDurabilityCheckIntervalTicks();
+    }
+
+    public static void setMineComplexToolDurabilityCheckIntervalTicks(int value) {
+        instance.actions.mineComplexToolDurabilityCheckIntervalTicks(value);
         instance.save();
     }
 

@@ -35,6 +35,7 @@ import org.six_coin.playerController.client.waypoint.WaypointManager;
  * /pc config actions mend_detect_interval_ticks [tick]
  * /pc config actions mine_max_blocks_per_tick [blocks]
  * /pc config actions mine_tool_switch_interval_ticks [tick]
+ * /pc config actions mine_complex_tool_durability_check_interval_ticks [tick]
  * /pc config actions mine_max_vertical_speed_blocks_per_tick [speed]
  * /pc config actions mine_max_horizontal_speed_blocks_per_tick [speed]
  * </pre>
@@ -278,6 +279,24 @@ public final class ConfigCommand {
                                 + PlayerControllerConfig.getMineToolSwitchIntervalTicks() + " tick"));
                         return 1;
                     })))
+            .then(ClientCommandManager.literal("mine_complex_tool_durability_check_interval_ticks")
+                .executes(context -> {
+                    showMineComplexToolDurabilityCheck(context.getSource());
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("ticks",
+                        IntegerArgumentType.integer(
+                            PlayerControllerConfig.MIN_MINE_COMPLEX_TOOL_DURABILITY_CHECK_INTERVAL_TICKS,
+                            PlayerControllerConfig.MAX_MINE_COMPLEX_TOOL_DURABILITY_CHECK_INTERVAL_TICKS))
+                    .executes(context -> {
+                        int ticks = IntegerArgumentType.getInteger(context, "ticks");
+                        PlayerControllerConfig.setMineComplexToolDurabilityCheckIntervalTicks(ticks);
+                        context.getSource().sendFeedback(Text.literal(
+                            "复杂挖掘的工具耐久检查间隔已设为 "
+                                + PlayerControllerConfig.getMineComplexToolDurabilityCheckIntervalTicks()
+                                + " tick"));
+                        return 1;
+                    })))
             .then(ClientCommandManager.literal("mine_max_vertical_speed_blocks_per_tick")
                 .executes(context -> {
                     showMineMaxVerticalSpeed(context.getSource());
@@ -343,6 +362,10 @@ public final class ConfigCommand {
             + PlayerControllerConfig.getMineMaxBlocksPerTick() + " 个（挖掘：每 tick 最多）"));
         source.sendFeedback(Text.literal("  actions.mine_tool_switch_interval_ticks = "
             + PlayerControllerConfig.getMineToolSwitchIntervalTicks() + " tick（挖掘：换完工具等多久）"));
+        source.sendFeedback(Text.literal(
+            "  actions.mine_complex_tool_durability_check_interval_ticks = "
+                + PlayerControllerConfig.getMineComplexToolDurabilityCheckIntervalTicks()
+                + " tick（复杂挖掘：多久查一次手上工具的耐久）"));
         source.sendFeedback(Text.literal("  actions.mine_max_vertical_speed_blocks_per_tick = "
             + PlayerControllerConfig.getMineMaxVerticalSpeedPerTick()
             + " 格/tick（挖掘：纵向速度不超过这个才动手）"));
@@ -367,6 +390,7 @@ public final class ConfigCommand {
         showMendDetectInterval(source);
         showMineMaxBlocks(source);
         showMineToolSwitchInterval(source);
+        showMineComplexToolDurabilityCheck(source);
         showMineMaxVerticalSpeed(source);
         showMineMaxHorizontalSpeed(source);
         return 1;
@@ -437,6 +461,13 @@ public final class ConfigCommand {
         source.sendFeedback(Text.literal("  mine_tool_switch_interval_ticks = "
             + PlayerControllerConfig.getMineToolSwitchIntervalTicks()
             + " tick（挖掘：换完工具之后空这么多 tick 再动手，0 = 不等）"));
+    }
+
+    private static void showMineComplexToolDurabilityCheck(FabricClientCommandSource source) {
+        source.sendFeedback(Text.literal(
+            "  mine_complex_tool_durability_check_interval_ticks = "
+                + PlayerControllerConfig.getMineComplexToolDurabilityCheckIntervalTicks()
+                + " tick（复杂挖掘：多久查一次手上工具的耐久，剩不到 100 就换备用工具）"));
     }
 
     private static void showMineMaxVerticalSpeed(FabricClientCommandSource source) {

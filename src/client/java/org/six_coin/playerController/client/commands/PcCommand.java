@@ -54,6 +54,7 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " mine ... §8- §7挖掘：cancel；simple <x1> <y1> <z1> <x2> <y2> <z2> <dim>（按 mine/ 下的白/黑名单挖框里的方块）；list mode|whitelist|blacklist list|add|del"));
                 source.sendFeedback(Text.literal("§7  /" + name + " mine complex add_task|del_task <名字>、/" + name + " mine complex task <名字> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim> §8- §7复杂挖掘任务（记在 mine/mine.json，范围 + 信标写在 mine/<名字>/region.json）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " mine complex station ... §8- §7挖掘站：list、check（算落点 + 走过去开箱检查）、show、safe_point / food_provider / totem_provider / item_collector / tool_cache / slime_cache / cobblestone_cache / unloading_shulker_box_placement"));
+                source.sendFeedback(Text.literal("§7  /" + name + " mine debug_chunk_miner [\"minecraft:dirt\", ...] §8- §c【临时调试】§7挖掉下面那个子区块（收集列表里的物品）"));
                 source.sendFeedback(Text.literal("§7  /" + name + " waypoint ... §8- §7路径点 / 边 / 出生点"));
                 source.sendFeedback(Text.literal("§7    §7子命令：show、edit、list、optimize default|radical"));
                 source.sendFeedback(Text.literal("§7    §7  add_waypoint here|target|position <x> <y> <z> <dim> [name]"));

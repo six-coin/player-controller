@@ -172,6 +172,23 @@ public final class MineManager {
         ChatUtils.debug("开始挖掘任务：" + region.describe());
     }
 
+    /**
+     * 开一个**临时**任务：和 {@link #start} 完全一样，但不写 {@code mine.json}。
+     *
+     * <p>给「一次性的调试任务」用（{@code /pc mine debug_chunk_miner}）：
+     * 那种任务重进世界不该被接回来，也不该盖掉玩家自己的 simple 任务缓存。
+     */
+    public void startTransient(MineRegion region) {
+        release();
+        this.region = region;
+        this.state = State.STARTING;
+        this.target = null;
+        this.targetTool = null;
+        this.lastTickCount = 0;
+        this.switchCooldown = 0;
+        ChatUtils.debug("开始临时挖掘任务（不写 mine.json）：" + region.describe());
+    }
+
     /** 取消所有挖掘任务（simple / complex），mine.json 里的 simple 缓存也一起清掉。有没有东西被取消掉。 */
     public boolean cancel() {
         boolean hadSaved = MineComplexManager.get().clearSimple();

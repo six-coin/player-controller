@@ -2,6 +2,8 @@ package org.six_coin.playerController.client.commands;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -17,6 +19,7 @@ import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.mine.MineFilter;
 import org.six_coin.playerController.client.mine.MineFilterConfig;
@@ -25,6 +28,7 @@ import org.six_coin.playerController.client.mine.MineRegion;
 import org.six_coin.playerController.client.mine.complex.MineBeaconPlanner;
 import org.six_coin.playerController.client.mine.complex.MineComplexManager;
 import org.six_coin.playerController.client.mine.complex.MineTaskRegion;
+import org.six_coin.playerController.client.mine.complex.single.MineComplexSingleStageN;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
 import java.io.IOException;
@@ -82,6 +86,9 @@ public final class MineCommand {
                 .executes(MineCommand::cancel))
             .then(simple())
             .then(lists())
+            .then(ClientCommandManager.literal("debug_chunk_miner")
+                .then(ClientCommandManager.argument("item_collector_list", StringArgumentType.greedyString())
+                    .executes(MineCommand::debugChunkMiner)))
             .then(ClientCommandManager.literal("complex")
                 .executes(MineCommand::complexStatus)
                 .then(addTask())
@@ -389,6 +396,8 @@ public final class MineCommand {
         source.sendFeedback(Text.literal("§7  §f" + ROOT
             + "complex task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区 + 算信标"));
         source.sendFeedback(Text.literal("§7  §f" + ROOT + "complex station ...§7 - 挖掘站（list / check / show / 各处坐标）"));
+        source.sendFeedback(Text.literal("§7  §f" + ROOT
+            + "debug_chunk_miner [\"minecraft:dirt\", ...]§7 - §c【临时调试】§7挖掉下面那个子区块"));
         source.sendFeedback(Text.literal("§7  范围记在 mine.json 里，重新进世界会接着挖（/pc mine cancel 才会清掉）"));
         return 1;
     }
@@ -403,10 +412,82 @@ public final class MineCommand {
         return 1;
     }
 
+    // ------------------------------------------------------------------
+    // debug_chunk_miner
+    // ------------------------------------------------------------------
+
+    /**
+     * {@code /pc mine debug_chunk_miner <item_collector_list>}：挖掉当前子区块正下方那个子区块。
+     *
+     * <p><b>临时的调试功能</b>（以后会删）：需求里的单段挖掘，实现在
+     * {@link MineComplexSingleStageN}（{@code mine/complex/single/} 下）。
+     *
+     * @param item_collector_list 要收集的物品，JSON 数组：{@code ["minecraft:dirt", ...]}
+     */
+    private static int debugChunkMiner(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
+        if (mc.world == null || mc.player == null) {
+            source.sendError(Text.literal("没有玩家或世界"));
+            return 0;
+        }
+
+        String raw = StringArgumentType.getString(context, "item_collector_list");
+        List<String> ids;
+        try {
+            ids = parseItemIds(raw);
+        } catch (Exception e) {
+            source.sendError(Text.literal("item_collector_list 解析失败：" + e.getMessage()));
+            return 0;
+        }
+        if (ids.isEmpty()) {
+            source.sendError(Text.literal("item_collector_list 是空的"));
+            return 0;
+        }
+
+        List<String> unknown = new ArrayList<>();
+        for (String id : ids) {
+            Identifier identifier = Identifier.tryParse(id);
+            if (identifier == null || Registries.ITEM.getOptionalValue(identifier).isEmpty()) {
+                unknown.add(id);
+            }
+        }
+        if (!unknown.isEmpty()) {
+            source.sendError(Text.literal("没有这些物品：" + String.join("、", unknown)));
+            return 0;
+        }
+
+        ActionManager.get().submit(new MineComplexSingleStageN(ids));
+        source.sendFeedback(Text.literal("已提交单段挖掘：挖掉下面那个子区块（收集 "
+            + ids.size() + " 种物品）"));
+        return 1;
+    }
+
+    /** {@code ["a", "b"]} 或者 {@code {"a": 1}} 都认，返回物品 id 列表。 */
+    private static List<String> parseItemIds(String raw) {
+        JsonElement root = JsonParser.parseString(raw);
+        List<String> ids = new ArrayList<>();
+
+        if (root.isJsonArray()) {
+            for (JsonElement element : root.getAsJsonArray()) {
+                if (!element.isJsonPrimitive()) continue;
+                String id = element.getAsString().trim();
+                if (!id.isEmpty()) ids.add(id);
+            }
+        } else if (root.isJsonObject()) {
+            ids.addAll(root.getAsJsonObject().keySet());
+        } else if (root.isJsonPrimitive()) {
+            String id = root.getAsString().trim();
+            if (!id.isEmpty()) ids.add(id);
+        } else {
+            throw new IllegalArgumentException("要写成 [\"minecraft:dirt\", ...] 这样的 JSON 数组");
+        }
+        return ids;
+    }
+
     private static int complexStatus(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        showTasks(source);
-        MineStationCommand.showStatus(source);
+        showTasks(source);        MineStationCommand.showStatus(source);
         return 1;
     }
 
