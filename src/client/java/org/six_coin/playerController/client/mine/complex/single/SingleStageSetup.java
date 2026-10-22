@@ -94,15 +94,14 @@ class SingleStageSetup extends SingleStageStep {
         queue.sync("搭平台", () -> {
             // 从临时站立点放不到最远的那个角（超出服务端允许的交互距离），先挪到平台正上方
             queue.child("挪到平台上方", () -> new SingleStageSnapAction(ctx, ctx.platformHover()));
-            for (BlockPos cell : ctx.platform()) {
-                queue.child("放平台 " + cell.toShortString(),
-                    () -> new SingleStagePlaceAction(ctx, cell, SingleStageCtx.HOTBAR_FREE_1));
-            }
+            queue.child("放平台 20 格", () -> new SingleStagePlaceBatchAction(ctx, ctx.platform(),
+                COBBLE, new int[]{SingleStageCtx.HOTBAR_FREE_1}, new int[0], "圆石"));
             queue.child("回临时站立点", () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
+            // 4 5 4 那个单独放的圆石（从站立点够得着）
+            queue.child("放 4 5 4 的那个圆石", () -> new SingleStagePlaceBatchAction(ctx,
+                List.of(ctx.marker()), COBBLE, new int[]{SingleStageCtx.HOTBAR_FREE_1},
+                new int[0], "圆石"));
         });
-
-        queue.child("放 4 5 4 的那个圆石",
-            () -> new SingleStagePlaceAction(ctx, ctx.marker(), SingleStageCtx.HOTBAR_FREE_1));
 
         queue.sync("放收集盒", this::queuePlaceCollectBoxes);
     }

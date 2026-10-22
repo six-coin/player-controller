@@ -14,6 +14,7 @@ import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.stock.MineBlockAction;
+import org.six_coin.playerController.client.stock.WaitAction;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
@@ -58,10 +59,10 @@ class SingleStageStage3 extends SingleStageStep {
     private final int top;
     private final SingleStageQueue queue = new SingleStageQueue();
 
-    /** 捡不到的掉落物（按方块坐标）。 */
-    private final Set<Long> ignored = new HashSet<>();
+    /** 捡不到的掉落物（按实体 id）。 */
+    private final Set<Integer> ignored = new HashSet<>();
 
-    private long lastTarget = Long.MIN_VALUE;
+    private int lastTarget = -1;
     private int repeats;
     private int unloads;
 
@@ -132,44 +133,62 @@ class SingleStageStage3 extends SingleStageStep {
         }
 
         ItemEntity nearest = nearest(player, drops);
-        BlockPos pos = nearest.getBlockPos();
-        long key = pos.asLong();
+        int id = nearest.getId();
 
-        if (key == lastTarget) {
+        if (id == lastTarget) {
             if (++repeats >= MAX_REPEATS) {
-                ignored.add(key);
+                ignored.add(id);
                 repeats = 0;
-                lastTarget = Long.MIN_VALUE;
-                ChatUtils.debug("捡不到 " + pos.toShortString() + "，先跳过它");
+                lastTarget = -1;
+                ChatUtils.debug("捡不到掉落物 #" + id + "（"
+                    + nearest.getBlockPos().toShortString() + "），先跳过它");
                 queue.sync("继续收集", this::collectStep);
                 return;
             }
         } else {
-            lastTarget = key;
+            lastTarget = id;
             repeats = 0;
         }
 
-        queue.child("去捡 " + pos.toShortString(), () -> new SingleStageSnapAction(ctx, pos));
+        queue.child("去捡 " + nearest.getBlockPos().toShortString(),
+            () -> new SingleStagePickupAction(ctx, id));
         queue.sync("继续收集", this::collectStep);
     }
 
-    /** 这一层里「要收集的」掉落物（别的东西扔在地上不管）。 */
+    /**
+     * 这一层里「要收集的」掉落物。
+     *
+     * <p>要收集的 = {@code item_collector} 里的东西 <b>+ 圆石 + 黏液块 / 树脂块</b>：
+     * 后两种卸货的时候是要装盒的，以前只认 item_collector，圆石掉在地上就永远不去捡了。
+     * 其它东西（泥土、砂砾之类）扔在地上不管，捡了也只能扔掉。
+     */
     private List<ItemEntity> findDrops(MinecraftClient mc) {
         List<ItemEntity> drops = new ArrayList<>();
         int minX = ctx.targetMin.getX();
         int minZ = ctx.targetMin.getZ();
-        Box area = new Box(minX, bottom - 1, minZ, minX + 17, top + 2, minZ + 17);
+        // 稍微放宽一圈：掉落物会滚 / 弹到边缘外一点点
+        Box area = new Box(minX - 2, bottom - 2, minZ - 2,
+            minX + 18, top + 3, minZ + 18);
 
         for (Entity entity : mc.world.getEntities()) {
             if (!(entity instanceof ItemEntity item)) continue;
             ItemStack stack = item.getStack();
             if (stack.isEmpty()) continue;
-            if (!ctx.collectorItems.contains(Registries.ITEM.getId(stack.getItem()).toString())) continue;
+            if (!wanted(stack)) continue;
             if (!area.contains(item.getEntityPos())) continue;
-            if (ignored.contains(item.getBlockPos().asLong())) continue;
+            if (ignored.contains(item.getId())) continue;
             drops.add(item);
         }
         return drops;
+    }
+
+    /** 这种掉落物要不要捡。 */
+    private boolean wanted(ItemStack stack) {
+        String id = Registries.ITEM.getId(stack.getItem()).toString();
+        return ctx.collectorItems.contains(id)
+            || "minecraft:cobblestone".equals(id)
+            || "minecraft:slime_block".equals(id)
+            || "minecraft:resin_block".equals(id);
     }
 
     private static ItemEntity nearest(ClientPlayerEntity player, List<ItemEntity> drops) {
@@ -295,6 +314,10 @@ class SingleStageStage3 extends SingleStageStep {
                     RotateManager.get().rotateTo(Owner.MINE, player.getYaw(), 90.0f);
                 }
             });
+            // 低头之后等 5 tick 再扔：转头包和服务端处理之间有延迟，
+            // 同一 tick 扔出去服务端可能还用旧 pitch，垃圾就斜着飞进矿洞里了
+            queue.child("等 5 tick 让服务端看到低头",
+                () -> new WaitAction("转头生效", () -> false, 5, false));
 
             List<SingleStageInventoryAction.Op> ops = new ArrayList<>();
             for (int slot : junk) ops.add(SingleStageInventoryAction.throwStack(slot));

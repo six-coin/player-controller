@@ -37,8 +37,12 @@ class SingleStageStage2 extends SingleStageStep {
     /** 等「下面两格被挖掉」最多等多久。 */
     private static final int MAX_DIG_WAIT_TICKS = 20 * 120;
 
-    /** 连续这么多 tick 没东西可挖，才算「这一格挖完了」。 */
-    private static final int QUIET_TICKS = 5;
+    /**
+     * 连续这么多 tick 没东西可挖，才算「这一格挖完了」。
+     *
+     * <p>1 = 一发现没得挖就走，中间不留等待间隔（走位是蛇形一条线，停下来看一会儿很费时间）。
+     */
+    private static final int QUIET_TICKS = 1;
 
     private enum Phase {
         START,

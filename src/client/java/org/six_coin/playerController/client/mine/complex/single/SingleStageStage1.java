@@ -38,6 +38,16 @@ class SingleStageStage1 extends SingleStageStep {
     /** 从盒子里拿几组粘液块。 */
     private static final int SLIME_STACKS = 9;
 
+    /** 放粘液块时可以用的快捷栏格（快捷栏 6~8）。 */
+    private static final int[] HOTBAR_SLOTS = {SingleStageCtx.HOTBAR_FREE_1,
+        SingleStageCtx.HOTBAR_FREE_2, SingleStageCtx.HOTBAR_FREE_3};
+
+    /** 快捷栏用完了从这几格（背包 22~27）补一叠。 */
+    private static final int[] MAIN_SLOTS = {SingleStageCtx.FILLER_START,
+        SingleStageCtx.FILLER_START + 1, SingleStageCtx.FILLER_START + 2,
+        SingleStageCtx.FILLER_START + 3, SingleStageCtx.FILLER_START + 4,
+        SingleStageCtx.FILLER_START + 5};
+
     /** 粘液块 / 树脂块。 */
     static final Predicate<ItemStack> SLIME = stack ->
         stack.isOf(Items.SLIME_BLOCK) || stack.isOf(Items.RESIN_BLOCK);
@@ -190,60 +200,21 @@ class SingleStageStage1 extends SingleStageStep {
             mined++;
         }
 
-        int filled = 0;
+        List<BlockPos> fill = new ArrayList<>();
         for (BlockPos pos : gaps) {
             if (!isGap(mc.world.getBlockState(pos))) continue;
             // 放方块按 7×7×7 的正方体算，不按 actions.reach（见 SingleStageCtx#canPlaceAt）
             if (!ctx.canPlaceAt(pos)) continue;
-            queuePlaceSlime(pos);
-            filled++;
+            fill.add(pos);
+        }
+        if (!fill.isEmpty()) {
+            queue.child("补粘液块 " + fill.size() + " 个",
+                () -> new SingleStagePlaceBatchAction(ctx, fill, SLIME, HOTBAR_SLOTS, MAIN_SLOTS, "粘液块"));
         }
 
-        if (mined + filled > 0) {
-            ChatUtils.debug("在 " + cell.toShortString() + " 处理：挖 " + mined + "、补 " + filled);
+        if (mined + fill.size() > 0) {
+            ChatUtils.debug("在 " + cell.toShortString() + " 处理：挖 " + mined + "、补 " + fill.size());
         }
-    }
-
-    /** 放一个粘液块（手上没有就先把背包里的挪到快捷栏）。 */
-    private void queuePlaceSlime(BlockPos pos) {
-        queue.sync("准备粘液块", () -> {
-            int hotbar = findSlot(SingleStageCtx.HOTBAR_FREE_1, SingleStageCtx.HOTBAR_FREE_3, SLIME);
-            if (hotbar < 0) {
-                int main = findSlot(SingleStageCtx.FILLER_START, SingleStageCtx.FILLER_END, SLIME);
-                int free = findFreeHotbar();
-                if (main < 0 || free < 0) {
-                    ChatUtils.debug("身上没有粘液块了，跳过 " + pos.toShortString());
-                    return;
-                }
-                queue.child("把粘液块挪到快捷栏第 " + (free + 1) + " 格",
-                    () -> new SingleStageInventoryAction(ctx,
-                        List.of(SingleStageInventoryAction.move(main, free))));
-                int slot = free;
-                queue.child("放粘液块 " + pos.toShortString(),
-                    () -> new SingleStagePlaceAction(ctx, pos, slot));
-                return;
-            }
-            int slot = hotbar;
-            queue.child("放粘液块 " + pos.toShortString(),
-                () -> new SingleStagePlaceAction(ctx, pos, slot));
-        });
-    }
-
-    /** 在 {@code [from, to]} 这些格子里找第一格符合条件的东西，返回格子下标；没有返回 -1。 */
-    private int findSlot(int from, int to, Predicate<ItemStack> filter) {
-        for (int i = from; i <= to; i++) {
-            ItemStack stack = ctx.live(i);
-            if (!stack.isEmpty() && filter.test(stack)) return i;
-        }
-        return -1;
-    }
-
-    /** 快捷栏 6~8 里第一个空着的。 */
-    private int findFreeHotbar() {
-        for (int i = SingleStageCtx.HOTBAR_FREE_1; i <= SingleStageCtx.HOTBAR_FREE_3; i++) {
-            if (ctx.live(i).isEmpty()) return i;
-        }
-        return -1;
     }
 
     // ------------------------------------------------------------------

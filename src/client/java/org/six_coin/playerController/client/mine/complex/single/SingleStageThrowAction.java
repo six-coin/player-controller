@@ -19,8 +19,14 @@ import java.util.List;
  *
  * <p>「低头」只是给服务端发一个转头包（见 {@link RotateManager}），客户端视角不动；
  * 服务端按它看到的 pitch 决定往哪儿丢，所以低头丢就是往脚下丢。
+ *
+ * <p><b>低头之后要等 {@value #WAIT_TICKS} tick 再扔</b>：转头包和服务端处理之间有延迟，
+ * 同一 tick 就扔的话服务端可能还在用旧 pitch，东西会斜着飞出去（扔到矿洞里被重新捡回来）。
  */
 class SingleStageThrowAction extends SingleStageStep {
+
+    /** 低头之后等几个 tick 再扔（写死）。 */
+    private static final int WAIT_TICKS = 5;
 
     private final List<Integer> slots;
     private final String what;
@@ -28,6 +34,8 @@ class SingleStageThrowAction extends SingleStageStep {
     @Nullable
     private SingleStageInventoryAction child;
     private boolean rotated;
+    private int waitTicks;
+    private boolean throwing;
 
     SingleStageThrowAction(SingleStageCtx ctx, List<Integer> slots, String what) {
         super(ctx);
@@ -65,19 +73,39 @@ class SingleStageThrowAction extends SingleStageStep {
             return;
         }
         rotated = true;
-
-        List<SingleStageInventoryAction.Op> ops = new ArrayList<>();
-        for (int slot : nonEmpty) {
-            ops.add(SingleStageInventoryAction.throwStack(slot));
-        }
-        ChatUtils.info("低头扔掉" + what + "里的 " + nonEmpty.size() + " 叠东西");
-
-        child = new SingleStageInventoryAction(ctx, ops);
-        child.start();
+        ChatUtils.debug("低头扔" + what + "：" + nonEmpty.size() + " 叠，等 " + WAIT_TICKS + " tick");
     }
 
     @Override
     protected void tick() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        ClientPlayerEntity player = mc.player;
+        if (player == null) {
+            fail("玩家不存在");
+            return;
+        }
+
+        if (!throwing) {
+            if (++waitTicks < WAIT_TICKS) return;
+            throwing = true;
+
+            List<SingleStageInventoryAction.Op> ops = new ArrayList<>();
+            for (int slot : slots) {
+                if (!player.getInventory().getStack(slot).isEmpty()) {
+                    ops.add(SingleStageInventoryAction.throwStack(slot));
+                }
+            }
+            if (ops.isEmpty()) {
+                finish();
+                return;
+            }
+            ChatUtils.info("低头扔掉" + what + "里的 " + ops.size() + " 叠东西");
+
+            child = new SingleStageInventoryAction(ctx, ops);
+            child.start();
+            return;
+        }
+
         if (child == null) {
             finish();
             return;
