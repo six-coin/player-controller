@@ -4,17 +4,22 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import org.six_coin.playerController.client.stock.MineBlockAction;
-import org.six_coin.playerController.client.util.ShulkerUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
- * 需求 (6)：拆掉临时工作站 —— 六个盒子逐个「挖掉 → snap 过去捡起来 → snap 回来 → 装回物品栏」。
+ * 需求 (6)：拆掉临时工作站。
  *
- * <p>装回去的顺序：圆石盒和黏液块盒都按内容**从少到多**装进对应那两个格子
- * （背包 6/7、9/10），收集盒同样按内容从少到多装进当前的两个收集位。
+ * <ol>
+ *   <li>六个盒子逐个「挖掉 → snap 到它的位置 → <b>等物品栏把它吸进来</b> → snap 回临时站立点 → 装回物品栏」。
+ *       装回去的顺序：圆石盒和黏液块盒都按内容**从少到多**装进对应那两个格子（背包 6/7、9/10），
+ *       收集盒同样按内容从少到多装进当前的两个收集位；</li>
+ *   <li>最后把 4×5 的圆石平台拆掉（悬停在平台正上方拆，20 格都在触及范围内）。
+ *       <b>拆完不捡掉落物</b> —— 所以拆的时候人站在平台上方两格，圆石就留在地上。</li>
+ * </ol>
  *
  * <p>如果目标格子里本来就有东西（比如「留一个空盒在背包」那个），就找个空格放，不会硬塞。
  */
@@ -79,6 +84,18 @@ class SingleStageTeardown extends SingleStageStep {
             queueBreak(boxes.get(0), ctx.collectSlot);
             queueBreak(boxes.get(1), ctx.collectSlot + 1);
         });
+
+        // 平台：拆掉，但不捡圆石（站上面两格，掉落物吸不到）
+        queue.sync("拆平台", () -> {
+            queue.child("挪到平台上方",
+                () -> new SingleStageSnapAction(ctx, ctx.platformHover()));
+            for (BlockPos cell : ctx.platform()) {
+                queue.child("挖掉平台 " + cell.toShortString(),
+                    () -> new MineBlockAction(cell, SingleStageCtx.HOTBAR_PICKAXE));
+            }
+            queue.child("回临时站立点",
+                () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
+        });
     }
 
     /** 内容少的排前面。 */
@@ -91,16 +108,19 @@ class SingleStageTeardown extends SingleStageStep {
     private void queueBreak(BlockPos spot, int targetSlot) {
         queue.sync("拆 " + spot.toShortString(), () -> {
             List<ItemStack> contents = ctx.data.box(spot);
+            Map<Integer, String> before = ctx.boxSignatures();
 
             queue.child("挖掉 " + spot.toShortString(),
                 () -> new MineBlockAction(spot, SingleStageCtx.HOTBAR_PICKAXE));
             queue.child("snap 到 " + spot.toShortString(),
                 () -> new SingleStageSnapAction(ctx, spot));
+            queue.child("等物品栏吸到盒子",
+                () -> new SingleStageWaitItemAction(ctx, contents, before));
             queue.child("snap 回临时站立点",
                 () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
 
             queue.sync("把盒子装回物品栏", () -> {
-                int found = findBoxSlot(contents);
+                int found = ctx.findPickedBox(before, contents);
                 if (found < 0) {
                     fail("找不到刚挖下来的盒子（" + spot.toShortString() + "）");
                     queue.cancel();
@@ -126,26 +146,5 @@ class SingleStageTeardown extends SingleStageStep {
             if (ctx.live(slot).isEmpty()) return slot;
         }
         return -1;
-    }
-
-    /** 物品栏里哪个格子的潜影盒内容和 {@code contents} 一样。 */
-    private int findBoxSlot(List<ItemStack> contents) {
-        for (int slot = 0; slot <= SingleStageCtx.FILLER_END; slot++) {
-            ItemStack stack = ctx.live(slot);
-            if (!ShulkerUtils.isShulkerBox(stack)) continue;
-            if (sameContents(ShulkerUtils.contents(stack), contents)) return slot;
-        }
-        return -1;
-    }
-
-    private static boolean sameContents(List<ItemStack> a, List<ItemStack> b) {
-        if (a.size() != b.size()) return false;
-        for (int i = 0; i < a.size(); i++) {
-            ItemStack left = a.get(i);
-            ItemStack right = b.get(i);
-            if (!ItemStack.areItemsAndComponentsEqual(left, right)) return false;
-            if (left.getCount() != right.getCount()) return false;
-        }
-        return true;
     }
 }

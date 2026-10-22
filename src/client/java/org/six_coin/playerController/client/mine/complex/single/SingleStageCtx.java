@@ -7,10 +7,14 @@ import org.six_coin.playerController.client.mine.MineFilter;
 import org.six_coin.playerController.client.mine.MineRegion;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
+import org.six_coin.playerController.client.util.ShulkerUtils;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * {@code /pc mine debug_chunk_miner} 一次的共享上下文：坐标、物品栏布局、数据缓存、各种区域。
@@ -70,11 +74,17 @@ public final class SingleStageCtx {
     /** 副手：不死图腾。 */
     public static final int OFFHAND = 40;
 
-    /** 初始子区块里，放置位置用的相对坐标（x, y, z）。 */
-    private static final int[][] PLATFORM_XZ = {{6, 6}, {6, 7}, {6, 8}, {6, 9}, {6, 10},
-        {7, 6}, {7, 7}, {7, 8}, {7, 9}, {7, 10},
-        {8, 6}, {8, 7}, {8, 8}, {8, 9}, {8, 10},
-        {9, 6}, {9, 7}, {9, 8}, {9, 9}, {9, 10}};
+    /**
+     * 平台 20 格的相对坐标（x 6~10、z 6~9，y = 2）。
+     *
+     * <p>顺序是「先近后远」，看着顺眼而已 —— 凭空放置不看相邻方块，先后无所谓。
+     */
+    private static final int[][] PLATFORM_XZ = {
+        {6, 6}, {6, 7}, {6, 8}, {6, 9},
+        {7, 6}, {7, 7}, {7, 8}, {7, 9},
+        {8, 6}, {8, 7}, {8, 8}, {8, 9},
+        {9, 6}, {9, 7}, {9, 8}, {9, 9},
+        {10, 6}, {10, 7}, {10, 8}, {10, 9}};
 
     /** 走位的 8 个拐点（相对目标子区块的 x / z）。 */
     private static final int[][] ROUTE = {{14, 14}, {14, 1}, {10, 1}, {10, 14},
@@ -156,7 +166,7 @@ public final class SingleStageCtx {
         return initialMin.add(9, 3, 8);
     }
 
-    /** 4×5 的圆石平台（20 格，相对坐标 6 2 6 ~ 9 2 10）。 */
+    /** 4×5 的圆石平台（20 格，相对坐标 6 2 6 ~ 10 2 9）。 */
     public List<BlockPos> platform() {
         List<BlockPos> cells = new ArrayList<>(PLATFORM_XZ.length);
         for (int[] xz : PLATFORM_XZ) {
@@ -166,10 +176,10 @@ public final class SingleStageCtx {
     }
 
     /**
-     * 搭平台时悬停的位置（相对坐标 8 4 8，平台正上方那一格空气）。
+     * 搭 / 拆平台时悬停的位置（相对坐标 8 4 8，平台正上方那一格空气）。
      *
-     * <p>从临时站立点 6 4 6 看，平台最远那个角（9 2 10）离眼睛差不多 6 格，
-     * 超过服务端允许的交互距离（{@code actions.reach} + 1 = 5.5），放不上去；
+     * <p>从临时站立点 6 4 6 看，平台最远那个角（10 2 9）离眼睛差不多 6 格，
+     * 超过服务端允许的交互距离（{@code actions.reach} + 1 = 5.5），放不上去也挖不到；
      * 站到平台正上方就全都在 4.5 格以内了。
      */
     public BlockPos platformHover() {
@@ -347,5 +357,55 @@ public final class SingleStageCtx {
         if (!slots.contains(collectSlot)) slots.add(collectSlot);
         if (!slots.contains(collectSlot + 1)) slots.add(collectSlot + 1);
         return slots;
+    }
+
+    // ------------------------------------------------------------------
+    // 认「刚挖下来的盒子」
+    // ------------------------------------------------------------------
+
+    /**
+     * 物品栏里每个潜影盒的「格子 -> 内容指纹」。
+     *
+     * <p>挖盒子**之前**拍一张，挖完再用 {@link #findPickedBox} 认出「刚吸进来的那个」
+     * —— 光比内容不够（可能有两个一样的盒子），比「挖之前这格不是这个内容」才准。
+     */
+    public Map<Integer, String> boxSignatures() {
+        Map<Integer, String> map = new HashMap<>();
+        for (int slot = 0; slot <= FILLER_END; slot++) {
+            ItemStack stack = live(slot);
+            if (!ShulkerUtils.isShulkerBox(stack)) continue;
+            map.put(slot, signature(ShulkerUtils.contents(stack)));
+        }
+        return map;
+    }
+
+    /**
+     * 挖下来的那个盒子现在在哪一格；还没吸进来返回 -1。
+     *
+     * @param before 挖之前拍的 {@link #boxSignatures()}
+     */
+    public int findPickedBox(Map<Integer, String> before, List<ItemStack> contents) {
+        String want = signature(contents);
+        int fallback = -1;
+
+        for (int slot = 0; slot <= FILLER_END; slot++) {
+            ItemStack stack = live(slot);
+            if (!ShulkerUtils.isShulkerBox(stack)) continue;
+            if (!signature(ShulkerUtils.contents(stack)).equals(want)) continue;
+
+            String was = before.get(slot);
+            if (was == null || !was.equals(want)) return slot;   // 这一格是挖完才变成这个内容的
+            if (fallback < 0) fallback = slot;
+        }
+        return fallback;
+    }
+
+    /** 一盒东西的指纹：物品 id -> 个数（顺序无关，方便比较）。 */
+    public static String signature(List<ItemStack> contents) {
+        Map<String, Integer> counts = new TreeMap<>();
+        for (ItemStack stack : contents) {
+            counts.merge(SingleStageData.idOf(stack), stack.getCount(), Integer::sum);
+        }
+        return counts.toString();
     }
 }

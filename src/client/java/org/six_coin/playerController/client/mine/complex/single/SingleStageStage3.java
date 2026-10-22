@@ -20,7 +20,6 @@ import org.six_coin.playerController.client.util.ShulkerUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -318,17 +317,20 @@ class SingleStageStage3 extends SingleStageStep {
             fullBox = null;
 
             List<ItemStack> contents = ctx.data.box(broken);
+            Map<Integer, String> before = ctx.boxSignatures();
             int slot = broken.equals(ctx.collectSpotB()) ? ctx.collectSlot + 1 : ctx.collectSlot;
 
             queue.child("挖掉装满的收集盒 " + broken.toShortString(),
                 () -> new MineBlockAction(broken, SingleStageCtx.HOTBAR_PICKAXE));
             queue.child("snap 到 " + broken.toShortString(),
                 () -> new SingleStageSnapAction(ctx, broken));
+            queue.child("等物品栏吸到盒子",
+                () -> new SingleStageWaitItemAction(ctx, contents, before));
             queue.child("snap 回临时站立点",
                 () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
 
             queue.sync("收好挖下来的盒子", () -> {
-                int found = findBoxSlot(contents);
+                int found = ctx.findPickedBox(before, contents);
                 if (found < 0) {
                     fail("找不到刚挖下来的收集盒（应该是一个满盒）");
                     queue.cancel();
@@ -366,26 +368,6 @@ class SingleStageStage3 extends SingleStageStep {
 
             queue.sync("收集位 +1", () -> ctx.collectSlot++);
         });
-    }
-
-    /** 物品栏里哪个格子的潜影盒内容和 {@code contents} 一样。 */
-    private int findBoxSlot(List<ItemStack> contents) {
-        Map<String, Integer> want = signature(contents);
-        for (int i = 0; i <= SingleStageCtx.FILLER_END; i++) {
-            ItemStack stack = ctx.live(i);
-            if (!ShulkerUtils.isShulkerBox(stack)) continue;
-            if (signature(ShulkerUtils.contents(stack)).equals(want)) return i;
-        }
-        return -1;
-    }
-
-    /** 「物品 id -> 数量」的指纹，用来认盒子。 */
-    private static Map<String, Integer> signature(List<ItemStack> contents) {
-        Map<String, Integer> map = new HashMap<>();
-        for (ItemStack stack : contents) {
-            map.merge(SingleStageData.idOf(stack), stack.getCount(), Integer::sum);
-        }
-        return map;
     }
 
     private int firstFreeHotbar() {
