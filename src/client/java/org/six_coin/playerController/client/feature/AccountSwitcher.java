@@ -27,13 +27,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 
 /**
- * {@code /pc account <player_id>}：把当前身份换成这个离线账户，然后重新加入刚才的世界。
+ * {@code /pc account switch_to <player_id>} / {@code /pc account re_login}：
+ * 下线之后重新加入刚才的世界，前者顺便把身份换成离线账户，后者什么都不换。
  *
  * <p>流程分三步，都是分 tick 做的：
  * <ol>
- *   <li>{@code /pc account} 只做校验和登记（{@link #request}），真正下线放到下一个 tick ——
- *       命令是在聊天栏回调里执行的，直接在里面走「保存世界 → 断开 → 重连」容易踩重入；</li>
- *   <li>下一个 tick 换掉 session 等身份字段，然后调用原版的下线流程
+ *   <li>{@code /pc account} 只做校验和登记（{@link #request} / {@link #requestRelogin}），
+ *       真正下线放到下一个 tick —— 命令是在聊天栏回调里执行的，
+ *       直接在里面走「保存世界 → 断开 → 重连」容易踩重入；</li>
+ *   <li>下一个 tick 换掉 session 等身份字段（只有换账户时才换），然后调用原版的下线流程
  *       （和「保存并退出」按钮同一个方法：它会等存档写完、服务端线程真正退出再返回，
  *       所以返回之后存档锁已经放开了，可以马上重新进同一个世界）；</li>
  *   <li>等 {@link #WAIT_TICKS} tick 之后，按下线前记下来的目标重连：
@@ -42,7 +44,7 @@ import java.util.regex.Pattern;
  *
  * <p>注意：单人游戏里玩家存档是按 UUID 存的，换成离线账户就是换了一个 UUID，
  * 所以重新进世界时通常是一个「新玩家」（出生点开局、背包是空的），除非以前就用这个离线名字
- * 玩过这个存档。这是换账户本身决定的。
+ * 玩过这个存档。这是换账户本身决定的。{@code re_login} 不换身份，所以不会遇到这个。
  */
 public final class AccountSwitcher {
 
@@ -73,6 +75,8 @@ public final class AccountSwitcher {
     }
 
     private static Stage stage = Stage.IDLE;
+    /** 这次是换账户（true）还是只重新登录（false）。 */
+    private static boolean switchingAccount;
     private static String pendingName;
     private static Target target;
     private static int waitTicks;
@@ -107,15 +111,34 @@ public final class AccountSwitcher {
         }
 
         pendingName = playerName;
+        switchingAccount = true;
         stage = Stage.START;
         LOG.info("请求切换到离线账户 {}（当前 {}）", playerName, describeCurrent(client));
+        return null;
+    }
+
+    /**
+     * 受理一次「原地重新登录」：不换账户，只退出到主界面再重新登录、回到刚才的世界。
+     *
+     * <p>返回错误信息，{@code null} 表示已经排队，会在下一个 tick 执行。
+     */
+    public static String requestRelogin() {
+        if (stage != Stage.IDLE) return "上一次账户操作还没结束，请稍等";
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null) return "客户端还没启动";
+
+        pendingName = null;
+        switchingAccount = false;
+        stage = Stage.START;
+        LOG.info("请求重新登录（账户不变：{}）", describeCurrent(client));
         return null;
     }
 
     /** 校验离线名字；返回错误信息，{@code null} 表示合法。 */
     public static String validateName(String playerName) {
         if (playerName == null || playerName.isEmpty()) {
-            return "要写玩家名字，例如：/pc account Steve";
+            return "要写玩家名字，例如：/pc account switch_to Steve";
         }
         if (!VALID_NAME.matcher(playerName).matches()) {
             return "离线名字只能是 3~16 个字母、数字、下划线（原版服务端就是这么校验的），这个名字不行："
@@ -151,32 +174,44 @@ public final class AccountSwitcher {
         }
     }
 
-    /** 换身份 + 下线。 */
+    /** 换身份（只换账户时）+ 下线。 */
     private static void start(MinecraftClient client) {
+        boolean switchAccount = switchingAccount;
         String name = pendingName;
         target = captureTarget(client);
-        applyOffline(client, name);
+        if (switchAccount) applyOffline(client, name);
         ActionManager.get().cancelAll();
 
         if (target == null) {
             boolean wasInWorld = client.world != null || client.getServer() != null;
-            ChatUtils.info(wasInWorld
-                ? "已切换到离线账户 " + name + "，但没能确定要回到哪个世界，需要你自己重新进入"
-                : "已切换到离线账户 " + name + "（当前不在世界里，没有重新加入）");
-            LOG.info("切换到离线账户 {}：没有重连目标（wasInWorld={}）", name, wasInWorld);
+            if (!wasInWorld) {
+                ChatUtils.info(switchAccount
+                    ? "已切换到离线账户 " + name + "（当前不在世界里，没有重新加入）"
+                    : "当前不在世界里，不用重新登录");
+            } else {
+                ChatUtils.info(switchAccount
+                    ? "已切换到离线账户 " + name + "，但没能确定要回到哪个世界，需要你自己重新进入"
+                    : "没能确定要回到哪个世界，需要你自己重新进入");
+            }
+            LOG.info("{}：没有重连目标（wasInWorld={}）",
+                switchAccount ? "切换到离线账户 " + name : "重新登录", wasInWorld);
             reset();
             return;
         }
 
-        ChatUtils.info("已切换到离线账户 " + name + "，正在下线……");
-        LOG.info("切换到离线账户 {}，下线后重连目标：{}", name, target.isServer()
-            ? "服务器 " + target.server().address
-            : "存档 " + target.levelName());
+        ChatUtils.info(switchAccount
+            ? "已切换到离线账户 " + name + "，正在下线……"
+            : "正在退出到主界面，然后重新登录……");
+        LOG.info("{}，下线后重连目标：{}",
+            switchAccount ? "切换到离线账户 " + name : "重新登录（账户不变）",
+            target.isServer() ? "服务器 " + target.server().address : "存档 " + target.levelName());
         stage = Stage.WAIT;
         waitTicks = WAIT_TICKS;
         try {
             // 和「保存并退出」按钮同一个方法：单人游戏里它会等存档写完、服务端线程退出再返回
-            client.disconnect(Text.literal("正在切换到离线账户 " + name));
+            client.disconnect(Text.literal(switchAccount
+                ? "正在切换到离线账户 " + name
+                : "正在重新登录"));
         } catch (Throwable t) {
             ChatUtils.error("下线失败：" + t);
             LOG.error("下线失败", t);
@@ -311,6 +346,7 @@ public final class AccountSwitcher {
 
     private static void reset() {
         stage = Stage.IDLE;
+        switchingAccount = false;
         pendingName = null;
         target = null;
         waitTicks = 0;

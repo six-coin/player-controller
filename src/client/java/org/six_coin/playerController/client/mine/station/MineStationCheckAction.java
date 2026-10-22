@@ -24,6 +24,7 @@ import org.six_coin.playerController.client.mine.MineTools;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
+import org.six_coin.playerController.client.util.ShulkerUtils;
 import org.six_coin.playerController.client.waypoint.PathPlanner;
 import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointGraph;
@@ -35,6 +36,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,7 +65,11 @@ import java.util.Set;
  *   <li>图腾补给：每一格都是不死图腾（不可堆叠，每格 1 个就是满的）；</li>
  *   <li>工具缓存：每个容器里只有合法工具（见 {@link MineToolRules}），
  *       而且<em>每个容器</em>里五类工具各至少 {@value MineToolRules#REQUIRED_PER_KIND} 件可用；</li>
- *   <li>黏液块缓存：每一格都是黏液块或树脂块。</li>
+ *   <li>黏液块缓存：每一格都是装满一整盒的黏液块 / 树脂块（同一个盒子里可以混装），
+ *       一盒 27 格 × 64 = {@value #FULL_BOX} 个；</li>
+ *   <li>圆石缓存：每一格都是装满一整盒的圆石，一盒必须正好 {@value #FULL_BOX} 个；</li>
+ *   <li>卸货潜影盒摆放处：必须<em>精确地</em>有 {@value #UNLOADING_PLACEMENT_COUNT} 个位置，
+ *       而且每一个位置上都必须空着（是空气）。</li>
  * </ul>
  *
  * <p>报告写到 {@code world_<n>/mine/check.json}（不管过没过都写，过没过看 {@code passed}）。
@@ -77,21 +83,28 @@ public class MineStationCheckAction extends Action {
     private static final String TOTEM = "minecraft:totem_of_undying";
     private static final String SLIME_BLOCK = "minecraft:slime_block";
     private static final String RESIN_BLOCK = "minecraft:resin_block";
+    private static final String COBBLESTONE = "minecraft:cobblestone";
+
+    /** 一整盒：潜影盒 27 格，每格 64 个。 */
+    private static final int FULL_BOX = 27 * 64;
+
+    /** 卸货潜影盒摆放处必须正好有这么多个位置。 */
+    public static final int UNLOADING_PLACEMENT_COUNT = 9;
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
         .disableHtmlEscaping()
         .create();
 
-    private static final List<MineStationPart> CONTAINER_PARTS = List.of(
-        MineStationPart.ITEM_COLLECTOR,
-        MineStationPart.FOOD_PROVIDER,
-        MineStationPart.TOTEM_PROVIDER,
-        MineStationPart.TOOL_CACHE,
-        MineStationPart.SLIME_CACHE);
+    /** 要打开数内容的那些部分（安全点和摆放处不是容器）。 */
+    private static final List<MineStationPart> CONTAINER_PARTS =
+        Arrays.stream(MineStationPart.values())
+            .filter(MineStationPart::isContainer)
+            .toList();
 
     /** 一个要开的目标。 */
-    private record Target(MineStationPart part, MinePlace place, BlockPos pos, BlockPos access) {
+    private record Target(MineStationPart part, MinePlace place, BlockPos pos, BlockPos access,
+                          boolean container) {
     }
 
     /** 开完一个容器数出来的东西。 */
@@ -200,15 +213,32 @@ public class MineStationCheckAction extends Action {
         for (MineStationPart part : CONTAINER_PARTS) {
             for (MinePlace place : manager.positions(part)) {
                 if (!resolveAccess(part, place, occupied, offsets, safeNode, graph)) continue;
-                targets.add(new Target(part, place, place.pos(), place.access().pos()));
+                targets.add(new Target(part, place, place.pos(), place.access().pos(), true));
             }
+        }
+
+        // 卸货潜影盒摆放处：不是容器，走过去只看「空不空」
+        for (MinePlace place : manager.positions(MineStationPart.UNLOADING_PLACEMENT)) {
+            if (!resolveAccess(MineStationPart.UNLOADING_PLACEMENT, place, occupied, offsets,
+                safeNode, graph)) continue;
+            targets.add(new Target(MineStationPart.UNLOADING_PLACEMENT, place, place.pos(),
+                place.access().pos(), false));
+        }
+
+        // 卸货潜影盒摆放处必须正好 9 个（多配了也算问题，命令里添加时只提示不拦）
+        int unloading = manager.positions(MineStationPart.UNLOADING_PLACEMENT).size();
+        if (unloading != UNLOADING_PLACEMENT_COUNT) {
+            addProblem(MineStationPart.UNLOADING_PLACEMENT.display() + " 必须精确地有 "
+                + UNLOADING_PLACEMENT_COUNT + " 个位置（现在 " + unloading + " 个）");
         }
 
         // 落点可能刚从边中间切出新路径点，统一存一次
         manager.save();
         WaypointManager.get().save();
 
-        ChatUtils.debug("挖掘站检查：落点算完，要开 " + targets.size() + " 个容器；问题 " + problems.size() + " 条");
+        long containers = targets.stream().filter(Target::container).count();
+        ChatUtils.debug("挖掘站检查：落点算完，要开 " + containers + " 个容器、"
+            + (targets.size() - containers) + " 个摆放处；问题 " + problems.size() + " 条");
     }
 
     /**
@@ -295,6 +325,13 @@ public class MineStationCheckAction extends Action {
         Vec3d center = PlayerUtils.blockCenter(target.access());
         if (player.squaredDistanceTo(center) > 1.0E-6) {
             PlayerUtils.snapToBlockCenter(target.access());
+        }
+
+        // 摆放处不用打开，看一眼方块是不是空着就行
+        if (!target.container()) {
+            checkPlacement(target);
+            nextTarget();
+            return;
         }
 
         MinecraftClient client = MinecraftClient.getInstance();
@@ -432,6 +469,24 @@ public class MineStationCheckAction extends Action {
             + " 格，空 " + emptySlots + " 格，物品 " + items.size() + " 种");
     }
 
+    /**
+     * 摆放处：那个位置必须空着（是空气）。
+     *
+     * <p>不看「上面能不能放盒子」这种细节 —— 只按用户的要求要求这里是空的。
+     */
+    private void checkPlacement(Target target) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.world == null) return;
+
+        BlockState state = mc.world.getBlockState(target.pos());
+        if (!state.isAir()) {
+            addProblem(describe(target.part(), target.place()) + " 必须空着（现在是 "
+                + ContainerTypes.idOf(state) + "）");
+            return;
+        }
+        ChatUtils.debug("挖掘站检查：" + describe(target.part(), target.place()) + " 是空的");
+    }
+
     private void closeSession(MinecraftClient mc) {
         if (session == null) return;
         session.close(mc);
@@ -474,9 +529,9 @@ public class MineStationCheckAction extends Action {
         validate();
 
         Path file = MineStationManager.get().currentCheckFile();
-        int slime = countSlime(SLIME_BLOCK);
-        int resin = countSlime(RESIN_BLOCK);
-        writeReport(file, slime, resin);
+        Map<String, Integer> slime = boxTotals(MineStationPart.SLIME_CACHE);
+        Map<String, Integer> cobble = boxTotals(MineStationPart.COBBLESTONE_CACHE);
+        writeReport(file, slime, cobble);
 
         if (problems.isEmpty()) {
             output().info("挖掘站检查通过，报告已写到 " + file);
@@ -485,7 +540,10 @@ public class MineStationCheckAction extends Action {
             for (String problem : problems) ChatUtils.error("  · " + problem);
             output().info("报告（含问题）已写到 " + file);
         }
-        output().info("黏液块 " + slime + " 个、树脂块 " + resin + " 个（共 " + (slime + resin) + " 个）");
+        output().info("黏液块 " + slime.getOrDefault(SLIME_BLOCK, 0) + " 个、树脂块 "
+            + slime.getOrDefault(RESIN_BLOCK, 0) + " 个（" + boxCount(MineStationPart.SLIME_CACHE)
+            + " 盒）；圆石 " + cobble.getOrDefault(COBBLESTONE, 0) + " 个（"
+            + boxCount(MineStationPart.COBBLESTONE_CACHE) + " 盒）");
     }
 
     /** 第 2 步的内容检查。 */
@@ -494,11 +552,14 @@ public class MineStationCheckAction extends Action {
         validateProvider(MineStationPart.FOOD_PROVIDER, COOKED_PORKCHOP, "熟猪排");
         validateProvider(MineStationPart.TOTEM_PROVIDER, TOTEM, "不死图腾");
         validateToolCaches();
-        validateSlimeCaches();
+        validateBoxCache(MineStationPart.SLIME_CACHE, "黏液块 / 树脂块",
+            Set.of(SLIME_BLOCK, RESIN_BLOCK));
+        validateBoxCache(MineStationPart.COBBLESTONE_CACHE, "圆石", Set.of(COBBLESTONE));
 
         // 该开的容器有没有真的数到（没数到的大半是上面「打不开 / 半路失败」）：
         // 凡是配了而且可达的都要数到，一条没数到就报一条
         for (Target target : targets) {
+            if (!target.container()) continue;
             if (surveyed(target)) continue;
             addProblem(describe(target.part(), target.place()) + " 没有数到（没走到或者没打开）");
         }
@@ -581,13 +642,42 @@ public class MineStationCheckAction extends Action {
         }
     }
 
-    private void validateSlimeCaches() {
-        for (Survey survey : surveysOf(MineStationPart.SLIME_CACHE)) {
+    /**
+     * 缓存类（黏液块 / 圆石）：容器里每一格都必须是一个<b>装满一整盒</b>的潜影盒。
+     *
+     * <p>「装满」= 一盒 {@value #FULL_BOX} 个（27 格 × 64）：黏液块缓存允许同一个盒子里
+     * 黏液块和树脂块混装，但总得装满一盒；圆石缓存每个盒子必须正好 {@value #FULL_BOX} 个圆石。
+     *
+     * <p>容器里的空格不管（不要求塞满所有格子）。
+     */
+    private void validateBoxCache(MineStationPart part, String label, Set<String> allowed) {
+        for (Survey survey : surveysOf(part)) {
             for (ItemStack stack : survey.stacks()) {
-                String id = Registries.ITEM.getId(stack.getItem()).toString();
-                if (id.equals(SLIME_BLOCK) || id.equals(RESIN_BLOCK)) continue;
-                addProblem(describe(MineStationPart.SLIME_CACHE, survey) + " 里有 " + id
-                    + " x" + stack.getCount() + "，只允许黏液块和树脂块");
+                String outerId = Registries.ITEM.getId(stack.getItem()).toString();
+                if (!ShulkerUtils.isShulkerBox(stack)) {
+                    addProblem(describe(part, survey) + " 里放了 " + outerId + " x" + stack.getCount()
+                        + "，这里只能放装满" + label + "的潜影盒");
+                    continue;
+                }
+
+                int total = 0;
+                List<String> wrong = new ArrayList<>();
+                for (ItemStack inner : ShulkerUtils.contents(stack)) {
+                    String innerId = Registries.ITEM.getId(inner.getItem()).toString();
+                    if (!allowed.contains(innerId)) {
+                        wrong.add(innerId + " x" + inner.getCount());
+                        continue;
+                    }
+                    total += inner.getCount();
+                }
+
+                if (!wrong.isEmpty()) {
+                    addProblem(describe(part, survey) + " 里的潜影盒装了不是" + label + "的东西："
+                        + String.join("、", wrong));
+                } else if (total != FULL_BOX) {
+                    addProblem(describe(part, survey) + " 里的潜影盒只有 " + total + " 个" + label
+                        + "（一盒要装满 " + FULL_BOX + " 个）");
+                }
             }
         }
     }
@@ -596,7 +686,7 @@ public class MineStationCheckAction extends Action {
     // 报告
     // ------------------------------------------------------------------
 
-    private void writeReport(Path file, int slime, int resin) {
+    private void writeReport(Path file, Map<String, Integer> slime, Map<String, Integer> cobble) {
         JsonObject root = new JsonObject();
         root.addProperty("passed", problems.isEmpty());
 
@@ -604,11 +694,10 @@ public class MineStationCheckAction extends Action {
         for (String problem : problems) problemArray.add(problem);
         root.add("problems", problemArray);
 
-        JsonObject slimeObject = new JsonObject();
-        slimeObject.addProperty("slime_block", slime);
-        slimeObject.addProperty("resin_block", resin);
-        slimeObject.addProperty("total", slime + resin);
-        root.add("slime_cache", slimeObject);
+        root.add("slime_cache", boxCacheJson(slime, MineStationPart.SLIME_CACHE,
+            "slime_block", SLIME_BLOCK, "resin_block", RESIN_BLOCK));
+        root.add("cobblestone_cache", boxCacheJson(cobble, MineStationPart.COBBLESTONE_CACHE,
+            "cobblestone", COBBLESTONE));
 
         JsonObject tools = new JsonObject();
         for (Survey survey : sortedSurveys(MineStationPart.TOOL_CACHE)) {
@@ -639,6 +728,29 @@ public class MineStationCheckAction extends Action {
         if (food != null) root.add("food_provider", food);
         JsonObject totem = providerJson(MineStationPart.TOTEM_PROVIDER);
         if (totem != null) root.add("totem_provider", totem);
+
+        // 卸货潜影盒摆放处：位置列表 + 要求 / 实际个数
+        JsonObject unloading = new JsonObject();
+        unloading.addProperty("required", UNLOADING_PLACEMENT_COUNT);
+        unloading.addProperty("count", MineStationManager.get()
+            .positions(MineStationPart.UNLOADING_PLACEMENT).size());
+        JsonArray unloadingPositions = new JsonArray();
+        for (MinePlace place : MineStationManager.get().positions(MineStationPart.UNLOADING_PLACEMENT)) {
+            JsonObject entry = new JsonObject();
+            entry.addProperty("id", place.id());
+            entry.addProperty("dimension", place.dimension());
+            entry.addProperty("x", place.pos().getX());
+            entry.addProperty("y", place.pos().getY());
+            entry.addProperty("z", place.pos().getZ());
+            if (place.access() != null) {
+                entry.addProperty("access_x", place.access().pos().getX());
+                entry.addProperty("access_y", place.access().pos().getY());
+                entry.addProperty("access_z", place.access().pos().getZ());
+            }
+            unloadingPositions.add(entry);
+        }
+        unloading.add("positions", unloadingPositions);
+        root.add("unloading_shulker_box_placement", unloading);
 
         try {
             Files.createDirectories(file.getParent());
@@ -709,16 +821,50 @@ public class MineStationCheckAction extends Action {
     // 小工具
     // ------------------------------------------------------------------
 
-    private int countSlime(String itemId) {
-        int total = 0;
-        for (Survey survey : surveysOf(MineStationPart.SLIME_CACHE)) {
+    /**
+     * 某个缓存部分里、所有潜影盒里各种物品一共多少个（只数盒子里的，不看外面的格子）。
+     */
+    private Map<String, Integer> boxTotals(MineStationPart part) {
+        Map<String, Integer> totals = new LinkedHashMap<>();
+        for (Survey survey : surveysOf(part)) {
             for (ItemStack stack : survey.stacks()) {
-                if (Registries.ITEM.getId(stack.getItem()).toString().equals(itemId)) {
-                    total += stack.getCount();
+                for (ItemStack inner : ShulkerUtils.contents(stack)) {
+                    totals.merge(Registries.ITEM.getId(inner.getItem()).toString(),
+                        inner.getCount(), Integer::sum);
                 }
             }
         }
-        return total;
+        return totals;
+    }
+
+    /** 某个缓存部分里一共数到几个潜影盒。 */
+    private int boxCount(MineStationPart part) {
+        int count = 0;
+        for (Survey survey : surveysOf(part)) {
+            for (ItemStack stack : survey.stacks()) {
+                if (ShulkerUtils.isShulkerBox(stack)) count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 缓存部分在报告里的那一段：几个盒子 + 每种物品多少个 + 合计。
+     *
+     * @param keys 成对出现：{@code 报告里的键, 物品 id}（顺序就是写进 json 的顺序）
+     */
+    private JsonObject boxCacheJson(Map<String, Integer> totals, MineStationPart part,
+                                    String... keys) {
+        JsonObject object = new JsonObject();
+        int total = 0;
+        for (int i = 0; i + 1 < keys.length; i += 2) {
+            int count = totals.getOrDefault(keys[i + 1], 0);
+            object.addProperty(keys[i], count);
+            total += count;
+        }
+        object.addProperty("total", total);
+        object.addProperty("boxes", boxCount(part));
+        return object;
     }
 
     private List<Survey> surveysOf(MineStationPart part) {

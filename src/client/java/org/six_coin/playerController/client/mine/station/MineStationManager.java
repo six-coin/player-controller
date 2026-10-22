@@ -155,6 +155,8 @@ public final class MineStationManager {
             case ITEM_COLLECTOR -> List.copyOf(data.itemCollector());
             case TOOL_CACHE -> List.copyOf(data.toolCache());
             case SLIME_CACHE -> List.copyOf(data.slimeCache());
+            case COBBLESTONE_CACHE -> List.copyOf(data.cobblestoneCache());
+            case UNLOADING_PLACEMENT -> List.copyOf(data.unloadingShulkerBoxPlacement());
             default -> List.of();
         };
     }
@@ -256,6 +258,8 @@ public final class MineStationManager {
             case ITEM_COLLECTOR -> data.itemCollector();
             case TOOL_CACHE -> data.toolCache();
             case SLIME_CACHE -> data.slimeCache();
+            case COBBLESTONE_CACHE -> data.cobblestoneCache();
+            case UNLOADING_PLACEMENT -> data.unloadingShulkerBoxPlacement();
             default -> throw new IllegalArgumentException(part + " 不是列表");
         };
     }

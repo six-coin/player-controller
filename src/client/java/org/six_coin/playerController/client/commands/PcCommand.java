@@ -53,7 +53,7 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7  /" + name + " mend ... §8- §7经验修补：start；station stand_point|ender_chest set|set_here|set_target|del"));
                 source.sendFeedback(Text.literal("§7  /" + name + " mine ... §8- §7挖掘：cancel；simple <x1> <y1> <z1> <x2> <y2> <z2> <dim>（按 mine/ 下的白/黑名单挖框里的方块）；list mode|whitelist|blacklist list|add|del"));
                 source.sendFeedback(Text.literal("§7  /" + name + " mine complex add_task|del_task <名字>、/" + name + " mine complex task <名字> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim> §8- §7复杂挖掘任务（记在 mine/mine.json，范围 + 信标写在 mine/<名字>/region.json）"));
-                source.sendFeedback(Text.literal("§7  /" + name + " mine complex station ... §8- §7挖掘站：list、check（算落点 + 走过去开箱检查）、show、safe_point / food_provider / totem_provider / item_collector / tool_cache / slime_cache"));
+                source.sendFeedback(Text.literal("§7  /" + name + " mine complex station ... §8- §7挖掘站：list、check（算落点 + 走过去开箱检查）、show、safe_point / food_provider / totem_provider / item_collector / tool_cache / slime_cache / cobblestone_cache / unloading_shulker_box_placement"));
                 source.sendFeedback(Text.literal("§7  /" + name + " waypoint ... §8- §7路径点 / 边 / 出生点"));
                 source.sendFeedback(Text.literal("§7    §7子命令：show、edit、list、optimize default|radical"));
                 source.sendFeedback(Text.literal("§7    §7  add_waypoint here|target|position <x> <y> <z> <dim> [name]"));
@@ -61,7 +61,8 @@ public final class PcCommand {
                 source.sendFeedback(Text.literal("§7    §7  del_waypoint here|target|id <id>|position <x> <y> <z> <dim>|name <name>"));
                 source.sendFeedback(Text.literal("§7    §7  add_edge <id1> <id2>、del_edge <负数id>、set_spawn <选择器>、del_spawn"));
                 source.sendFeedback(Text.literal("§7  /" + name + " config ... §8- §7配置（debug / world / actions move_speed、move_max_descent_speed_blocks_per_tick、reach、move_anti_kick_delay_ticks、move_anti_kick_off_time_ticks、network_delay_ticks、move_dimension_wait_ticks、mend_max_wait_exp_seconds、mend_detect_interval_ticks、mine_max_blocks_per_tick、mine_tool_switch_interval_ticks、mine_max_vertical_speed_blocks_per_tick、mine_max_horizontal_speed_blocks_per_tick）"));
-                source.sendFeedback(Text.literal("§7  /" + name + " account [player_id] §8- §7换成名为 player_id 的离线账户：下线后重新加入刚才的世界（不带参数看当前账户）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " account switch_to <player_id> §8- §7换成名为 player_id 的离线账户：下线后重新加入刚才的世界（不带参数看当前账户）"));
+                source.sendFeedback(Text.literal("§7  /" + name + " account re_login §8- §7不换账户，只退出到主界面再重新登录，回到刚才的世界"));
                 source.sendFeedback(Text.literal("§7  item_list 例：§f{\"minecraft:cobblestone\": 65, \"minecraft:grass_block\": 13}"));
                 return 1;
             })

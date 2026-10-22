@@ -17,6 +17,8 @@ public final class MineStationData {
     private List<MinePlace> item_collector = new ArrayList<>();
     private List<MinePlace> tool_cache = new ArrayList<>();
     private List<MinePlace> slime_cache = new ArrayList<>();
+    private List<MinePlace> cobblestone_cache = new ArrayList<>();
+    private List<MinePlace> unloading_shulker_box_placement = new ArrayList<>();
 
     MinePlace safePoint() {
         return safe_point;
@@ -57,6 +59,16 @@ public final class MineStationData {
         return slime_cache;
     }
 
+    List<MinePlace> cobblestoneCache() {
+        if (cobblestone_cache == null) cobblestone_cache = new ArrayList<>();
+        return cobblestone_cache;
+    }
+
+    List<MinePlace> unloadingShulkerBoxPlacement() {
+        if (unloading_shulker_box_placement == null) unloading_shulker_box_placement = new ArrayList<>();
+        return unloading_shulker_box_placement;
+    }
+
     /**
      * 按「每个部分内部从 1 开始」重新编 id：单点固定 1，列表按顺序 1..n。
      *
@@ -73,5 +85,9 @@ public final class MineStationData {
         for (MinePlace place : toolCache()) place.id(id++);
         id = 1;
         for (MinePlace place : slimeCache()) place.id(id++);
+        id = 1;
+        for (MinePlace place : cobblestoneCache()) place.id(id++);
+        id = 1;
+        for (MinePlace place : unloadingShulkerBoxPlacement()) place.id(id++);
     }
 }

@@ -57,14 +57,16 @@ import java.util.concurrent.CompletableFuture;
  * /pc mine complex station tool_cache add &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | add_target
  *                                del &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | del_target | list
  * /pc mine complex station slime_cache 同上
+ * /pc mine complex station cobblestone_cache 同上
+ * /pc mine complex station unloading_shulker_box_placement 同上（要正好 9 个，而且都空着）
  * </pre>
  *
  * <p>和备货的工作站不一样：挖掘站不要求所有容器都在触及范围内，所以 set / add 只记坐标、不查距离；
  * 每个容器在哪里开（{@code access_position}）由 {@code check} 算出来。
  *
  * <p>产物收集（{@code item_collector}）是可选的：不配就不收集产物，{@code check} 也不会报错；
- * 别的部分（食物、图腾、工具缓存、黏液块缓存）都必须配。配了的东西都要在路径点的可达范围内，
- * 否则 {@code check} 会报错。
+ * 别的部分（食物、图腾、工具缓存、黏液块缓存、圆石缓存、卸货潜影盒摆放处）都必须配。
+ * 配了的东西都要在路径点的可达范围内，否则 {@code check} 会报错。
  */
 public final class MineStationCommand {
 
@@ -370,6 +372,15 @@ public final class MineStationCommand {
             + (itemId == null ? "" : "（产物 " + itemId + "）")
             + " " + DimensionUtils.display(dimension) + " " + pos.toShortString()
             + "（现在 " + places.size() + " 个" + (added == null ? "" : "，#" + added.id()) + "）"));
+
+        // 卸货潜影盒摆放处要正好 9 个：允许先多配，但超了要说一声
+        if (part == MineStationPart.UNLOADING_PLACEMENT
+            && places.size() > MineStationCheckAction.UNLOADING_PLACEMENT_COUNT) {
+            source.sendFeedback(Text.literal("§e提示：" + part.display() + " 必须正好 "
+                + MineStationCheckAction.UNLOADING_PLACEMENT_COUNT + " 个，现在有 " + places.size()
+                + " 个，check 会报错（多出来的请 del 掉）"));
+        }
+
         hintBlockType(source, part, pos);
         return 1;
     }
@@ -486,9 +497,15 @@ public final class MineStationCommand {
         BlockState state = mc.world.getBlockState(pos);
         String expected = null;
 
-        if (part == MineStationPart.ITEM_COLLECTOR) {
+        if (!part.isContainer()) {
+            // 摆放处：check 要求这里是空的
+            if (part != MineStationPart.SAFE_POINT && !state.isAir()) {
+                source.sendFeedback(Text.literal("§e提示：这里现在是 " + ContainerTypes.idOf(state)
+                    + "，check 会要求这里空着（是空气）"));
+            }
+        } else if (part == MineStationPart.ITEM_COLLECTOR) {
             if (!(state.getBlock() instanceof ShulkerBoxBlock)) expected = "潜影盒";
-        } else if (part != MineStationPart.SAFE_POINT && !ContainerTypes.isSupported(state.getBlock())) {
+        } else if (!ContainerTypes.isSupported(state.getBlock())) {
             expected = "容器（" + ContainerTypes.describeSupported() + "）";
         }
 
