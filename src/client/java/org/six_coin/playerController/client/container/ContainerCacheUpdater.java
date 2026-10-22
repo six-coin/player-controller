@@ -4,6 +4,8 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
+import org.six_coin.playerController.client.stock.station.StationManager;
+import org.six_coin.playerController.client.stock.station.StationPos;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
@@ -21,6 +23,9 @@ import java.util.Map;
  * <p>找出对应缓存条目的规则：先看这个位置自己；如果是大箱子，再按方块状态算出另一半在哪一格
  * （{@link ContainerTypes#otherHalf(World, BlockPos)}），那一格在缓存里就一起刷新。
  * 不做「附近有几个候选」这种猜测。
+ *
+ * <p><b>工作站里的容器永远不记</b>（见 {@link #refresh}）：{@code item_storage}、{@code item_final}、
+ * 潜影盒摆放处、任务前暂存处、空潜影盒提供处这些是备货自己的仓库，内容由 check.json / station_data 管。
  */
 public final class ContainerCacheUpdater {
 
@@ -55,6 +60,10 @@ public final class ContainerCacheUpdater {
     /**
      * 把这次打开的容器对应的缓存刷新一遍（内容没变化就不写文件，只打 debug）。
      *
+     * <p><b>工作站里的容器不记</b>：{@code item_storage} / {@code item_final} / 潜影盒摆放处 /
+     * 任务前暂存处 / 空潜影盒提供处这些都在工作站里，按约定它们<b>永远不进容器缓存</b>
+     * （缓存只用来记「外面的箱子」里有什么，备货会用 check.json / station_data 管工作站的东西）。
+     *
      * @return 刷了几个条目的内容（内容没变的不算）
      */
     public static int refresh(MinecraftClient client, BlockPos pos, ScreenHandler handler) {
@@ -63,6 +72,13 @@ public final class ContainerCacheUpdater {
         // 创造模式物品栏不是真容器，别理它
         if (ContainerCacheTracker.isCreativeInventory(client)) {
             ChatUtils.debug("现在开着创造模式物品栏，不刷新容器缓存");
+            return 0;
+        }
+
+        // 工作站里的容器一律不写缓存
+        if (isStationContainer(client.world, pos)) {
+            ChatUtils.debug("容器 " + pos.toShortString()
+                + " 是工作站的容器，按约定不进容器缓存，跳过刷新");
             return 0;
         }
 
@@ -89,5 +105,24 @@ public final class ContainerCacheUpdater {
             }
         }
         return changed;
+    }
+
+    /**
+     * 这个位置是不是工作站里配置过的容器（大箱子的另一半也算）。
+     *
+     * <p>只看当前维度里配过的坐标；一个都没配就直接 false。
+     */
+    private static boolean isStationContainer(World world, BlockPos pos) {
+        String dimension = DimensionUtils.current();
+        List<BlockPos> station = new ArrayList<>();
+        for (StationPos stationPos : StationManager.get().allPositions()) {
+            if (!stationPos.dimension().equals(dimension)) continue;
+            station.add(stationPos.pos());
+        }
+        if (station.isEmpty()) return false;
+        if (station.contains(pos)) return true;
+
+        BlockPos other = world == null ? null : ContainerTypes.otherHalf(world, pos);
+        return other != null && station.contains(other);
     }
 }

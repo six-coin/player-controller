@@ -776,7 +776,7 @@ final class Part2Stage3Craft extends StockStep {
                 // 这一步要用的材料（need）留着，不然又得重新去仓库拿一遍。
                 if (!get.stoppedForInventory() || dumps >= MAX_INVENTORY_DUMPS) {
                     ChatUtils.error("物品栏放不下这些材料了（还差 " + fetch.describe()
-                        + "），先去手动清一下物品栏");
+                        + "）；收尾会把物品栏倒回 item_storage，之后重新执行 start_collect 即可");
                     fetchFromStorage(fetch, need, ids, index + 1, dumps, next);
                     return;
                 }

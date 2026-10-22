@@ -93,9 +93,13 @@ public final class StockTask extends Action {
 
         Action failed = steps.failedStep();
         if (failed != null) {
-            // 失败原因一层层往上带，最后只由 Action 的收尾报一行
+            // 失败原因一层层往上带，最后只由 Action 的收尾报一行。
+            // 末尾统一提示「重新执行 start_collect 就行」：中途出问题不需要用户手工收拾，
+            // 收尾会把物品栏里的东西倒回 item_storage（见 StockCleanupAction）。
             fail("第 " + steps.number() + "/" + steps.total() + " 步 " + phaseOf(failed)
-                + " → " + failed.failureReason());
+                + " → " + failed.failureReason()
+                + "；稍后会自动把物品栏里的东西倒回 item_storage，"
+                + "然后重新执行 /pc stock task " + task + " start_collect 即可");
             return;
         }
 
@@ -115,7 +119,7 @@ public final class StockTask extends Action {
         if (failureReason() != null) {
             MinecraftClient mc = MinecraftClient.getInstance();
             if (mc.player != null && mc.world != null) {
-                ActionManager.get().submit(new StockCleanupAction());
+                ActionManager.get().submit(new StockCleanupAction(task));
             }
         }
     }

@@ -71,6 +71,13 @@ public final class StockCleanupAction extends Action {
 
     private int totalTicks;
 
+    /** 是哪个备货任务（收尾完了提示「重新执行哪个 start_collect」）。 */
+    private final String task;
+
+    public StockCleanupAction(String task) {
+        this.task = task;
+    }
+
     @Override
     public String name() {
         return "备货失败收尾（把物品栏放回 item_storage）";
@@ -159,10 +166,15 @@ public final class StockCleanupAction extends Action {
         }
 
         if (failureReason() != null) return;
-        if (cleared == 0 && skipped == 0) return;
-        ChatUtils.info("备货失败收尾：倒回去 " + cleared + " 个容器"
-            + (skipped > 0 ? "，还有 " + skipped + " 个容器没倒干净" : "")
-            + "（快捷栏第一格的钻石镐留着）");
+
+        // 收尾完了统一给一句「接下来怎么办」：重新跑一遍 start_collect 就行
+        String dumped = (cleared == 0 && skipped == 0)
+            ? "物品栏里没有要倒的东西"
+            : "倒回去 " + cleared + " 个容器"
+                + (skipped > 0 ? "，还有 " + skipped + " 个容器没倒干净" : "")
+                + "（快捷栏第一格的钻石镐留着）";
+        ChatUtils.info("备货失败收尾：" + dumped
+            + "；修好问题后重新执行 /pc stock task " + task + " start_collect 即可");
     }
 
     // ------------------------------------------------------------------
