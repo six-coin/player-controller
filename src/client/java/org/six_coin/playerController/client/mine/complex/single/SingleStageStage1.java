@@ -193,7 +193,8 @@ class SingleStageStage1 extends SingleStageStep {
         int filled = 0;
         for (BlockPos pos : gaps) {
             if (!isGap(mc.world.getBlockState(pos))) continue;
-            if (!PlayerUtils.isWithinReach(pos)) continue;
+            // 放方块按 7×7×7 的正方体算，不按 actions.reach（见 SingleStageCtx#canPlaceAt）
+            if (!ctx.canPlaceAt(pos)) continue;
             queuePlaceSlime(pos);
             filled++;
         }

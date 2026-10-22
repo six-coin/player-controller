@@ -408,4 +408,26 @@ public final class SingleStageCtx {
         }
         return counts.toString();
     }
+
+    // ------------------------------------------------------------------
+    // 放方块的有效范围
+    // ------------------------------------------------------------------
+
+    /** 放方块的有效范围半径：以玩家所在方块为中心 7×7×7 的正方体。 */
+    public static final int PLACE_RANGE = 3;
+
+    /**
+     * 这个位置现在放不放得上去。
+     *
+     * <p><b>不用 {@code actions.reach}</b>：需求里实测服务端那边松得多（7 格都能放），
+     * 所以这里按「以玩家下半身所在方块为中心、7×7×7 的正方体」判断
+     * （{@code |dx|、|dy|、|dz| <= }{@value #PLACE_RANGE}）。
+     */
+    public boolean canPlaceAt(BlockPos pos) {
+        BlockPos here = PlayerUtils.currentBlockPos();
+        if (here == null) return false;
+        return Math.abs(pos.getX() - here.getX()) <= PLACE_RANGE
+            && Math.abs(pos.getY() - here.getY()) <= PLACE_RANGE
+            && Math.abs(pos.getZ() - here.getZ()) <= PLACE_RANGE;
+    }
 }

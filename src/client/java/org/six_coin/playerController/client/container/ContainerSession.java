@@ -8,6 +8,8 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
+import org.six_coin.playerController.client.owner.Owner;
+import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -190,7 +192,7 @@ public final class ContainerSession {
         }
     }
 
-    /** 收尾：刷新容器缓存 → 关掉界面 → 解除「不显示界面」。 */
+    /** 收尾：刷新容器缓存 → 关掉界面 → 解除「不显示界面」→ 把朝向还回去。 */
     public void close(MinecraftClient mc) {
         refreshCache(mc);
         if (mc.player != null && handler != null && mc.player.currentScreenHandler == handler) {
@@ -200,5 +202,9 @@ public final class ContainerSession {
             ScreenSuppressor.release();
             holding = false;
         }
+        // 开容器的时候是用 Owner.STOCK 转的头（见 ContainerOpener），必须在这里还回去：
+        // 不还的话 STOCK 会一直占着朝向，之后 mine / attack 的转头全都被
+        // 「不让转头：现在是 STOCK 在用」挡掉（挖掘会一直卡在 ROTATE_DENIED）。
+        RotateManager.get().release(Owner.STOCK);
     }
 }

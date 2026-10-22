@@ -85,7 +85,7 @@ class SingleStageTeardown extends SingleStageStep {
             queueBreak(boxes.get(1), ctx.collectSlot + 1);
         });
 
-        // 平台：拆掉，但不捡圆石（站上面两格，掉落物吸不到）
+        // 平台 + 4 5 4 那个圆石：都拆掉，但不捡圆石（站上面两格，掉落物吸不到）
         queue.sync("拆平台", () -> {
             queue.child("挪到平台上方",
                 () -> new SingleStageSnapAction(ctx, ctx.platformHover()));
@@ -95,6 +95,8 @@ class SingleStageTeardown extends SingleStageStep {
             }
             queue.child("回临时站立点",
                 () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
+            queue.child("挖掉 4 5 4 的圆石",
+                () -> new MineBlockAction(ctx.marker(), SingleStageCtx.HOTBAR_PICKAXE));
         });
     }
 

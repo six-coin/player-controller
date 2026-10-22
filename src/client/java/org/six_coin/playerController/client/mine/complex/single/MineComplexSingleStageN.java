@@ -182,7 +182,13 @@ public class MineComplexSingleStageN extends Action {
     }
 
     private void runTeardown() {
-        run(new SingleStageTeardown(ctx), this::restockCheck);
+        run(new SingleStageTeardown(ctx), this::throwLeftovers);
+    }
+
+    /** 拆完平台，快捷栏第 6 格基本一定会吸上来几块圆石：低头扔掉，再去做补货检查。 */
+    private void throwLeftovers() {
+        run(new SingleStageThrowAction(ctx, List.of(SingleStageCtx.HOTBAR_FREE_1), "快捷栏 6"),
+            this::restockCheck);
     }
 
     /** 需求 (7)：再按 (2) 检查一遍物品栏，看看要不要补货。 */
