@@ -165,6 +165,17 @@ public final class SingleStageCtx {
         return cells;
     }
 
+    /**
+     * 搭平台时悬停的位置（相对坐标 8 4 8，平台正上方那一格空气）。
+     *
+     * <p>从临时站立点 6 4 6 看，平台最远那个角（9 2 10）离眼睛差不多 6 格，
+     * 超过服务端允许的交互距离（{@code actions.reach} + 1 = 5.5），放不上去；
+     * 站到平台正上方就全都在 4.5 格以内了。
+     */
+    public BlockPos platformHover() {
+        return initialMin.add(8, 4, 8);
+    }
+
     /** 六个盒子的位置（顺序：黏液块 ×2、圆石 ×2、收集 ×2）。 */
     public List<BlockPos> boxSpots() {
         return List.of(slimeSpotA(), slimeSpotB(), cobbleSpotA(), cobbleSpotB(),

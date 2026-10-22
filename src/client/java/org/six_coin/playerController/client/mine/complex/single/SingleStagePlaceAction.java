@@ -1,7 +1,6 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
 import net.minecraft.block.BlockState;
-import net.minecraft.block.FluidBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.BlockItem;
@@ -16,29 +15,43 @@ import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.util.ChatUtils;
+import org.six_coin.playerController.client.util.PlayerUtils;
 
 /**
- * 把快捷栏某一格里的方块放到某个位置（潜影盒、圆石、黏液块都用它）。
+ * 把快捷栏某一格里的方块放到某个位置（潜影盒、圆石、黏液块都用它）—— <b>凭空放置</b>。
  *
- * <p><b>不查触及范围</b>：需求里明确说了「硬放就行」，这些位置都是按设计算好的，
- * 服务端那边的距离检查比 {@code actions.reach} 松（多给 1 格）。
+ * <p><b>做法：直接点目标格自己</b>，面随便挑一个。原因是 {@code ItemPlacementContext}：
+ * <pre>
+ * canReplaceExisting = world.getBlockState(点的那一格).canReplace(...)
+ * getBlockPos()      = canReplaceExisting ? 点的那一格 : 点的那一格.offset(面)
+ * </pre>
+ * 目标格是空气（或水 / 熔岩 / 草这类可替换的），{@code canReplaceExisting} 就是 {@code true}，
+ * 方块正好落在目标格上，不需要旁边有方块垫着。
  *
- * <p>放的时候是「对着相邻方块的那一面右键」：优先点下面那一格（最稳），
- * 放不上去就换别的面再试（平台是浮空的，六个面都可能是空气）。
+ * <p>这也是 litematica-printer 的 {@code PLACE_IN_AIR} 做法（{@code Action#queueAction} 里
+ * 「凭空放置」分支点的是 {@code blockPos} 自己，而不是 {@code blockPos.relative(side)}）。
+ *
+ * <p>点错了（点成相邻格）的后果很隐蔽：手上东西会被消耗、方块落到旁边那一格、目标格还是空气，
+ * 然后一直空手重试 —— 所以这里只点目标格。
+ *
+ * <p><b>不查触及范围</b>：需求里说「硬放就行」，服务端那边的距离检查比 {@code actions.reach} 松 1 格。
+ * 真放不上去（超出服务端允许的距离 / 丢包）会重试几次，然后报错并带上距离。
  */
 class SingleStagePlaceAction extends SingleStageStep {
 
-    /** 一个面最多等这么多 tick 看它有没有真的放上去。 */
-    private static final int MAX_WAIT_TICKS = 20;
+    /** 一次点击最多等这么多 tick 看它有没有真的放上去。 */
+    private static final int MAX_WAIT_TICKS = 10;
 
-    /** 试哪些面（按这个顺序）。{@code UP} = 点下面那一格的上面。 */
+    /** 最多点几次（换不同的面，纯属换个命中点，面本身不影响落点）。 */
+    private static final int MAX_ATTEMPTS = 6;
+
     private static final Direction[] FACES = {Direction.UP, Direction.NORTH, Direction.SOUTH,
         Direction.WEST, Direction.EAST, Direction.DOWN};
 
     private final BlockPos spot;
     private final int hotbarIndex;
 
-    private int faceIndex;
+    private int attempt;
     private int waitTicks;
 
     SingleStagePlaceAction(SingleStageCtx ctx, BlockPos spot, int hotbarIndex) {
@@ -98,11 +111,12 @@ class SingleStagePlaceAction extends SingleStageStep {
 
         if (++waitTicks <= MAX_WAIT_TICKS) return;
 
-        // 这一面没放上去：换一个面再试
         waitTicks = 0;
-        faceIndex++;
-        if (faceIndex >= FACES.length) {
-            fail("在 " + spot.toShortString() + " 放不上去（六个面都试过了）");
+        attempt++;
+        if (attempt >= MAX_ATTEMPTS) {
+            fail("在 " + spot.toShortString() + " 放不上去（点了 " + attempt + " 次；离眼睛 "
+                + String.format("%.2f", PlayerUtils.eyeDistanceTo(spot)) + " 格，手上是 "
+                + SingleStageData.idOf(player.getInventory().getStack(hotbarIndex)) + "）");
             return;
         }
         tryPlace(mc, player);
@@ -116,24 +130,23 @@ class SingleStagePlaceAction extends SingleStageStep {
 
     // ------------------------------------------------------------------
 
-    /** 这一格现在能不能放方块（空气 / 水 / 熔岩都算能放）。 */
+    /** 这一格现在能不能放方块（空气 / 水 / 熔岩 / 草这类可替换的方块都算）。 */
     static boolean replaceable(BlockState state) {
-        return state.isAir() || state.getBlock() instanceof FluidBlock;
+        return state.isAir() || state.isReplaceable();
     }
 
     private void tryPlace(MinecraftClient mc, ClientPlayerEntity player) {
-        Direction side = FACES[faceIndex];
-        BlockPos hitBlock = spot.offset(side.getOpposite());
+        Direction side = FACES[attempt % FACES.length];
 
-        Vec3d hitPos = Vec3d.ofCenter(hitBlock).add(
+        // 命中点取目标格的这一面（面本身不影响落点，只影响服务端那边的「点在哪」）
+        Vec3d hitPos = Vec3d.ofCenter(spot).add(
             side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5);
-        BlockHitResult hit = new BlockHitResult(hitPos, side, hitBlock, false);
+        BlockHitResult hit = new BlockHitResult(hitPos, side, spot, false);
 
         RotateManager.get().rotateTo(Owner.MINE, hitPos);
 
-        ChatUtils.debug("放方块：%s（对着 %s 的 %s 面，手上 %s）", spot.toShortString(),
-            hitBlock.toShortString(), side.asString(),
-            SingleStageData.idOf(player.getInventory().getStack(hotbarIndex)));
+        ChatUtils.debug("凭空放方块：%s（点它自己的 %s 面，手上 %s）", spot.toShortString(),
+            side.asString(), SingleStageData.idOf(player.getInventory().getStack(hotbarIndex)));
         mc.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
         player.swingHand(Hand.MAIN_HAND);
     }

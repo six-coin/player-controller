@@ -19,7 +19,9 @@ import java.util.List;
  *   <li>snap 到临时站立点 6 4 6；</li>
  *   <li>放两个粘液块盒（7 3 7 / 7 3 8）和两个圆石盒（8 3 7 / 8 3 8）；</li>
  *   <li>从圆石盒里取 21 个圆石放到快捷栏 6；</li>
- *   <li>用这 21 个圆石搭 4×5 的平台（6 2 6 ~ 9 2 10），再在 4 5 4 放一个；</li>
+ *   <li>用这 21 个圆石搭 4×5 的平台（6 2 6 ~ 9 2 10），再在 4 5 4 放一个
+ *       —— 搭平台的时候先挪到平台正上方（{@link SingleStageCtx#platformHover()}）：
+ *       从临时站立点看，最远的那个角差不多 6 格，超出服务端允许的交互距离，放不上去；</li>
  *   <li>最后放两个收集盒（9 3 7 / 9 3 8）—— 放到平台之后，盒子下面就有东西垫着了。</li>
  * </ol>
  *
@@ -90,10 +92,13 @@ class SingleStageSetup extends SingleStageStep {
         queue.sync("取圆石搭平台", this::queueTakeCobble);
 
         queue.sync("搭平台", () -> {
+            // 从临时站立点放不到最远的那个角（超出服务端允许的交互距离），先挪到平台正上方
+            queue.child("挪到平台上方", () -> new SingleStageSnapAction(ctx, ctx.platformHover()));
             for (BlockPos cell : ctx.platform()) {
                 queue.child("放平台 " + cell.toShortString(),
                     () -> new SingleStagePlaceAction(ctx, cell, SingleStageCtx.HOTBAR_FREE_1));
             }
+            queue.child("回临时站立点", () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
         });
 
         queue.child("放 4 5 4 的那个圆石",
