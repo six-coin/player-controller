@@ -1,7 +1,9 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.block.FluidBlock;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.BlockTags;
@@ -31,9 +33,13 @@ import java.util.function.Predicate;
  *       就算中途碰到也有食物顶着）；</li>
  *   <li>每到一个位置就：把**这个位置能放的洞全部放完** → 把够得着的含水方块挖掉 →
  *       再放一遍（刚挖出来的新洞）→ 然后挑下一个位置；</li>
- *   <li><b>扫的范围一律是「全量目标区域」</b>（目标区域 + 外面那一圈壳）：
- *       含水方块和「能被粘液块替换掉的东西」都在这里面找，
- *       找到多少就放多少（目标区域里本来就有空气 / 水的地方也会被填上，反正后面要挖掉）；</li>
+ *   <li><b>两个区域规则不一样</b>：
+ *       <ul>
+ *         <li>「边缘目标区域」（外面那一圈壳）：**能替换的全替换**（空气、水、熔岩、藤蔓、草…）；</li>
+ *         <li>「目标区域」里面：**只替换水和熔岩**（空气 / 草 / 藤蔓不碰，反正马上要挖掉）；</li>
+ *       </ul>
+ *       含水方块照旧在全量目标区域（区域 + 壳）里找；</li>
+ *   <li>粘液块用完了会自动回临时站立点、开盒子再拿一趟，然后飞回原来的位置接着补；</li>
  *   <li>「下一个位置」的挑法：在走位层（目标区域上面那一层）的 256 个格子里，
  *       找**能放的洞最多**的那一个；一样多就取**离当前位置最近**的；还要走得过去
  *       （snap 得通）。一个都挑不出来（剩下的洞哪个位置都放不了）就结束这一阶段；</li>
@@ -49,6 +55,9 @@ class SingleStageStage1 extends SingleStageStep {
 
     /** 最多挪几次窝（防止「怎么放都放不上」的时候空转）。 */
     private static final int MAX_STOPS = 64;
+
+    /** 一阶段里最多回盒子补几次粘液块。 */
+    private static final int MAX_REFILLS = 6;
 
     /** 放粘液块时可以用的快捷栏格（快捷栏 6~8）。 */
     private static final int[] HOTBAR_SLOTS = {SingleStageCtx.HOTBAR_FREE_1,
@@ -77,6 +86,10 @@ class SingleStageStage1 extends SingleStageStep {
         PLACE_AGAIN,
         /** 挑下一个位置。 */
         NEXT,
+        /** 粘液块用完了：飞回临时站立点。 */
+        REFILL_GO,
+        /** 补完货飞回原来那个位置。 */
+        REFILL_BACK,
         /** 回临时站立点。 */
         BACK,
         /** 把多余的粘液块放回盒子里。 */
@@ -87,11 +100,11 @@ class SingleStageStage1 extends SingleStageStep {
     private final int iteration;
     private final int walkLayer;
 
-    /**
-     * 这一层的**全量目标区域**（目标区域 + 外面那一圈壳）。
-     *
-     * <p>含水方块、能放粘液块的洞都在这里面找 —— 一律用这一个范围，别的地方不要另算。
-     */
+    /** 目标区域（要挖掉的那 16×16×2）：这里**只替换水和熔岩**。 */
+    private final List<BlockPos> region = new ArrayList<>();
+    /** 边缘目标区域（外面那一圈壳）：这里**能替换的全替换**。 */
+    private final List<BlockPos> shell = new ArrayList<>();
+    /** 全量目标区域 = 区域 + 壳（找含水方块用）。 */
     private final List<BlockPos> wrap = new ArrayList<>();
 
     private Phase phase = Phase.TAKE;
@@ -104,6 +117,11 @@ class SingleStageStage1 extends SingleStageStep {
     /** 取 / 放粘液块时用到的盒子（第 {@link #boxIndex} 个，从 1 开始）。 */
     private int boxIndex = 1;
     private List<BlockPos> boxes = List.of();
+    /** 取完粘液块之后去哪（开局是 {@link Phase#TRAVEL}，补货时是 {@link Phase#REFILL_BACK}）。 */
+    private Phase afterTake = Phase.TRAVEL;
+    /** 补货时要飞回的位置。 */
+    private BlockPos refillReturn;
+    private int refills;
 
     /** 这一轮要挖的含水方块。 */
     private final List<BlockPos> mineList = new ArrayList<>();
@@ -131,7 +149,10 @@ class SingleStageStage1 extends SingleStageStep {
             return;
         }
 
-        wrap.addAll(ctx.wrapCells(iteration, mc.world));
+        region.addAll(ctx.regionCells(iteration));
+        shell.addAll(ctx.shellCells(iteration, mc.world));
+        wrap.addAll(region);
+        wrap.addAll(shell);
         List<BlockPos> gaps = scanGaps(mc.world);
         int water = countWaterlogged(mc.world);
 
@@ -203,20 +224,14 @@ class SingleStageStage1 extends SingleStageStep {
             switch (phase) {
                 case TAKE -> {
                     if (!takeSlime()) return;
-                    phase = Phase.TRAVEL;
+                    phase = afterTake;
                 }
                 case TRAVEL -> {
                     startChild(new SingleStageSnapAction(ctx, travelTarget), Phase.PLACE);
                     return;
                 }
                 case PLACE -> {
-                    List<BlockPos> gaps = placeable(PlayerUtils.currentBlockPos());
-                    if (!gaps.isEmpty()) {
-                        startChild(new SingleStagePlaceBatchAction(ctx, gaps, SLIME,
-                            HOTBAR_SLOTS, MAIN_SLOTS, "粘液块"), Phase.MINE);
-                        return;
-                    }
-                    phase = Phase.MINE;
+                    if (!placeHere(mc, Phase.MINE)) return;
                 }
                 case MINE -> {
                     if (!minePrepared) {
@@ -235,13 +250,7 @@ class SingleStageStage1 extends SingleStageStep {
                     phase = Phase.PLACE_AGAIN;
                 }
                 case PLACE_AGAIN -> {
-                    List<BlockPos> gaps = placeable(PlayerUtils.currentBlockPos());
-                    if (!gaps.isEmpty()) {
-                        startChild(new SingleStagePlaceBatchAction(ctx, gaps, SLIME,
-                            HOTBAR_SLOTS, MAIN_SLOTS, "粘液块"), Phase.NEXT);
-                        return;
-                    }
-                    phase = Phase.NEXT;
+                    if (!placeHere(mc, Phase.NEXT)) return;
                 }
                 case NEXT -> {
                     if (pickNext(mc)) {
@@ -255,6 +264,15 @@ class SingleStageStage1 extends SingleStageStep {
                         boxIndex = 1;
                         phase = Phase.BACK;
                     }
+                }
+                case REFILL_GO -> {
+                    // 粘液块用完了：先回临时站立点（盒子在那儿），拿完再飞回来
+                    startChild(new SingleStageSnapAction(ctx, ctx.standPoint()), Phase.TAKE);
+                    return;
+                }
+                case REFILL_BACK -> {
+                    startChild(new SingleStageSnapAction(ctx, refillReturn), Phase.PLACE);
+                    return;
                 }
                 case BACK -> {
                     startChild(new SingleStageSnapAction(ctx, ctx.standPoint()), Phase.PUT_BACK);
@@ -270,6 +288,42 @@ class SingleStageStage1 extends SingleStageStep {
                 }
             }
         }
+    }
+
+    /**
+     * 把当前位置能放的洞放掉。
+     *
+     * @return {@code false} = 起了子动作（等它跑完再继续）
+     */
+    private boolean placeHere(MinecraftClient mc, Phase next) {
+        BlockPos here = PlayerUtils.currentBlockPos();
+        List<BlockPos> gaps = holes(here, mc.world);
+        if (gaps.isEmpty()) {
+            phase = next;
+            return true;
+        }
+
+        if (slimeCount() <= 0) {
+            // 身上的粘液块用完了：盒子里还有的话就回去补一趟
+            int left = ctx.data.boxItems(ctx.slimeSpotA()) + ctx.data.boxItems(ctx.slimeSpotB());
+            if (left > 0 && refills < MAX_REFILLS) {
+                refills++;
+                refillReturn = here;
+                boxes = boxesLeastFull();
+                boxIndex = 1;
+                afterTake = Phase.REFILL_BACK;
+                phase = Phase.REFILL_GO;
+                ChatUtils.info(phase() + "：粘液块用完了，回去补一趟（盒子里还有 " + left + " 个）");
+                return true;
+            }
+            ChatUtils.error("粘液块用完了，还有 " + gaps.size() + " 个洞没补（盒子里也没货了）");
+            phase = next;
+            return true;
+        }
+
+        startChild(new SingleStagePlaceBatchAction(ctx, gaps, SLIME, HOTBAR_SLOTS, MAIN_SLOTS,
+            "粘液块"), next);
+        return false;
     }
 
     private void startChild(Action action, Phase next) {
@@ -389,29 +443,30 @@ class SingleStageStage1 extends SingleStageStep {
     // 扫方块
     // ------------------------------------------------------------------
 
-    /** 全量目标区域里现在还能被粘液块替换掉的格子（就是「洞」）。 */
-    private List<BlockPos> scanGaps(World world) {
-        List<BlockPos> gaps = new ArrayList<>();
-        for (BlockPos pos : wrap) {
-            if (isGap(world.getBlockState(pos))) gaps.add(pos);
-        }
-        return gaps;
-    }
-
-    /** 站在 {@code stand} 的时候能放的那些洞。 */
-    private List<BlockPos> placeable(@Nullable BlockPos stand) {
+    /**
+     * 现在的「洞」：壳里能替换的都算，区域里只算水和熔岩。
+     *
+     * @param stand {@code null} = 不看距离（全扫一遍）
+     */
+    private List<BlockPos> holes(@Nullable BlockPos stand, World world) {
         List<BlockPos> result = new ArrayList<>();
-        if (stand == null) return result;
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return result;
-
-        for (BlockPos pos : wrap) {
-            if (!isGap(mc.world.getBlockState(pos))) continue;
-            if (!SingleStageCtx.canPlaceFrom(stand, pos)) continue;
+        for (BlockPos pos : shell) {
+            if (!isGap(world.getBlockState(pos))) continue;
+            if (stand != null && !SingleStageCtx.canPlaceFrom(stand, pos)) continue;
+            result.add(pos);
+        }
+        for (BlockPos pos : region) {
+            if (!isFluid(world.getBlockState(pos))) continue;
+            if (stand != null && !SingleStageCtx.canPlaceFrom(stand, pos)) continue;
             result.add(pos);
         }
         return result;
+    }
+
+    /** 全量目标区域里现在还有哪些洞（不看距离）。 */
+    private List<BlockPos> scanGaps(World world) {
+        return holes(null, world);
     }
 
     /** 够得着的含水方块（同样只看全量目标区域）。 */
@@ -440,15 +495,39 @@ class SingleStageStage1 extends SingleStageStep {
         return state.contains(Properties.WATERLOGGED) && state.get(Properties.WATERLOGGED);
     }
 
+    /** 这个方块是不是水 / 熔岩（目标区域里只替换这两种）。 */
+    static boolean isFluid(BlockState state) {
+        return state.getBlock() instanceof FluidBlock;
+    }
+
     /**
      * 这个方块是不是「漏洞」：凡是**能被粘液块直接替换掉**的都算。
      *
      * <p>用原版的 {@code replaceable} 判定（{@code BlockState#isReplaceable}）：
-     * 空气、水、熔岩、藤蔓、草、雪片……全都在里面。以前只认「空气 / 流体」，
-     * 藤蔓、草这类也一样会漏水，却漏掉了。
+     * 空气、水、熔岩、藤蔓、草、雪片……全都在里面。
+     * 只用在「边缘目标区域」（壳）上 —— 目标区域里只替换水和熔岩，见 {@link #isFluid}。
      */
     static boolean isGap(BlockState state) {
         return state.isReplaceable();
+    }
+
+    /** 物品栏里还有多少个粘液块 / 树脂块。 */
+    private int slimeCount() {
+        ClientPlayerEntity player = PlayerUtils.player();
+        if (player == null) return 0;
+        int total = 0;
+        for (int i = 0; i < player.getInventory().size(); i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (SLIME.test(stack)) total += stack.getCount();
+        }
+        return total;
+    }
+
+    /** 两个粘液块盒子里，内容少的排前面（补货先拿快空的那个）。 */
+    private List<BlockPos> boxesLeastFull() {
+        List<BlockPos> sorted = new ArrayList<>(List.of(ctx.slimeSpotA(), ctx.slimeSpotB()));
+        sorted.sort(Comparator.comparingInt(ctx.data::boxItems));
+        return sorted;
     }
 
     /** 挖这个方块该用快捷栏第几格（剑镐斧铲锄，下标 0~4）。 */
