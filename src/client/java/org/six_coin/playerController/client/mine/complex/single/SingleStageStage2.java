@@ -16,7 +16,9 @@ import org.six_coin.playerController.client.util.SnapUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 第 (5) 步的**第二步**：用 mine simple 把目标区域挖空。
@@ -85,6 +87,14 @@ class SingleStageStage2 extends SingleStageStep {
     private int moves;
     private int stuck;
     private int lastRemaining = -1;
+
+    /** 挪不过去的格子（snap 试过失败），后面挑位置时直接跳过。 */
+    private final Set<Long> unreachable = new HashSet<>();
+    /** 当前这个子动作是不是「挪到挖掘点」（是的话失败可以跳过，不用整段停掉）。 */
+    private boolean movingToMine;
+    /** 正在挪去的那个挖掘点。 */
+    @Nullable
+    private BlockPos moveTarget;
     private boolean mineStarted;
     private boolean warnedNoBlocks;
 
@@ -132,10 +142,24 @@ class SingleStageStage2 extends SingleStageStep {
             current = null;
             done.cleanup();
             if (done.failureReason() != null) {
+                if (movingToMine && moveTarget != null) {
+                    // 这个挖掘点走不过去：记下来，重新挑一个（不整段失败）
+                    unreachable.add(moveTarget.asLong());
+                    ChatUtils.debug(phase() + "：跳过走不到的 " + moveTarget.toShortString()
+                        + "（" + done.failureReason() + "）");
+                    movingToMine = false;
+                    moveTarget = null;
+                    phase = Phase.MINE;
+                    settledTicks = 0;
+                    quietTicks = 0;
+                    return;
+                }
                 fail(done.failureReason());
                 return;
             }
             phase = afterChild;
+            movingToMine = false;
+            moveTarget = null;
             settledTicks = 0;
             quietTicks = 0;
             return;
@@ -238,6 +262,8 @@ class SingleStageStage2 extends SingleStageStep {
             return;
         }
         ChatUtils.debug(phase() + "：挪到 " + next.toShortString() + "（还剩 " + remaining + " 个方块）");
+        movingToMine = true;
+        moveTarget = next;
         startChild(new SingleStageSnapAction(ctx, next), Phase.MINE);
     }
 
@@ -259,6 +285,7 @@ class SingleStageStage2 extends SingleStageStep {
             for (int z = 0; z < 16; z++) {
                 BlockPos stand = ctx.routePoint(bottom, x, z);
                 if (stand.equals(here)) continue;
+                if (unreachable.contains(stand.asLong())) continue;
                 if (!mc.world.getBlockState(stand).isAir()) continue;
                 if (!mc.world.getBlockState(stand.up()).isAir()) continue;
                 candidates.add(new Stand(stand, here.getSquaredDistance(stand)));

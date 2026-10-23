@@ -19,6 +19,7 @@ import org.six_coin.playerController.client.util.SnapUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -128,6 +129,11 @@ class SingleStageStage1 extends SingleStageStep {
     private BlockPos refillReturn;
     private int refills;
 
+    /** 走不到的落点（snap 试过失败），挑位置时直接跳过。 */
+    private final Set<Long> unreachable = new HashSet<>();
+    /** 当前这个子动作是不是「飞去落点」（是的话失败可以换一个，不用整段停掉）。 */
+    private boolean traveling;
+
     /** 这一轮要挖的含水方块。 */
     private final List<BlockPos> mineList = new ArrayList<>();
     private int mineIndex;
@@ -202,10 +208,20 @@ class SingleStageStage1 extends SingleStageStep {
             child = null;
             done.cleanup();
             if (done.failureReason() != null) {
+                if (traveling && travelTarget != null) {
+                    // 这个落点走不过去：记下来，重新挑一个
+                    unreachable.add(travelTarget.asLong());
+                    ChatUtils.debug(phase() + "：跳过走不到的 " + travelTarget.toShortString()
+                        + "（" + done.failureReason() + "）");
+                    traveling = false;
+                    phase = Phase.NEXT;
+                    return;
+                }
                 fail(done.failureReason());
                 return;
             }
             phase = afterChild;
+            traveling = false;
             return;
         }
 
@@ -232,6 +248,7 @@ class SingleStageStage1 extends SingleStageStep {
                     phase = afterTake;
                 }
                 case TRAVEL -> {
+                    traveling = true;
                     startChild(new SingleStageSnapAction(ctx, travelTarget), Phase.PLACE);
                     return;
                 }
@@ -430,6 +447,7 @@ class SingleStageStage1 extends SingleStageStep {
             for (int z = 0; z < 16; z++) {
                 BlockPos stand = ctx.routePoint(walkLayer, x, z);
                 if (stand.equals(here)) continue;
+                if (unreachable.contains(stand.asLong())) continue;
                 int cover = 0;
                 for (BlockPos gap : gaps) {
                     if (SingleStageCtx.canPlaceFrom(stand, gap)) cover++;
