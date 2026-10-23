@@ -31,6 +31,9 @@ import java.util.function.Predicate;
  *       就算中途碰到也有食物顶着）；</li>
  *   <li>每到一个位置就：把**这个位置能放的洞全部放完** → 把够得着的含水方块挖掉 →
  *       再放一遍（刚挖出来的新洞）→ 然后挑下一个位置；</li>
+ *   <li><b>扫的范围一律是「全量目标区域」</b>（目标区域 + 外面那一圈壳）：
+ *       含水方块和「能被粘液块替换掉的东西」都在这里面找，
+ *       找到多少就放多少（目标区域里本来就有空气 / 水的地方也会被填上，反正后面要挖掉）；</li>
  *   <li>「下一个位置」的挑法：在走位层（目标区域上面那一层）的 256 个格子里，
  *       找**能放的洞最多**的那一个；一样多就取**离当前位置最近**的；还要走得过去
  *       （snap 得通）。一个都挑不出来（剩下的洞哪个位置都放不了）就结束这一阶段；</li>
@@ -84,8 +87,12 @@ class SingleStageStage1 extends SingleStageStep {
     private final int iteration;
     private final int walkLayer;
 
-    /** 这一层的「壳」（已经按相邻子区块跳过不用建的墙）。 */
-    private final List<BlockPos> shell = new ArrayList<>();
+    /**
+     * 这一层的**全量目标区域**（目标区域 + 外面那一圈壳）。
+     *
+     * <p>含水方块、能放粘液块的洞都在这里面找 —— 一律用这一个范围，别的地方不要另算。
+     */
+    private final List<BlockPos> wrap = new ArrayList<>();
 
     private Phase phase = Phase.TAKE;
     private BlockPos travelTarget;
@@ -124,7 +131,7 @@ class SingleStageStage1 extends SingleStageStep {
             return;
         }
 
-        shell.addAll(ctx.shellCells(iteration, mc.world));
+        wrap.addAll(ctx.wrapCells(iteration, mc.world));
         List<BlockPos> gaps = scanGaps(mc.world);
         int water = countWaterlogged(mc.world);
 
@@ -382,10 +389,10 @@ class SingleStageStage1 extends SingleStageStep {
     // 扫方块
     // ------------------------------------------------------------------
 
-    /** 壳里现在还能被粘液块替换掉的格子（就是「洞」）。 */
+    /** 全量目标区域里现在还能被粘液块替换掉的格子（就是「洞」）。 */
     private List<BlockPos> scanGaps(World world) {
         List<BlockPos> gaps = new ArrayList<>();
-        for (BlockPos pos : shell) {
+        for (BlockPos pos : wrap) {
             if (isGap(world.getBlockState(pos))) gaps.add(pos);
         }
         return gaps;
@@ -399,7 +406,7 @@ class SingleStageStage1 extends SingleStageStep {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.world == null) return result;
 
-        for (BlockPos pos : shell) {
+        for (BlockPos pos : wrap) {
             if (!isGap(mc.world.getBlockState(pos))) continue;
             if (!SingleStageCtx.canPlaceFrom(stand, pos)) continue;
             result.add(pos);
@@ -407,10 +414,10 @@ class SingleStageStage1 extends SingleStageStep {
         return result;
     }
 
-    /** 够得着的含水方块。 */
+    /** 够得着的含水方块（同样只看全量目标区域）。 */
     private List<BlockPos> reachableWaterlogged(World world) {
         List<BlockPos> result = new ArrayList<>();
-        for (BlockPos pos : ctx.wrapCells(iteration, world)) {
+        for (BlockPos pos : wrap) {
             if (!isWaterlogged(world.getBlockState(pos))) continue;
             if (!PlayerUtils.isWithinReach(pos)) continue;
             result.add(pos);
@@ -420,7 +427,7 @@ class SingleStageStage1 extends SingleStageStep {
 
     private int countWaterlogged(World world) {
         int total = 0;
-        for (BlockPos pos : ctx.wrapCells(iteration, world)) {
+        for (BlockPos pos : wrap) {
             if (isWaterlogged(world.getBlockState(pos))) total++;
         }
         return total;

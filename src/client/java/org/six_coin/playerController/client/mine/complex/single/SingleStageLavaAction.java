@@ -17,7 +17,8 @@ import org.six_coin.playerController.client.util.ChatUtils;
  * 拆平台之前「用熔岩桶烧垃圾」：站到 6 6 6，把服务端那边的朝向转到 yaw 135 / pitch 30，
  * 拿背包 12 的熔岩桶**右键两次**（中间隔 1 tick），然后把桶归位。
  *
- * <p>两次右键是「一放一收」：第一次把岩浆倒到放垃圾的那一格上，把地上的东西烧掉；
+ * <p>两次右键是「一放一收」：第一次把岩浆倒到放垃圾的那一格上，把地上的东西烧掉
+ * （中间隔 {@value #GAP_TICKS} tick，给岩浆留出烧东西的时间）；
  * 第二次空桶对着那滩岩浆再点一下，把岩浆收回来。所以地上不会留下岩浆。
  *
  * <p><b>为什么要自己拼包</b>：{@code interactItem} 发出去的包带的是**客户端真实**的 yaw / pitch，
@@ -30,8 +31,12 @@ class SingleStageLavaAction extends SingleStageStep {
     /** 切快捷栏 + 转头包落地要几 tick。 */
     private static final int PREPARE_TICKS = 3;
 
-    /** 两次右键之间隔几 tick。 */
-    private static final int GAP_TICKS = 1;
+    /**
+     * 两次右键之间隔几 tick。
+     *
+     * <p>10 tick（0.5 秒）：岩浆要烧掉地上的东西需要时间，1 tick 太短，东西还没烧没就被收走了。
+     */
+    private static final int GAP_TICKS = 10;
 
     /** 收完岩浆之后再等几 tick 才归位。 */
     private static final int SETTLE_TICKS = 2;

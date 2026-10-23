@@ -34,6 +34,9 @@ public final class SingleStageCheck {
     /** 黏液块那盒的最低要求。 */
     public static final int SLIME_BOX_MIN = 1600;
 
+    /** 背包 7 那盒圆石的最低要求（搭平台要 21 个）。 */
+    public static final int COBBLE_BOX_MIN = 21;
+
     /** 食物最少要多少个。 */
     public static final int FOOD_MIN = 16;
 
@@ -168,11 +171,11 @@ public final class SingleStageCheck {
         toolSlot(data, problems, SingleStageCtx.SPARE_START + 3, MineToolRules.Kind.SHOVEL, "背包 4", true);
         toolSlot(data, problems, SingleStageCtx.SPARE_START + 4, MineToolRules.Kind.HOE, "背包 5", true);
 
-        // 背包 6~8：圆石。6 必须是装满的（1728）；7、8 随便（空 / 半满 / 满都行），
+        // 背包 6~8：圆石。6 必须是装满的（1728）；7 至少 21 个（搭平台要用）；8 随便（空 / 半满 / 满都行），
         // 只要 7 不比 8 少（倒序 —— 拆站装回去的时候也是按这个顺序放的）
         Set<Item> cobble = Set.of(Items.COBBLESTONE);
         boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_A, "背包 6", "圆石", cobble, FULL_BOX);
-        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_B, "背包 7", "圆石", cobble, 0);
+        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_B, "背包 7", "圆石", cobble, COBBLE_BOX_MIN);
         boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_FULL, "背包 8", "圆石", cobble, 0);
         descending(problems, data, "圆石", "背包 7", SingleStageCtx.COBBLE_BOX_B,
             "背包 8", SingleStageCtx.COBBLE_BOX_FULL);
