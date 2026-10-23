@@ -12,26 +12,24 @@ import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
-import org.six_coin.playerController.client.util.SnapUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * 第 (5) 步的**第二步**：用 mine simple 把目标区域挖空。
  *
- * <p><b>不再蛇形走位</b>，改成「挖到没得挖了就挪到最远的那一侧」：
+ * <p>**和补粘液块走同一层**：站在目标区域**上面那一层**（走位层）挖，不下到区域里面去。
+ * 实测从高两格挖完全没问题（mine simple 的触及距离够），而且这一层是清过的、不会有阻挡，
+ * 所以**不做任何 snap 检查**，直接飞。
+ *
  * <ol>
  *   <li>把 mine simple 的范围设成目标区域（{@link MineManager#startTransient}，不写 mine.json）；</li>
- *   <li>snap 到目标区域**上面那一层**的 1 1，等下面那两格被挖掉；</li>
- *   <li>snap 进目标区域**最下面那层**的 1 1；</li>
- *   <li>之后每到一个位置，就等「附近没东西可挖了」，然后挪到
- *       <b>目标区域内可达的最远一侧</b>：上下两格都是空气（能站人）、而且离当前位置笛卡尔距离最远、
- *       还得 snap 得过去。一直挖到目标区域清空为止；</li>
- *   <li>结束停掉 mine simple。</li>
+ *   <li>snap 到走位层的 1 1；</li>
+ *   <li>挖到「附近没东西可挖了」就挪窝：挑**还能挖到东西的、离当前位置最远**的那一格
+ *       （走位层 16×16 都是空气，随便挑）；</li>
+ *   <li>目标区域里没有 mine simple 会挖的方块了 → 停掉 mine simple。</li>
  * </ol>
  *
  * <p>**并行**做工具耐久检查：每
@@ -42,9 +40,6 @@ class SingleStageStage2 extends SingleStageStep {
 
     /** 手上工具耐久低于这个值就换。 */
     static final int LOW_DURABILITY = 100;
-
-    /** 等「下面两格被挖掉」最多等多久。 */
-    private static final int MAX_DIG_WAIT_TICKS = 20 * 120;
 
     /**
      * 连续这么多 tick 没东西可挖，才算「这一格挖完了」。
@@ -62,9 +57,15 @@ class SingleStageStage2 extends SingleStageStep {
     /** 连着几次挪窝都没挖掉新方块，就认为卡住了。 */
     private static final int STUCK_LIMIT = 3;
 
+    /**
+     * 「站在这一格还能挖到」的水平半径（格）。
+     *
+     * <p>人站在走位层，眼睛比区域底面高 3 格多，触及 4.5 格 → 水平能覆盖半径 3 左右。
+     * 用来判断某个走位格还值不值得去。
+     */
+    private static final int REACH = 3;
+
     private enum Phase {
-        /** 等下面两格被挖掉。 */
-        WAIT_DOWN,
         /** 挖，挖不动了就挪窝。 */
         MINE,
         /** 收尾。 */
@@ -72,37 +73,26 @@ class SingleStageStage2 extends SingleStageStep {
     }
 
     private final int iteration;
-    private final int bottom;
-    private final int above;
+    private final int walkLayer;
 
-    private Phase phase = Phase.WAIT_DOWN;
+    private Phase phase = Phase.MINE;
     @Nullable
     private Action current;
     private Phase afterChild = Phase.MINE;
 
-    private int waitTicks;
     private int quietTicks;
     private int settledTicks;
     private int sinceDurabilityCheck;
     private int moves;
     private int stuck;
     private int lastRemaining = -1;
-
-    /** 挪不过去的格子（snap 试过失败），后面挑位置时直接跳过。 */
-    private final Set<Long> unreachable = new HashSet<>();
-    /** 当前这个子动作是不是「挪到挖掘点」（是的话失败可以跳过，不用整段停掉）。 */
-    private boolean movingToMine;
-    /** 正在挪去的那个挖掘点。 */
-    @Nullable
-    private BlockPos moveTarget;
     private boolean mineStarted;
     private boolean warnedNoBlocks;
 
     SingleStageStage2(SingleStageCtx ctx, int iteration) {
         super(ctx);
         this.iteration = iteration;
-        this.bottom = ctx.regionBottom(iteration);
-        this.above = ctx.walkLayer(iteration);
+        this.walkLayer = ctx.walkLayer(iteration);
     }
 
     @Override
@@ -120,7 +110,7 @@ class SingleStageStage2 extends SingleStageStep {
         MineManager.get().startTransient(ctx.region(iteration));
         mineStarted = true;
         ChatUtils.info(phase() + "：mine simple 范围设为 " + ctx.region(iteration).describe());
-        startChild(new SingleStageSnapAction(ctx, ctx.routePoint(above, 1, 1)), Phase.WAIT_DOWN);
+        startChild(new SingleStageSnapAction(ctx, ctx.routePoint(walkLayer, 1, 1)), Phase.MINE);
     }
 
     @Override
@@ -142,40 +132,16 @@ class SingleStageStage2 extends SingleStageStep {
             current = null;
             done.cleanup();
             if (done.failureReason() != null) {
-                if (movingToMine && moveTarget != null) {
-                    // 这个挖掘点走不过去：记下来，重新挑一个（不整段失败）
-                    unreachable.add(moveTarget.asLong());
-                    ChatUtils.debug(phase() + "：跳过走不到的 " + moveTarget.toShortString()
-                        + "（" + done.failureReason() + "）");
-                    movingToMine = false;
-                    moveTarget = null;
-                    phase = Phase.MINE;
-                    settledTicks = 0;
-                    quietTicks = 0;
-                    return;
-                }
                 fail(done.failureReason());
                 return;
             }
             phase = afterChild;
-            movingToMine = false;
-            moveTarget = null;
             settledTicks = 0;
             quietTicks = 0;
             return;
         }
 
         switch (phase) {
-            case WAIT_DOWN -> {
-                if (belowCleared(mc)) {
-                    startChild(new SingleStageSnapAction(ctx, ctx.routePoint(bottom, 1, 1)),
-                        Phase.MINE);
-                    return;
-                }
-                if (++waitTicks > MAX_DIG_WAIT_TICKS) {
-                    fail("等了 " + waitTicks + " tick，1 1 下面那两格还是没挖掉（mine simple 卡住了？）");
-                }
-            }
             case MINE -> tickMine(mc);
             case END -> {
                 stopMining();
@@ -232,50 +198,54 @@ class SingleStageStage2 extends SingleStageStep {
         settledTicks = 0;
 
         // 这一轮挖完了：看看有没有进展
-        int remaining = countBlocks(mc);
-        if (remaining >= lastRemaining && lastRemaining >= 0) {
+        List<BlockPos> remaining = remainingBlocks(mc);
+        int count = remaining.size();
+        if (count >= lastRemaining && lastRemaining >= 0) {
             stuck++;
         } else {
             stuck = 0;
         }
-        lastRemaining = remaining;
+        lastRemaining = count;
 
         if (stuck >= STUCK_LIMIT) {
             ChatUtils.error(phase() + "：连着挪了几次窝都没挖掉新方块，先停下（区域里还剩 "
-                + remaining + " 个方块）");
+                + count + " 个方块）");
             phase = Phase.END;
             return;
         }
 
         if (++moves > MAX_MOVES) {
             ChatUtils.error(phase() + "：挪了 " + MAX_MOVES + " 次窝还没挖完，先停下（还剩 "
-                + remaining + " 个方块）");
+                + count + " 个方块）");
             phase = Phase.END;
             return;
         }
 
-        BlockPos next = farthestReachable(mc);
+        BlockPos next = farthestUseful(mc, remaining);
         if (next == null) {
-            ChatUtils.error(phase() + "：已经没有能站着继续挖的位置了，先停下（区域里还剩 "
-                + remaining + " 个方块）");
+            if (count > 0) {
+                ChatUtils.error(phase() + "：走位层上已经没有能挖到东西的位置了，先停下（区域里还剩 "
+                    + count + " 个方块）");
+            }
             phase = Phase.END;
             return;
         }
-        ChatUtils.debug(phase() + "：挪到 " + next.toShortString() + "（还剩 " + remaining + " 个方块）");
-        movingToMine = true;
-        moveTarget = next;
+        ChatUtils.debug(phase() + "：挪到 " + next.toShortString() + "（还剩 " + count + " 个方块）");
         startChild(new SingleStageSnapAction(ctx, next), Phase.MINE);
     }
 
     /**
-     * 目标区域内「能站人（上下两格都是空气）、snap 得过去、而且离当前位置最远」的那一格。
+     * 走位层里「还能挖到东西、而且离当前位置最远」的那一格。
      *
-     * @return 没有就返回 null
+     * <p>走位层是清过的（全是空气），所以不做 snap 检查，直接按距离挑。
+     *
+     * @param remaining 区域里还没挖掉的方块
+     * @return 没有就返回 null（说明剩下的方块从走位层哪个位置都够不着了）
      */
     @Nullable
-    private BlockPos farthestReachable(MinecraftClient mc) {
+    private BlockPos farthestUseful(MinecraftClient mc, List<BlockPos> remaining) {
         BlockPos here = PlayerUtils.currentBlockPos();
-        if (here == null) return null;
+        if (here == null || remaining.isEmpty()) return null;
 
         record Stand(BlockPos pos, double distance) {
         }
@@ -283,31 +253,35 @@ class SingleStageStage2 extends SingleStageStep {
         List<Stand> candidates = new ArrayList<>();
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
-                BlockPos stand = ctx.routePoint(bottom, x, z);
+                BlockPos stand = ctx.routePoint(walkLayer, x, z);
                 if (stand.equals(here)) continue;
-                if (unreachable.contains(stand.asLong())) continue;
-                if (!mc.world.getBlockState(stand).isAir()) continue;
-                if (!mc.world.getBlockState(stand.up()).isAir()) continue;
+                if (!useful(stand, remaining)) continue;
                 candidates.add(new Stand(stand, here.getSquaredDistance(stand)));
             }
         }
-        candidates.sort(Comparator.comparingDouble(Stand::distance).reversed());
+        if (candidates.isEmpty()) return null;
 
-        for (Stand candidate : candidates) {
-            if (SnapUtils.plan(mc, here, candidate.pos()) == null) continue;
-            return candidate.pos();
-        }
-        return null;
+        candidates.sort(Comparator.comparingDouble(Stand::distance).reversed());
+        return candidates.get(0).pos();
     }
 
-    /** 目标区域里还剩几个「mine simple 会挖」的方块（水 / 熔岩不算）。 */
-    private int countBlocks(MinecraftClient mc) {
-        int total = 0;
-        for (BlockPos pos : ctx.regionCells(iteration)) {
-            if (!breakable(mc.world.getBlockState(pos))) continue;
-            total++;
+    /** 站在 {@code stand} 还能挖到 {@code remaining} 里的方块吗。 */
+    private static boolean useful(BlockPos stand, List<BlockPos> remaining) {
+        for (BlockPos pos : remaining) {
+            int dx = pos.getX() - stand.getX();
+            int dz = pos.getZ() - stand.getZ();
+            if (dx * dx + dz * dz <= REACH * REACH) return true;
         }
-        return total;
+        return false;
+    }
+
+    /** 区域里还没挖掉的方块（mine simple 眼里的「有东西」：非空气、非流体）。 */
+    private List<BlockPos> remainingBlocks(MinecraftClient mc) {
+        List<BlockPos> left = new ArrayList<>();
+        for (BlockPos pos : ctx.regionCells(iteration)) {
+            if (breakable(mc.world.getBlockState(pos))) left.add(pos);
+        }
+        return left;
     }
 
     private boolean regionCleared(MinecraftClient mc) {
@@ -320,12 +294,6 @@ class SingleStageStage2 extends SingleStageStep {
     /** mine simple 眼里的「有东西可挖」：不是空气、不是流体。 */
     private static boolean breakable(BlockState state) {
         return !state.isAir() && !(state.getBlock() instanceof FluidBlock);
-    }
-
-    /** 1 1 下面那两格是不是都空了。 */
-    private boolean belowCleared(MinecraftClient mc) {
-        return mc.world.getBlockState(ctx.routePoint(above - 1, 1, 1)).isAir()
-            && mc.world.getBlockState(ctx.routePoint(above - 2, 1, 1)).isAir();
     }
 
     // ------------------------------------------------------------------

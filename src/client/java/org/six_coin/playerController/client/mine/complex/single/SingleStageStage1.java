@@ -15,11 +15,9 @@ import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.stock.MineBlockAction;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
-import org.six_coin.playerController.client.util.SnapUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -96,8 +94,10 @@ class SingleStageStage1 extends SingleStageStep {
         REFILL_BACK,
         /** 再从 1 1 飞回原来那个位置。 */
         REFILL_RETURN,
-        /** 回临时站立点。 */
+        /** 先回走位层的 1 1（回临时站立点的跳板）。 */
         BACK,
+        /** 再从 1 1 回临时站立点。 */
+        BACK_HOME,
         /** 把多余的粘液块放回盒子里。 */
         PUT_BACK,
         DONE
@@ -129,10 +129,6 @@ class SingleStageStage1 extends SingleStageStep {
     private BlockPos refillReturn;
     private int refills;
 
-    /** 走不到的落点（snap 试过失败），挑位置时直接跳过。 */
-    private final Set<Long> unreachable = new HashSet<>();
-    /** 当前这个子动作是不是「飞去落点」（是的话失败可以换一个，不用整段停掉）。 */
-    private boolean traveling;
 
     /** 这一轮要挖的含水方块。 */
     private final List<BlockPos> mineList = new ArrayList<>();
@@ -208,20 +204,10 @@ class SingleStageStage1 extends SingleStageStep {
             child = null;
             done.cleanup();
             if (done.failureReason() != null) {
-                if (traveling && travelTarget != null) {
-                    // 这个落点走不过去：记下来，重新挑一个
-                    unreachable.add(travelTarget.asLong());
-                    ChatUtils.debug(phase() + "：跳过走不到的 " + travelTarget.toShortString()
-                        + "（" + done.failureReason() + "）");
-                    traveling = false;
-                    phase = Phase.NEXT;
-                    return;
-                }
                 fail(done.failureReason());
                 return;
             }
             phase = afterChild;
-            traveling = false;
             return;
         }
 
@@ -248,7 +234,6 @@ class SingleStageStage1 extends SingleStageStep {
                     phase = afterTake;
                 }
                 case TRAVEL -> {
-                    traveling = true;
                     startChild(new SingleStageSnapAction(ctx, travelTarget), Phase.PLACE);
                     return;
                 }
@@ -310,6 +295,12 @@ class SingleStageStage1 extends SingleStageStep {
                     return;
                 }
                 case BACK -> {
+                    // 从下面回临时站立点一定要以 1 1 为跳板：直接飞没有沿轴走得通的路
+                    startChild(new SingleStageSnapAction(ctx, ctx.routePoint(walkLayer, 1, 1)),
+                        Phase.BACK_HOME);
+                    return;
+                }
+                case BACK_HOME -> {
                     startChild(new SingleStageSnapAction(ctx, ctx.standPoint()), Phase.PUT_BACK);
                     return;
                 }
@@ -447,7 +438,6 @@ class SingleStageStage1 extends SingleStageStep {
             for (int z = 0; z < 16; z++) {
                 BlockPos stand = ctx.routePoint(walkLayer, x, z);
                 if (stand.equals(here)) continue;
-                if (unreachable.contains(stand.asLong())) continue;
                 int cover = 0;
                 for (BlockPos gap : gaps) {
                     if (SingleStageCtx.canPlaceFrom(stand, gap)) cover++;
@@ -461,14 +451,14 @@ class SingleStageStage1 extends SingleStageStep {
         candidates.sort(Comparator.comparingInt(Stand::cover).reversed()
             .thenComparingDouble(Stand::distance));
 
-        for (Stand candidate : candidates) {
-            if (SnapUtils.plan(mc, here, candidate.pos()) == null) continue;
-            travelTarget = candidate.pos();
-            ChatUtils.debug(phase() + "：挪到 " + travelTarget.toShortString()
-                + "（那里能放 " + candidate.cover() + " 个洞，还剩 " + gaps.size() + " 个）");
-            return true;
-        }
-        return false;
+        if (candidates.isEmpty()) return false;
+
+        // 走位层是清过的（不会有阻挡），所以不做 snap 检查，直接取排序后的第一个
+        Stand best = candidates.get(0);
+        travelTarget = best.pos();
+        ChatUtils.debug(phase() + "：挪到 " + travelTarget.toShortString()
+            + "（那里能放 " + best.cover() + " 个洞，还剩 " + gaps.size() + " 个）");
+        return true;
     }
 
     /** 一个候选落脚点：能放几个洞、离当前位置多远。 */

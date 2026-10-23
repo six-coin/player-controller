@@ -242,8 +242,10 @@ class SingleStageStage3 extends SingleStageStep {
         fullBox = null;
 
         queue.sync("卸货：回临时站立点", () -> {
-            queue.child("snap 到 1 14",
-                () -> new SingleStageSnapAction(ctx, ctx.routePoint(bottom, 1, 14)));
+            // 从下面回临时站立点一定要以 1 1 为跳板（那一列从下到上都是空的），
+            // 直接飞很可能没有沿轴走得通的路
+            queue.child("snap 到 1 1",
+                () -> new SingleStageSnapAction(ctx, ctx.routePoint(bottom, 1, 1)));
             queue.child("snap 到临时站立点",
                 () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
         });
