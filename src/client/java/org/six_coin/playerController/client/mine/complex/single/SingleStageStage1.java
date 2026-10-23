@@ -67,7 +67,10 @@ class SingleStageStage1 extends SingleStageStep {
     private static final int SLIME_STACKS = 6;
 
     /** 最多挪几次窝（防止「怎么放都放不上」的时候空转）。 */
-    private static final int MAX_STOPS = 64;
+    private static final int MAX_STOPS = 96;
+
+    /** 挑落脚点时，一个洞算多少分（含水方块算 1 分）—— 先把洞填完，再补远处的含水方块。 */
+    private static final int HOLE_WEIGHT = 4;
 
     /** 一阶段里最多回盒子补几次粘液块（一次只拿 6 组，所以给得宽一点）。 */
     private static final int MAX_REFILLS = 12;
@@ -313,6 +316,13 @@ class SingleStageStage1 extends SingleStageStep {
                     if (pickNext(mc)) {
                         phase = Phase.TRAVEL;
                     } else {
+                        // 收尾前把「还剩什么」报出来（够不着的地方会留下来，挖到那层就冒水）
+                        List<BlockPos> leftHoles = scanGaps(mc.world);
+                        List<BlockPos> leftWater = unminedWaterlogged(mc.world);
+                        if (!leftHoles.isEmpty() || !leftWater.isEmpty()) {
+                            ChatUtils.error("补粘液块收尾：还有 " + leftHoles.size() + " 个洞、"
+                                + leftWater.size() + " 个含水方块够不着（走位层上放不到 / 挖不到）");
+                        }
                         // 剩下的洞哪个位置都放不了：这一阶段结束，回去把粘液块放好
                         List<BlockPos> sorted =
                             new ArrayList<>(List.of(ctx.slimeSpotA(), ctx.slimeSpotB()));
@@ -549,10 +559,14 @@ class SingleStageStage1 extends SingleStageStep {
         if (here == null) return false;
 
         List<BlockPos> gaps = scanGaps(mc.world);
-        if (gaps.isEmpty()) return false;
+        // **还没打掉的含水方块也要算**：它们只有站在够得着的地方才能打，
+        // 光按「能放几个洞」挑落脚点的话，离得远的含水方块（海底的 kelp 之类）会一直没人管，
+        // 留在那儿就是一条水路，挖到那层就冒水。
+        List<BlockPos> water = unminedWaterlogged(mc.world);
+        if (gaps.isEmpty() && water.isEmpty()) return false;
         if (++stops > MAX_STOPS) {
-            ChatUtils.error("补粘液块挪了 " + MAX_STOPS + " 次还是没补完，先停下（还剩 "
-                + gaps.size() + " 个洞）");
+            ChatUtils.error("补粘液块挪了 " + MAX_STOPS + " 次还是没弄完，先停下（还剩 "
+                + gaps.size() + " 个洞、" + water.size() + " 个含水方块）");
             return false;
         }
 
@@ -563,7 +577,10 @@ class SingleStageStage1 extends SingleStageStep {
                 if (stand.equals(here)) continue;
                 int cover = 0;
                 for (BlockPos gap : gaps) {
-                    if (SingleStageCtx.canPlaceFrom(stand, gap)) cover++;
+                    if (SingleStageCtx.canPlaceFrom(stand, gap)) cover += HOLE_WEIGHT;
+                }
+                for (BlockPos pos : water) {
+                    if (canMineFrom(stand, pos)) cover++;
                 }
                 if (cover == 0) continue;
                 candidates.add(new Stand(stand, cover, here.getSquaredDistance(stand)));
@@ -580,7 +597,8 @@ class SingleStageStage1 extends SingleStageStep {
         Stand best = candidates.get(0);
         travelTarget = best.pos();
         ChatUtils.debug(phase() + "：挪到 " + travelTarget.toShortString()
-            + "（那里能放 " + best.cover() + " 个洞，还剩 " + gaps.size() + " 个）");
+            + "（覆盖分 " + best.cover() + "；还剩 " + gaps.size() + " 个洞、"
+            + water.size() + " 个含水方块）");
         return true;
     }
 
@@ -620,6 +638,26 @@ class SingleStageStage1 extends SingleStageStep {
     /** 全量目标区域里现在还有哪些洞（不看距离）。 */
     private List<BlockPos> scanGaps(World world) {
         return holes(null, world);
+    }
+
+    /**
+     * 站在 {@code stand} 够得着 {@code pos} 吗（按触及距离算，和 {@link PlayerUtils#isWithinReach} 一致）。
+     */
+    private static boolean canMineFrom(BlockPos stand, BlockPos pos) {
+        double reach = PlayerUtils.reach();
+        double dx = pos.getX() + 0.5 - (stand.getX() + 0.5);
+        double dy = pos.getY() + 0.5 - (stand.getY() + PlayerUtils.EYE_HEIGHT);
+        double dz = pos.getZ() + 0.5 - (stand.getZ() + 0.5);
+        return dx * dx + dy * dy + dz * dz <= reach * reach;
+    }
+
+    /** 全量目标区域里**还没打掉**的含水方块（不管够不够得着）。 */
+    private List<BlockPos> unminedWaterlogged(World world) {
+        List<BlockPos> result = new ArrayList<>();
+        for (BlockPos pos : wrap) {
+            if (isWaterlogged(world.getBlockState(pos))) result.add(pos);
+        }
+        return result;
     }
 
     /** 够得着的含水方块（同样只看全量目标区域）。 */
