@@ -168,24 +168,21 @@ public final class SingleStageCheck {
         toolSlot(data, problems, SingleStageCtx.SPARE_START + 3, MineToolRules.Kind.SHOVEL, "背包 4", true);
         toolSlot(data, problems, SingleStageCtx.SPARE_START + 4, MineToolRules.Kind.HOE, "背包 5", true);
 
-        // 背包 6~8：圆石。6 必须是装满的（1728），7、8 半满或者空，而且 7 不比 8 少（倒序）
+        // 背包 6~8：圆石。6 必须是装满的（1728）；7、8 随便（空 / 半满 / 满都行），
+        // 只要 7 不比 8 少（倒序 —— 拆站装回去的时候也是按这个顺序放的）
         Set<Item> cobble = Set.of(Items.COBBLESTONE);
-        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_A, "背包 6", "圆石", cobble,
-            FULL_BOX, FULL_BOX);
-        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_B, "背包 7", "圆石", cobble, 0, FULL_BOX - 1);
-        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_FULL, "背包 8", "圆石", cobble,
-            0, FULL_BOX - 1);
+        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_A, "背包 6", "圆石", cobble, FULL_BOX);
+        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_B, "背包 7", "圆石", cobble, 0);
+        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_FULL, "背包 8", "圆石", cobble, 0);
         descending(problems, data, "圆石", "背包 7", SingleStageCtx.COBBLE_BOX_B,
             "背包 8", SingleStageCtx.COBBLE_BOX_FULL);
 
-        // 背包 9~11：黏液块 / 树脂块。9 必须装满（≥1600），10、11 半满或者空，同样倒序
+        // 背包 9~11：黏液块 / 树脂块。9 必须装满（≥1600）；10、11 同理随便，但要倒序
         Set<Item> slime = Set.of(Items.SLIME_BLOCK, Items.RESIN_BLOCK);
         boxSlot(data, problems, SingleStageCtx.SLIME_BOX_A, "背包 9", "黏液块 / 树脂块", slime,
-            SLIME_BOX_MIN, -1);
-        boxSlot(data, problems, SingleStageCtx.SLIME_BOX_B, "背包 10", "黏液块 / 树脂块", slime,
-            0, SLIME_BOX_MIN - 1);
-        boxSlot(data, problems, SingleStageCtx.SLIME_BOX_FULL, "背包 11", "黏液块 / 树脂块", slime,
-            0, SLIME_BOX_MIN - 1);
+            SLIME_BOX_MIN);
+        boxSlot(data, problems, SingleStageCtx.SLIME_BOX_B, "背包 10", "黏液块 / 树脂块", slime, 0);
+        boxSlot(data, problems, SingleStageCtx.SLIME_BOX_FULL, "背包 11", "黏液块 / 树脂块", slime, 0);
         descending(problems, data, "黏液块 / 树脂块", "背包 10", SingleStageCtx.SLIME_BOX_B,
             "背包 11", SingleStageCtx.SLIME_BOX_FULL);
 
@@ -287,11 +284,11 @@ public final class SingleStageCheck {
     }
 
     /**
-     * 潜影盒格子：必须是潜影盒、里面只有 {@code allowed}，数量落在 {@code minItems}~{@code maxItems}
-     * 之间（-1 = 那一头不限）。
+     * 潜影盒格子：必须是潜影盒、里面只有 {@code allowed}，数量至少 {@code minItems}
+     * （0 = 只要是这类东西就行，空盒子也算）。
      */
     private static void boxSlot(SingleStageData data, List<String> problems, int index, String label,
-                                String what, Set<Item> allowed, int minItems, int maxItems) {
+                                String what, Set<Item> allowed, int minItems) {
         ItemStack stack = data.stack(index);
         if (stack.isEmpty()) {
             problems.add(label + " 是空的，要放装" + what + "的潜影盒");
@@ -311,12 +308,8 @@ public final class SingleStageCheck {
             }
             total += inner.getCount();
         }
-        if (minItems >= 0 && total < minItems) {
+        if (minItems > 0 && total < minItems) {
             problems.add(label + " 的盒子里只有 " + total + " 个" + what + "（要 ≥" + minItems + "）");
-        }
-        if (maxItems >= 0 && total > maxItems) {
-            problems.add(label + " 的盒子里有 " + total + " 个" + what
-                + "（要 ≤" + maxItems + "，这一格只能是半满或者空的）");
         }
     }
 

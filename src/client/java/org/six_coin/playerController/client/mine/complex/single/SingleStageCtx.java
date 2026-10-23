@@ -52,17 +52,17 @@ public final class SingleStageCtx {
 
     /** 背包 1~5：替换用的剑 / 镐 / 斧 / 铲 / 锄（耐久必须满）。 */
     public static final int SPARE_START = 9;
-    /** 背包 6：只有圆石的潜影盒（可以不装满）。 */
+    /** 背包 6：**装满**圆石的潜影盒（1728）。 */
     public static final int COBBLE_BOX_A = 14;
-    /** 背包 7：同上。 */
+    /** 背包 7：圆石盒，空 / 半满 / 满都行（内容不能比背包 8 少）。 */
     public static final int COBBLE_BOX_B = 15;
-    /** 背包 8：装满圆石的潜影盒（1728）。 */
+    /** 背包 8：圆石盒，同上（内容不能比背包 7 多）。 */
     public static final int COBBLE_BOX_FULL = 16;
-    /** 背包 9：只有黏液块 / 树脂块的潜影盒（可以不装满）。 */
+    /** 背包 9：**装满**黏液块 / 树脂块的潜影盒（≥1600）。 */
     public static final int SLIME_BOX_A = 17;
-    /** 背包 10：同上。 */
+    /** 背包 10：黏液块盒，空 / 半满 / 满都行（内容不能比背包 11 少）。 */
     public static final int SLIME_BOX_B = 18;
-    /** 背包 11：黏液块 / 树脂块 ≥ 1600 的潜影盒。 */
+    /** 背包 11：黏液块盒，同上（内容不能比背包 10 多）。 */
     public static final int SLIME_BOX_FULL = 19;
     /** 背包 12：熔岩桶（拆平台前拿去烧垃圾，用完归位）。 */
     public static final int LAVA_BUCKET = 20;
