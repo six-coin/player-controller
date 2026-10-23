@@ -36,8 +36,7 @@ import java.util.function.Predicate;
  *       就算中途碰到也有食物顶着）；</li>
  *   <li>每到一个位置就：先把**够得着的含水方块一次性全打掉**（同时发包、一个都不等，
  *       发完等几 tick 按世界里的方块核对一遍），再把**这个位置能放的洞全部放完**
- *       （放完拿剑把这些格子挨个右键一遍，逼服务端回推真实方块状态，再核对；
- *       没填上就再填一遍）；然后挑下一个位置；</li>
+ *       （放完只等 1 tick 就走）；然后挑下一个位置；</li>
  *   <li><b>两个区域规则不一样</b>：
  *       <ul>
  *         <li>「边缘目标区域」（外面那一圈壳）：**能替换的全替换**（空气、水、熔岩、藤蔓、草…）；</li>
@@ -78,9 +77,6 @@ class SingleStageStage1 extends SingleStageStep {
     /** 一阶段里最多换几次盒子（把放着的空盒换成背包里的备用盒）。 */
     private static final int MAX_SWAPS = 3;
 
-    /** 同一个落点最多重填几次。 */
-    private static final int MAX_VERIFY = 3;
-
     /** 放粘液块时可以用的快捷栏格（快捷栏 6~8）。 */
     private static final int[] HOTBAR_SLOTS = {SingleStageCtx.HOTBAR_FREE_1,
         SingleStageCtx.HOTBAR_FREE_2, SingleStageCtx.HOTBAR_FREE_3};
@@ -104,10 +100,8 @@ class SingleStageStage1 extends SingleStageStep {
         PLACE,
         /** 把够得着的含水方块一次性全打掉。 */
         MINE,
-        /** 放完之后拿剑把这些格子挨个右键一遍（逼服务端回推真实方块状态）。 */
-        POKE,
-        /** 确认刚才要填的地方都填上了；没填就再填一遍。 */
-        VERIFY_CHECK,
+        /** 放完等 1 tick 再走。 */
+        SETTLE,
         /** 挑下一个位置。 */
         NEXT,
         /** 粘液块用完了：先飞回走位层的 1 1（回临时站立点的必经之路）。 */
@@ -176,9 +170,8 @@ class SingleStageStage1 extends SingleStageStep {
     private SingleStageQueue junkQueue;
     private boolean junking;
 
-    /** 刚才这一批要填的格子（等 10 tick 之后拿它核对）。 */
-    private List<BlockPos> lastPlaceTargets = List.of();
-    private int verifyAttempts;
+    /** 放完之后等了几 tick。 */
+    private int settleTicks;
 
 
 
@@ -295,22 +288,13 @@ class SingleStageStage1 extends SingleStageStep {
                     phase = Phase.PLACE;
                 }
                 case PLACE -> {
-                    verifyAttempts = 0;
-                    if (!placeHere(mc, Phase.NEXT, true)) return;
+                    if (!placeHere(mc, Phase.SETTLE)) return;
                 }
-                case POKE -> {
-                    // 放完可能「客户端看着放上了、服务端没放上」：拿剑挨个右键一遍，
-                    // 服务端会把这些位置的真实方块状态推回来，之后一查就知道漏了哪些
-                    if (lastPlaceTargets.isEmpty()) {
-                        phase = Phase.VERIFY_CHECK;
-                    } else {
-                        startChild(new SingleStagePokeAction(ctx, lastPlaceTargets),
-                            Phase.VERIFY_CHECK);
-                        return;
-                    }
-                }
-                case VERIFY_CHECK -> {
-                    if (!verifyFilled(mc)) return;
+                case SETTLE -> {
+                    // 只等 1 tick，然后就走（不再做二次检测）
+                    if (settleTicks++ < 1) return;
+                    settleTicks = 0;
+                    phase = Phase.NEXT;
                 }
                 case NEXT -> {
                     if (pickNext(mc)) {
@@ -425,7 +409,7 @@ class SingleStageStage1 extends SingleStageStep {
      *
      * @return {@code false} = 起了子动作（等它跑完再继续）
      */
-    private boolean placeHere(MinecraftClient mc, Phase next, boolean verify) {
+    private boolean placeHere(MinecraftClient mc, Phase next) {
         BlockPos here = PlayerUtils.currentBlockPos();
         List<BlockPos> gaps = holes(here, mc.world);
         if (gaps.isEmpty()) {
@@ -451,40 +435,9 @@ class SingleStageStage1 extends SingleStageStep {
             return true;
         }
 
-        lastPlaceTargets = gaps;
         startChild(new SingleStagePlaceBatchAction(ctx, gaps, SLIME, HOTBAR_SLOTS, MAIN_SLOTS,
-            "粘液块"), verify ? Phase.POKE : next);
+            "粘液块"), next);
         return false;
-    }
-
-    /**
-     * 核对（前面已经右键同步过了）：刚才要填的那些格子现在填上了没有。
-     *
-     * <p>没填上就**再填一遍**（最多 {@value #MAX_VERIFY} 次）；实在填不上才跳过。
-     *
-     * @return {@code false} = 又起了子动作
-     */
-    private boolean verifyFilled(MinecraftClient mc) {
-        List<BlockPos> left = new ArrayList<>();
-        for (BlockPos pos : lastPlaceTargets) {
-            if (isHole(pos, mc.world.getBlockState(pos))) left.add(pos);
-        }
-
-        if (left.isEmpty()) {
-            verifyAttempts = 0;
-            phase = Phase.NEXT;
-            return true;
-        }
-        if (verifyAttempts >= MAX_VERIFY || slimeCount() <= 0) {
-            ChatUtils.error("有 " + left.size() + " 个洞填不上（试了 " + verifyAttempts + " 次），先跳过");
-            verifyAttempts = 0;
-            phase = Phase.NEXT;
-            return true;
-        }
-
-        verifyAttempts++;
-        ChatUtils.debug("还有 " + left.size() + " 个洞没填上，再填一遍");
-        return placeHere(mc, Phase.NEXT, true);
     }
 
     private void startChild(Action action, Phase next) {

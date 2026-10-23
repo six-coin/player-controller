@@ -173,7 +173,18 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
             if (stack.isEmpty() || !blockFilter.test(stack)) continue;
 
             int free = freeHotbar(player);
-            if (free < 0) return false;
+            if (free < 0) {
+                // 快捷栏 6~8 被别的东西占着（挖着挖着吸进来的杂物）：
+                // 跟它换一下（容器操作，点格子），把占用物换到背包这一格，粘液块换到快捷栏
+                free = occupiedHotbar(player);
+                if (free < 0) return false;
+                if (!SingleStageInventoryAction.swapNow(player, main, free)) return false;
+                if (!HotbarManager.get().request(Owner.MINE, free)) return false;
+                hotbarHeld = true;
+                ChatUtils.debug("快捷栏第 " + (free + 1) + " 格被占了，和背包第 " + main
+                    + " 格的" + what + "换了");
+                return true;
+            }
             if (!SingleStageInventoryAction.swapNow(player, main, free)) return false;
             if (!HotbarManager.get().request(Owner.MINE, free)) return false;
             hotbarHeld = true;
@@ -186,6 +197,17 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
     private int freeHotbar(ClientPlayerEntity player) {
         for (int slot : hotbarSlots) {
             if (player.getInventory().getStack(slot).isEmpty()) return slot;
+        }
+        return -1;
+    }
+
+    /** 快捷栏那几格里第一个「被别的东西占着」的格子（不是空的、也不是要放的方块）。 */
+    private int occupiedHotbar(ClientPlayerEntity player) {
+        for (int slot : hotbarSlots) {
+            ItemStack stack = player.getInventory().getStack(slot);
+            if (stack.isEmpty()) continue;
+            if (blockFilter.test(stack)) continue;
+            return slot;
         }
         return -1;
     }

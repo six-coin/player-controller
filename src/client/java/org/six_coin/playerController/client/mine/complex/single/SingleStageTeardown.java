@@ -10,6 +10,7 @@ import org.six_coin.playerController.client.mine.MineRegion;
 import org.six_coin.playerController.client.stock.MineBlockAction;
 import org.six_coin.playerController.client.stock.WaitAction;
 import org.six_coin.playerController.client.util.ChatUtils;
+import org.six_coin.playerController.client.util.ShulkerUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -106,6 +107,9 @@ class SingleStageTeardown extends SingleStageStep {
             queueBreak(boxes.get(1), new int[]{ctx.collectSlot, ctx.collectSlot + 1});
         });
 
+        // 拆完之后再确认一遍「多的在前」
+        queue.sync("整理盒子顺序", this::queueFixOrder);
+
         // 拆平台之前先把熔岩桶用掉（烧掉放垃圾那地方的东西）
         queue.child("走到倒岩浆的位置",
             () -> new SingleStageSnapAction(ctx, ctx.lavaStandPoint()));
@@ -113,6 +117,74 @@ class SingleStageTeardown extends SingleStageStep {
 
         // 平台 + 4 5 4：快挖，挖完不捡掉落物
         queue.sync("快挖平台", this::queueFastBreakPlatform);
+    }
+
+    /**
+     * 拆完再核对一遍：这几组盒子里的东西必须是**单调递减**的，不是就把两格换过来。
+     *
+     * <p>（装回去的时候已经按内容多少排过了，但中途可能被别的东西影响，这里兜一道。）
+     */
+    private void queueFixOrder() {
+        List<SingleStageInventoryAction.Op> ops = new ArrayList<>();
+        ops.addAll(orderOps(new int[]{SingleStageCtx.COBBLE_BOX_A, SingleStageCtx.COBBLE_BOX_B,
+            SingleStageCtx.COBBLE_BOX_FULL}));
+        ops.addAll(orderOps(new int[]{SingleStageCtx.SLIME_BOX_A, SingleStageCtx.SLIME_BOX_B,
+            SingleStageCtx.SLIME_BOX_FULL}));
+        ops.addAll(orderOps(new int[]{ctx.collectSlot, ctx.collectSlot + 1}));
+
+        if (ops.isEmpty()) {
+            ChatUtils.debug("盒子数量本来就是递减的，不用换");
+            return;
+        }
+        ChatUtils.info("盒子数量不是递减的，调换一下顺序");
+        queue.child("调换盒子顺序", () -> new SingleStageInventoryAction(ctx, ops));
+    }
+
+    /** 让这几格按「多 → 少」排好，返回要做的调换操作（冒泡，几格而已）。 */
+    private List<SingleStageInventoryAction.Op> orderOps(int[] slots) {
+        List<SingleStageInventoryAction.Op> ops = new ArrayList<>();
+        int n = slots.length;
+        int[] cur = slots.clone();
+        int[] counts = new int[n];
+        for (int i = 0; i < n; i++) counts[i] = boxItems(cur[i]);
+
+        for (int pass = 0; pass < n; pass++) {
+            boolean swapped = false;
+            for (int i = 0; i + 1 < n; i++) {
+                if (counts[i] >= counts[i + 1]) continue;
+
+                int temp = firstFreeHotbar();
+                if (temp < 0) return ops;          // 没地方周转，先这样
+
+                // a → 临时格，b → a，临时格 → b
+                ops.add(SingleStageInventoryAction.move(cur[i], temp));
+                ops.add(SingleStageInventoryAction.move(cur[i + 1], cur[i]));
+                ops.add(SingleStageInventoryAction.move(temp, cur[i + 1]));
+
+                int c = counts[i];
+                counts[i] = counts[i + 1];
+                counts[i + 1] = c;
+                int s = cur[i];
+                cur[i] = cur[i + 1];
+                cur[i + 1] = s;
+                swapped = true;
+            }
+            if (!swapped) break;
+        }
+        return ops;
+    }
+
+    private int boxItems(int slot) {
+        int total = 0;
+        for (ItemStack stack : ShulkerUtils.contents(ctx.live(slot))) total += stack.getCount();
+        return total;
+    }
+
+    private int firstFreeHotbar() {
+        for (int slot = SingleStageCtx.HOTBAR_FREE_1; slot <= SingleStageCtx.HOTBAR_FREE_3; slot++) {
+            if (ctx.live(slot).isEmpty()) return slot;
+        }
+        return -1;
     }
 
     /** 内容多的排前面。 */

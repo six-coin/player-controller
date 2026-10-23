@@ -54,6 +54,8 @@ class SingleStageStage3 extends SingleStageStep {
     private final int iteration;
     private final int bottom;
     private final int top;
+    /** 走位层（区域上面那一层）——回临时站立点的跳板用这一层，那一层一定是空的。 */
+    private final int walkLayer;
     private final SingleStageQueue queue = new SingleStageQueue();
 
     /** 捡不到的掉落物（按实体 id）。 */
@@ -72,6 +74,7 @@ class SingleStageStage3 extends SingleStageStep {
         this.iteration = iteration;
         this.bottom = ctx.regionBottom(iteration);
         this.top = ctx.regionTop(iteration);
+        this.walkLayer = ctx.walkLayer(iteration);
     }
 
     @Override
@@ -242,10 +245,10 @@ class SingleStageStage3 extends SingleStageStep {
         fullBox = null;
 
         queue.sync("卸货：回临时站立点", () -> {
-            // 从下面回临时站立点一定要以 1 1 为跳板（那一列从下到上都是空的），
-            // 直接飞很可能没有沿轴走得通的路
-            queue.child("snap 到 1 1",
-                () -> new SingleStageSnapAction(ctx, ctx.routePoint(bottom, 1, 1)));
+            // 从下面回临时站立点一定要以 1 1 为跳板，而且要用**走位层**的 1 1：
+            // 区域里可能还剩几块没挖掉的方块，直接飞 bottom 那一层的 1 1 会没有沿轴走得通的路
+            queue.child("snap 到 1 1（走位层）",
+                () -> new SingleStageSnapAction(ctx, ctx.routePoint(walkLayer, 1, 1)));
             queue.child("snap 到临时站立点",
                 () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
         });
