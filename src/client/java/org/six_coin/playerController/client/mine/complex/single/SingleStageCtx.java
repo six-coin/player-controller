@@ -3,6 +3,8 @@ package org.six_coin.playerController.client.mine.complex.single;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.World;
+import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.mine.MineFilter;
 import org.six_coin.playerController.client.mine.MineRegion;
 import org.six_coin.playerController.client.util.DimensionUtils;
@@ -62,8 +64,8 @@ public final class SingleStageCtx {
     public static final int SLIME_BOX_B = 18;
     /** 背包 11：黏液块 / 树脂块 ≥ 1600 的潜影盒。 */
     public static final int SLIME_BOX_FULL = 19;
-    /** 背包 12：替换不死图腾。 */
-    public static final int SPARE_TOTEM = 20;
+    /** 背包 12：熔岩桶（拆平台前拿去烧垃圾，用完归位）。 */
+    public static final int LAVA_BUCKET = 20;
     /** 背包 13~21：收集用的潜影盒（13~17 有装满程度的顺序要求，18~21 必须全空）。 */
     public static final int COLLECT_START = 21;
     public static final int COLLECT_END = 29;
@@ -142,6 +144,17 @@ public final class SingleStageCtx {
         return initialMin.add(4, 5, 4);
     }
 
+    /** 倒熔岩时站的位置（6 6 6）。 */
+    public BlockPos lavaStandPoint() {
+        return initialMin.add(6, 6, 6);
+    }
+
+    /** 倒熔岩时给服务端的 yaw（135°，朝 -x / -z 那一边）。 */
+    public static final float LAVA_YAW = 135.0f;
+
+    /** 倒熔岩时给服务端的 pitch（30°，往下 30°）。 */
+    public static final float LAVA_PITCH = 30.0f;
+
     public BlockPos slimeSpotA() {
         return initialMin.add(7, 3, 7);
     }
@@ -190,6 +203,18 @@ public final class SingleStageCtx {
     public List<BlockPos> boxSpots() {
         return List.of(slimeSpotA(), slimeSpotB(), cobbleSpotA(), cobbleSpotB(),
             collectSpotA(), collectSpotB());
+    }
+
+    /**
+     * 拆平台时交给 mine simple 的范围：把平台 20 格和 4 5 4 那个圆石**一起框进来**。
+     *
+     * <p>框是「平台 + marker」的包围盒（相对坐标 4 2 4 ~ 10 5 9）。里面本来就只剩空气和
+     * 要拆的那 21 个圆石，多框进来几格空气无所谓；过滤器用 {@link MineFilter#ALL}
+     * （拆自己放的东西，不该被玩家的挖掘白/黑名单挡住）。
+     */
+    public MineRegion platformRegion() {
+        return MineRegion.of(dimension,
+            initialMin.add(4, 2, 4), initialMin.add(10, 5, 9), MineFilter.ALL);
     }
 
     /** 这个坐标是不是我们放的某个盒子。 */
@@ -250,20 +275,31 @@ public final class SingleStageCtx {
      *
      * <p>就是需求里的「边缘目标区域」：包裹住目标区域的那一层，往这里补粘液块就不会漏
      * （水 / 熔岩 / 空气都是漏洞）。上面那一层不算 —— 那是我们自己走位的地方。
+     *
+     * <p><b>某一面旁边那个子区块整块都是空气的话，这一面的墙就不建</b>
+     * （见 {@link #subChunkEmpty}）：那边本来就是空的，挡了也没用，纯浪费粘液块。
+     *
+     * @param world 拿不到世界（{@code null}）就按「四面都要建」算
      */
-    public List<BlockPos> shellCells(int iteration) {
+    public List<BlockPos> shellCells(int iteration, @Nullable World world) {
         List<BlockPos> cells = new ArrayList<>();
         int minX = targetMin.getX();
         int minZ = targetMin.getZ();
         int bottom = regionBottom(iteration);
         int top = regionTop(iteration);
+        int subY = targetMin.getY();
+
+        boolean west = !skipWall(world, minX - 16, subY, minZ);
+        boolean east = !skipWall(world, minX + 16, subY, minZ);
+        boolean north = !skipWall(world, minX, subY, minZ - 16);
+        boolean south = !skipWall(world, minX, subY, minZ + 16);
 
         for (int y = bottom; y <= top; y++) {
             for (int i = 0; i < 16; i++) {
-                cells.add(new BlockPos(minX - 1, y, minZ + i));      // 西
-                cells.add(new BlockPos(minX + 16, y, minZ + i));     // 东
-                cells.add(new BlockPos(minX + i, y, minZ - 1));      // 北
-                cells.add(new BlockPos(minX + i, y, minZ + 16));     // 南
+                if (west) cells.add(new BlockPos(minX - 1, y, minZ + i));
+                if (east) cells.add(new BlockPos(minX + 16, y, minZ + i));
+                if (north) cells.add(new BlockPos(minX + i, y, minZ - 1));
+                if (south) cells.add(new BlockPos(minX + i, y, minZ + 16));
             }
         }
         for (int x = 0; x < 16; x++) {
@@ -274,10 +310,29 @@ public final class SingleStageCtx {
         return cells;
     }
 
+    /** 这一面旁边那个子区块是不是整块空气（是就不用建这面墙）。 */
+    private static boolean skipWall(@Nullable World world, int x, int y, int z) {
+        return world != null && subChunkEmpty(world, new BlockPos(x, y, z));
+    }
+
+    /** 这个 16×16×16 的子区块是不是全是空气。 */
+    public static boolean subChunkEmpty(World world, BlockPos min) {
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+        for (int x = 0; x < 16; x++) {
+            for (int y = 0; y < 16; y++) {
+                for (int z = 0; z < 16; z++) {
+                    pos.set(min.getX() + x, min.getY() + y, min.getZ() + z);
+                    if (!world.getBlockState(pos).isAir()) return false;
+                }
+            }
+        }
+        return true;
+    }
+
     /** 全量目标区域 = 目标区域 + 那一圈壳。 */
-    public List<BlockPos> wrapCells(int iteration) {
+    public List<BlockPos> wrapCells(int iteration, @Nullable World world) {
         List<BlockPos> cells = new ArrayList<>(regionCells(iteration));
-        cells.addAll(shellCells(iteration));
+        cells.addAll(shellCells(iteration, world));
         return cells;
     }
 
@@ -356,6 +411,24 @@ public final class SingleStageCtx {
         }
         if (!slots.contains(collectSlot)) slots.add(collectSlot);
         if (!slots.contains(collectSlot + 1)) slots.add(collectSlot + 1);
+        return slots;
+    }
+
+    /**
+     * **搭平台之前**要保证是空的那些格子：快捷栏 6~8、背包 22~27、以及已经放出去的盒子的原格。
+     *
+     * <p>和 {@link #expectedEmptySlots} 的区别：这时候收集盒还没放出去（还在背包 13~21 里），
+     * 所以不能把收集位算进来 —— 算了会把还没放的盒子当垃圾扔掉。
+     */
+    public List<Integer> setupJunkSlots() {
+        List<Integer> slots = new ArrayList<>();
+        slots.add(HOTBAR_FREE_1);
+        slots.add(HOTBAR_FREE_2);
+        slots.add(HOTBAR_FREE_3);
+        for (int i = FILLER_START; i <= FILLER_END; i++) slots.add(i);
+        for (int slot : placedBoxSlots) {
+            if (!slots.contains(slot)) slots.add(slot);
+        }
         return slots;
     }
 

@@ -1,7 +1,6 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
 import net.minecraft.block.BlockState;
-import net.minecraft.block.FluidBlock;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -20,9 +19,9 @@ import java.util.Set;
  * 执行前的两道检查（需求 (1) 和 (2)）。返回一串「为什么不行」，空列表就是通过。
  *
  * <p>(1) 初始子区块必须全是空气（不然我们没地方站、也没地方放盒子），
- * 目标子区块里**每一个**方块都必须是「按当前 mine filter 挖得掉的」（有一个挖不动就拒绝执行）。
+ * 目标子区块里的方块必须都能被当前 mine filter 挖（水 / 熔岩不算问题 —— 它们能被粘液块替换掉）。
  *
- * <p>(2) 物品栏的布局：工具、食物、图腾、三种潜影盒的格子都要对。
+ * <p>(2) 物品栏的布局：工具、食物、图腾、熔岩桶、三种潜影盒的格子都要对。
  */
 public final class SingleStageCheck {
 
@@ -84,7 +83,7 @@ public final class SingleStageCheck {
         for (BlockPos pos : cells(ctx.targetMin)) {
             BlockState state = world.getBlockState(pos);
             if (state.isAir()) continue;
-            String why = notMineable(world, ctx, pos, state);
+            String why = notMineable(ctx, state);
             if (why == null) continue;
             blocked++;
             if (samples.size() < 5) samples.add(pos.toShortString() + " " + why);
@@ -96,10 +95,13 @@ public final class SingleStageCheck {
         return problems;
     }
 
-    /** 这个方块能不能被这次任务挖掉；能挖返回 null，挖不掉返回原因。 */
-    private static String notMineable(World world, SingleStageCtx ctx, BlockPos pos, BlockState state) {
-        if (state.getBlock() instanceof FluidBlock) return "是流体";
-        if (state.getHardness(world, pos) < 0.0F) return "挖不动";
+    /**
+     * 这个方块能不能被这次任务挖掉；能挖返回 null，挖不掉返回原因。
+     *
+     * <p><b>只看 mine filter</b>：水 / 熔岩现在能直接拿粘液块替换掉，硬度也拦不住我们
+     * （挖不动的那种 mine simple 自己会跳过，不值得为它拒绝整个子区块）。
+     */
+    private static String notMineable(SingleStageCtx ctx, BlockState state) {
         if (!ctx.filter.allows(state.getBlock())) {
             return "被 mine filter 排除（" + Registries.BLOCK.getId(state.getBlock()) + "）";
         }
@@ -166,23 +168,31 @@ public final class SingleStageCheck {
         toolSlot(data, problems, SingleStageCtx.SPARE_START + 3, MineToolRules.Kind.SHOVEL, "背包 4", true);
         toolSlot(data, problems, SingleStageCtx.SPARE_START + 4, MineToolRules.Kind.HOE, "背包 5", true);
 
-        // 背包 6、7：只有圆石的盒子（可以不装满）；背包 8：装满圆石
-        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_A, "背包 6", "圆石", Set.of(Items.COBBLESTONE), -1);
-        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_B, "背包 7", "圆石", Set.of(Items.COBBLESTONE), -1);
-        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_FULL, "背包 8", "圆石",
-            Set.of(Items.COBBLESTONE), FULL_BOX);
+        // 背包 6~8：圆石。6 必须是装满的（1728），7、8 半满或者空，而且 7 不比 8 少（倒序）
+        Set<Item> cobble = Set.of(Items.COBBLESTONE);
+        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_A, "背包 6", "圆石", cobble,
+            FULL_BOX, FULL_BOX);
+        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_B, "背包 7", "圆石", cobble, 0, FULL_BOX - 1);
+        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_FULL, "背包 8", "圆石", cobble,
+            0, FULL_BOX - 1);
+        descending(problems, data, "圆石", "背包 7", SingleStageCtx.COBBLE_BOX_B,
+            "背包 8", SingleStageCtx.COBBLE_BOX_FULL);
 
-        // 背包 9、10：只有黏液块 / 树脂块（可以不装满）；背包 11：≥1600
+        // 背包 9~11：黏液块 / 树脂块。9 必须装满（≥1600），10、11 半满或者空，同样倒序
         Set<Item> slime = Set.of(Items.SLIME_BLOCK, Items.RESIN_BLOCK);
-        boxSlot(data, problems, SingleStageCtx.SLIME_BOX_A, "背包 9", "黏液块 / 树脂块", slime, -1);
-        boxSlot(data, problems, SingleStageCtx.SLIME_BOX_B, "背包 10", "黏液块 / 树脂块", slime, -1);
+        boxSlot(data, problems, SingleStageCtx.SLIME_BOX_A, "背包 9", "黏液块 / 树脂块", slime,
+            SLIME_BOX_MIN, -1);
+        boxSlot(data, problems, SingleStageCtx.SLIME_BOX_B, "背包 10", "黏液块 / 树脂块", slime,
+            0, SLIME_BOX_MIN - 1);
         boxSlot(data, problems, SingleStageCtx.SLIME_BOX_FULL, "背包 11", "黏液块 / 树脂块", slime,
-            SLIME_BOX_MIN);
+            0, SLIME_BOX_MIN - 1);
+        descending(problems, data, "黏液块 / 树脂块", "背包 10", SingleStageCtx.SLIME_BOX_B,
+            "背包 11", SingleStageCtx.SLIME_BOX_FULL);
 
-        // 背包 12：替换不死图腾
-        ItemStack spareTotem = data.stack(SingleStageCtx.SPARE_TOTEM);
-        if (!spareTotem.isOf(Items.TOTEM_OF_UNDYING)) {
-            problems.add("背包 12 是 " + SingleStageData.idOf(spareTotem) + "，要放不死图腾");
+        // 背包 12：熔岩桶（拆平台前拿去烧垃圾，烧完归位）
+        ItemStack lava = data.stack(SingleStageCtx.LAVA_BUCKET);
+        if (!lava.isOf(Items.LAVA_BUCKET)) {
+            problems.add("背包 12 是 " + SingleStageData.idOf(lava) + "，要放一个熔岩桶");
         }
 
         // 背包 13~21：收集用的潜影盒
@@ -277,13 +287,14 @@ public final class SingleStageCheck {
     }
 
     /**
-     * 潜影盒格子：必须是潜影盒、里面只有 {@code allowed}、数量满足 {@code minItems}（-1 = 不限）。
+     * 潜影盒格子：必须是潜影盒、里面只有 {@code allowed}，数量落在 {@code minItems}~{@code maxItems}
+     * 之间（-1 = 那一头不限）。
      */
     private static void boxSlot(SingleStageData data, List<String> problems, int index, String label,
-                                String what, Set<Item> allowed, int minItems) {
+                                String what, Set<Item> allowed, int minItems, int maxItems) {
         ItemStack stack = data.stack(index);
         if (stack.isEmpty()) {
-            problems.add(label + " 是空的，要放装满" + what + "的潜影盒");
+            problems.add(label + " 是空的，要放装" + what + "的潜影盒");
             return;
         }
         if (!ShulkerUtils.isShulkerBox(stack)) {
@@ -303,5 +314,28 @@ public final class SingleStageCheck {
         if (minItems >= 0 && total < minItems) {
             problems.add(label + " 的盒子里只有 " + total + " 个" + what + "（要 ≥" + minItems + "）");
         }
+        if (maxItems >= 0 && total > maxItems) {
+            problems.add(label + " 的盒子里有 " + total + " 个" + what
+                + "（要 ≤" + maxItems + "，这一格只能是半满或者空的）");
+        }
+    }
+
+    /** 前面那格的东西不能比后面那格少（卸货装回去的时候也是按这个顺序放的）。 */
+    private static void descending(List<String> problems, SingleStageData data, String what,
+                                   String firstLabel, int firstIndex,
+                                   String secondLabel, int secondIndex) {
+        int first = boxItems(data.stack(firstIndex));
+        int second = boxItems(data.stack(secondIndex));
+        if (first < second) {
+            problems.add(firstLabel + " 的" + what + "（" + first + "）比 " + secondLabel
+                + " 的（" + second + "）还少，顺序反了（多的要在前面）");
+        }
+    }
+
+    /** 一盒东西一共几个。 */
+    public static int boxItems(ItemStack box) {
+        int total = 0;
+        for (ItemStack inner : ShulkerUtils.contents(box)) total += inner.getCount();
+        return total;
     }
 }

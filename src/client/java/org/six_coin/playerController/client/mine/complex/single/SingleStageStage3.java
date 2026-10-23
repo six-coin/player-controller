@@ -11,12 +11,8 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import org.jetbrains.annotations.Nullable;
-import org.six_coin.playerController.client.owner.Owner;
-import org.six_coin.playerController.client.rotate.RotateManager;
 import org.six_coin.playerController.client.stock.MineBlockAction;
-import org.six_coin.playerController.client.stock.WaitAction;
 import org.six_coin.playerController.client.util.ChatUtils;
-import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 
 import java.util.ArrayList;
@@ -41,7 +37,8 @@ import java.util.function.Predicate;
  * <ol>
  *   <li>snap 到 1 14，再 snap 回临时站立点；</li>
  *   <li>圆石 → 圆石盒、黏液块 → 黏液盒、要收集的东西 → 收集盒（都是「先装有的，再装没的」）；</li>
- *   <li>「理应是空位」的格子里还有东西的话，飞到 6 14 6 → 4 14 4、低头全扔掉，再飞回来；</li>
+ *   <li>「理应是空位」的格子里还有东西的话，飞到 6 14 6 → 4 14 4、低头全扔掉，再飞回来
+ *       （低头用 {@link SingleStageThrowAction}，只发假转头包，客户端视角不动）；</li>
  *   <li>如果有个收集盒满了：挖掉它、把盒子收回对应格、把「收集位 + 2」的备用盒放到挖掉的位置，
  *       收集位 +1。</li>
  * </ol>
@@ -128,6 +125,10 @@ class SingleStageStage3 extends SingleStageStep {
         if (inventoryFull()) {
             ChatUtils.info(phase() + "：物品栏满了，先卸货");
             queueUnload();
+            // 卸完货人在临时站立点（初始子区块那边），直接找掉落物会「不可达」：
+            // 先回到捡东西那一层的 1 1（进矿洞的那一头），再从那里出发
+            queue.child("回到捡东西那层的 1 1",
+                () -> new SingleStageSnapAction(ctx, ctx.routePoint(bottom, 1, 1)));
             queue.sync("继续收集", this::collectStep);
             return;
         }
@@ -182,13 +183,27 @@ class SingleStageStage3 extends SingleStageStep {
         return drops;
     }
 
+    /** 两个圆石盒里的圆石加起来到这个数，地上的圆石就不捡了。 */
+    private static final int COBBLE_ENOUGH = 3200;
+
     /** 这种掉落物要不要捡。 */
     private boolean wanted(ItemStack stack) {
         String id = Registries.ITEM.getId(stack.getItem()).toString();
-        return ctx.collectorItems.contains(id)
-            || "minecraft:cobblestone".equals(id)
-            || "minecraft:slime_block".equals(id)
-            || "minecraft:resin_block".equals(id);
+        if (ctx.collectorItems.contains(id)) return true;
+        if ("minecraft:cobblestone".equals(id)) return !cobbleEnough();
+        return "minecraft:slime_block".equals(id) || "minecraft:resin_block".equals(id);
+    }
+
+    /**
+     * 两个圆石盒里的圆石是不是已经够多了。
+     *
+     * <p>挖这个子区块会掉一大堆圆石，两个盒子早晚装满 —— 装满以后再追着捡纯属浪费时间，
+     * 捡了也只能扔掉。够了就只捡 item_collector 和粘液块。
+     */
+    private boolean cobbleEnough() {
+        int total = ctx.data.boxCount(ctx.cobbleSpotA(), Items.COBBLESTONE)
+            + ctx.data.boxCount(ctx.cobbleSpotB(), Items.COBBLESTONE);
+        return total >= COBBLE_ENOUGH;
     }
 
     private static ItemEntity nearest(ClientPlayerEntity player, List<ItemEntity> drops) {
@@ -308,22 +323,10 @@ class SingleStageStage3 extends SingleStageStep {
 
             queue.child("snap 到 6 14 6", () -> new SingleStageSnapAction(ctx, high));
             queue.child("snap 到 4 14 4", () -> new SingleStageSnapAction(ctx, drop));
-            queue.sync("低头", () -> {
-                ClientPlayerEntity player = PlayerUtils.player();
-                if (player != null) {
-                    RotateManager.get().rotateTo(Owner.MINE, player.getYaw(), 90.0f);
-                }
-            });
-            // 低头之后等 5 tick 再扔：转头包和服务端处理之间有延迟，
-            // 同一 tick 扔出去服务端可能还用旧 pitch，垃圾就斜着飞进矿洞里了
-            queue.child("等 5 tick 让服务端看到低头",
-                () -> new WaitAction("转头生效", () -> false, 5, false));
-
-            List<SingleStageInventoryAction.Op> ops = new ArrayList<>();
-            for (int slot : junk) ops.add(SingleStageInventoryAction.throwStack(slot));
-            queue.child("扔东西", () -> new SingleStageInventoryAction(ctx, ops));
-            queue.sync("松头", () -> RotateManager.get().release(Owner.MINE));
-
+            // 低头扔（转头只发假包，客户端视角不动）；扔的方向看的是服务端记着的 pitch，
+            // 所以用统一的 ThrowAction：它会每 tick 重发一次低头，并在失败时明确报错
+            queue.child("低头扔掉这些垃圾",
+                () -> new SingleStageThrowAction(ctx, junk, "垃圾"));
             queue.child("snap 回 6 14 6", () -> new SingleStageSnapAction(ctx, high));
             queue.child("snap 回临时站立点", () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
         });

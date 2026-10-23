@@ -85,6 +85,11 @@ class SingleStageThrowAction extends SingleStageStep {
             return;
         }
 
+        // 每 tick 都把「低头」再发一遍：扔东西的方向是**服务端**记着的 yaw / pitch
+        // （{@code dropItem} 用它算速度），中间只要有任何东西把服务端朝向改掉，
+        // 东西就会朝着客户端真实视角飞出去。重发一次最稳，客户端视角照样不动。
+        if (rotated) RotateManager.get().resend();
+
         if (!throwing) {
             if (++waitTicks < WAIT_TICKS) return;
             throwing = true;

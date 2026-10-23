@@ -135,6 +135,24 @@ public final class RotateManager {
         return true;
     }
 
+    /**
+     * 把当前生效的朝向**再发一遍**（不管上次是不是已经发过）。
+     *
+     * <p>给「靠服务端记着的朝向决定结果」的操作用：扔东西（{@code dropItem} 用服务端的 yaw / pitch
+     * 算速度）、用桶（服务端会拿包里带的 yaw / pitch 覆盖自己的朝向再射线）……
+     * 这些操作之前重发一次，就不用管中间有没有别的东西把服务端的朝向改掉了。
+     *
+     * @return {@code false} = 现在没有生效中的朝向（没人请求过转头）
+     */
+    public boolean resend() {
+        if (!active) return false;
+        send(yaw, pitch);
+        sentYaw = yaw;
+        sentPitch = pitch;
+        sent = true;
+        return true;
+    }
+
     /** 用完还回去（不发包：服务端保持最后那个朝向）。 */
     public void release(Owner requester) {
         if (owner != requester) return;

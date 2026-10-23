@@ -1,7 +1,6 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
 import net.minecraft.block.BlockState;
-import net.minecraft.block.FluidBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -78,10 +77,10 @@ class SingleStageStage1 extends SingleStageStep {
             return;
         }
 
-        for (BlockPos pos : ctx.wrapCells(iteration)) {
+        for (BlockPos pos : ctx.wrapCells(iteration, mc.world)) {
             if (isWaterlogged(mc.world.getBlockState(pos))) waterlogged.add(pos);
         }
-        for (BlockPos pos : ctx.shellCells(iteration)) {
+        for (BlockPos pos : ctx.shellCells(iteration, mc.world)) {
             if (isGap(mc.world.getBlockState(pos))) gaps.add(pos);
         }
 
@@ -224,9 +223,15 @@ class SingleStageStage1 extends SingleStageStep {
         return state.contains(Properties.WATERLOGGED) && state.get(Properties.WATERLOGGED);
     }
 
-    /** 这个方块是不是「漏洞」：空气 / 水 / 熔岩。 */
+    /**
+     * 这个方块是不是「漏洞」：凡是**能被粘液块直接替换掉**的都算。
+     *
+     * <p>用原版的 {@code replaceable} 判定（{@code BlockState#isReplaceable}）：
+     * 空气、水、熔岩、藤蔓、草、雪片……全都在里面。以前只认「空气 / 流体」，
+     * 藤蔓、草这类也一样会漏水，却漏掉了。
+     */
     static boolean isGap(BlockState state) {
-        return state.isAir() || state.getBlock() instanceof FluidBlock;
+        return state.isReplaceable();
     }
 
     /** 挖这个方块该用快捷栏第几格（剑镐斧铲锄，下标 0~4）。 */

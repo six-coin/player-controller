@@ -25,15 +25,17 @@ import java.util.List;
  *   <li>最后放两个收集盒（9 3 7 / 9 3 8）—— 放到平台之后，盒子下面就有东西垫着了。</li>
  * </ol>
  *
- * <p>盒子怎么挑（需求里的「有空的，就放剩下的两个」）：
- * <ul>
- *   <li>三个盒子里有空盒 → <b>留一个空盒在背包</b>，把另外两个放出去（所以剩下那两个里可能还有一个空的）；</li>
- *   <li>都不空 → 放内容最少的两个。</li>
- * </ul>
+ * <p>盒子怎么挑：**一般留下装满的那一个**（背包 6 / 9），把两个半满的放出去 ——
+ * 这样卸货装回去的时候顺序还是「满、半、空」，补货检查能过。
+ * 只有两个半满的加起来不够用（圆石要 21 个、黏液块要 9 组）的时候，才把装满的那个也放出去、
+ * 留一个最空的在背包里（不然平台搭不起来）。
  */
 class SingleStageSetup extends SingleStageStep {
 
     private static final int PLATFORM_COBBLE = 21;
+
+    /** 第一步要从盒子里拿 9 组粘液块（见 {@code SingleStageStage1.SLIME_STACKS}）。 */
+    private static final int SLIME_NEED = 9 * 64;
 
     private final SingleStageQueue queue = new SingleStageQueue();
 
@@ -77,17 +79,22 @@ class SingleStageSetup extends SingleStageStep {
 
         queue.sync("放粘液块盒", () -> {
             List<Integer> slots = chooseTwo(SingleStageCtx.SLIME_BOX_A,
-                SingleStageCtx.SLIME_BOX_B, SingleStageCtx.SLIME_BOX_FULL);
+                SingleStageCtx.SLIME_BOX_B, SingleStageCtx.SLIME_BOX_FULL, SLIME_NEED);
             queuePlaceBox(ctx.slimeSpotA(), slots.get(0), "粘液块", true);
             queuePlaceBox(ctx.slimeSpotB(), slots.get(1), "粘液块", true);
         });
 
         queue.sync("放圆石盒", () -> {
             List<Integer> slots = chooseTwo(SingleStageCtx.COBBLE_BOX_A,
-                SingleStageCtx.COBBLE_BOX_B, SingleStageCtx.COBBLE_BOX_FULL);
+                SingleStageCtx.COBBLE_BOX_B, SingleStageCtx.COBBLE_BOX_FULL, PLATFORM_COBBLE);
             queuePlaceBox(ctx.cobbleSpotA(), slots.get(0), "圆石", true);
             queuePlaceBox(ctx.cobbleSpotB(), slots.get(1), "圆石", true);
         });
+
+        // 建平台的时候人贴着平台飞，旁边有东西很容易被吸进「该空」的格子里
+        // （吸进来以后放盒子、卸货全都会对不上），所以先清一遍。
+        // 必须在「取圆石」之前：快捷栏第 6 格待会儿要装搭平台用的圆石。
+        queue.sync("清掉该空的格子", this::queueCleanJunk);
 
         queue.sync("取圆石搭平台", this::queueTakeCobble);
 
@@ -107,42 +114,55 @@ class SingleStageSetup extends SingleStageStep {
     }
 
     /**
-     * 三个盒子里挑两个放出去。
+     * 三个盒子里挑两个放出去，返回的这两个按「内容多的在前」排好。
      *
-     * <p>有空盒 → 留一个空盒在背包、另外两个放出去；都不空 → 放内容最少的两个。
+     * <p>一般情况：留下 {@code slotA}（装满的那一格），把两个半满的放出去。
+     * 两个半满的加起来不到 {@code needItems} 的时候（放出去也拿不出东西），
+     * 改成留下最空的那个，把装满的那个放出去。
      */
-    private List<Integer> chooseTwo(int slotA, int slotB, int slotFull) {
+    private List<Integer> chooseTwo(int slotA, int slotB, int slotFull, int needItems) {
         List<Integer> all = new ArrayList<>(List.of(slotA, slotB, slotFull));
+        int partial = boxItems(slotB) + boxItems(slotFull);
 
-        int keep = -1;
-        for (int slot : all) {
-            if (isEmptyBox(slot)) {
-                keep = slot;
-                break;
-            }
+        int keep = slotA;
+        if (partial < needItems) {
+            List<Integer> byItems = new ArrayList<>(all);
+            byItems.sort(Comparator.comparingInt(this::boxItems));
+            keep = byItems.get(0);
         }
 
         List<Integer> place = new ArrayList<>();
         for (int slot : all) {
             if (slot != keep) place.add(slot);
         }
-        if (keep < 0) {
-            place.sort(Comparator.comparingInt(this::boxItems));
-            place = new ArrayList<>(place.subList(0, 2));
-        }
-        ChatUtils.debug("挑两个盒子放出去：" + place + "（留在背包：" + keep + "）");
+        place.sort(Comparator.comparingInt(this::boxItems).reversed());
+        ChatUtils.debug("挑两个盒子放出去：" + place + "（留在背包：" + keep
+            + "；两个半满的一共 " + partial + " 个，至少要 " + needItems + "）");
         return place;
-    }
-
-    private boolean isEmptyBox(int slot) {
-        ItemStack stack = ctx.live(slot);
-        return ShulkerUtils.isShulkerBox(stack) && ShulkerUtils.contents(stack).isEmpty();
     }
 
     private int boxItems(int slot) {
         int total = 0;
         for (ItemStack stack : ShulkerUtils.contents(ctx.live(slot))) total += stack.getCount();
         return total;
+    }
+
+    /**
+     * 「该空」的格子里有东西就低头扔掉。
+     *
+     * <p>建平台的时候人就贴着平台飞，旁边掉的东西（上一轮留下的圆石、挖下来的杂物）很容易被吸进来；
+     * 一旦占了快捷栏 6~8 / 背包 22~27，后面放盒子、卸货、扔垃圾全会对不上，所以先清一遍。
+     */
+    private void queueCleanJunk() {
+        List<Integer> junk = new ArrayList<>();
+        for (int slot : ctx.setupJunkSlots()) {
+            if (!ctx.live(slot).isEmpty()) junk.add(slot);
+        }
+        if (junk.isEmpty()) return;
+
+        ChatUtils.info("搭平台前先扔掉 " + junk.size() + " 格里不该有的东西");
+        queue.child("扔掉多出来的东西",
+            () -> new SingleStageThrowAction(ctx, junk, "多出来的东西"));
     }
 
     // ------------------------------------------------------------------
