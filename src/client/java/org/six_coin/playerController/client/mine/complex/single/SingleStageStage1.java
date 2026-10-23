@@ -1,6 +1,7 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.block.FluidBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
@@ -654,8 +655,17 @@ class SingleStageStage1 extends SingleStageStep {
 
     // ------------------------------------------------------------------
 
-    /** 这个方块是不是 {@code waterlogged=true}。 */
+    /**
+     * 这个方块是不是「含水方块」（要当成含水方块挖掉的那种）。
+     *
+     * <p>除了带 {@code waterlogged=true} 的，还**硬编码**了海草和 kelp：
+     * 它们没有 waterlogged 这个状态，但一定泡在水里 —— 不挖掉的话水会顺着它们漏进区域。
+     */
     static boolean isWaterlogged(BlockState state) {
+        if (state.isOf(Blocks.SEAGRASS) || state.isOf(Blocks.TALL_SEAGRASS)
+            || state.isOf(Blocks.KELP) || state.isOf(Blocks.KELP_PLANT)) {
+            return true;
+        }
         return state.contains(Properties.WATERLOGGED) && state.get(Properties.WATERLOGGED);
     }
 
