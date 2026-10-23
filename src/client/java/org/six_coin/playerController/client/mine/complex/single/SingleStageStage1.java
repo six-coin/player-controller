@@ -34,8 +34,9 @@ import java.util.function.Predicate;
  *   <li>先从两个粘液块盒子里拿 9 组（优先拿不满的那个盒子，不够再拿另一个）；</li>
  *   <li>snap 到目标区域上面那一层的 1 1（<b>不管安不安全</b>：熔岩 / 水都会在这一阶段被填掉，
  *       就算中途碰到也有食物顶着）；</li>
- *   <li>每到一个位置就：把**这个位置能放的洞全部放完** → 把够得着的含水方块挖掉 →
- *       再放一遍（刚挖出来的新洞）→ 然后挑下一个位置；</li>
+ *   <li>每到一个位置就：先把**够得着的含水方块一次性全打掉**（同时发包、一个都不等，
+ *       发完等几 tick 按世界里的方块核对一遍），再把**这个位置能放的洞全部放完**
+ *       （放完等 10 tick 再核对一遍，没填上就再填）；然后挑下一个位置；</li>
  *   <li><b>两个区域规则不一样</b>：
  *       <ul>
  *         <li>「边缘目标区域」（外面那一圈壳）：**能替换的全替换**（空气、水、熔岩、藤蔓、草…）；</li>
@@ -100,10 +101,8 @@ class SingleStageStage1 extends SingleStageStep {
         TRAVEL,
         /** 把当前位置能放的洞都放掉。 */
         PLACE,
-        /** 挖够得着的含水方块。 */
+        /** 把够得着的含水方块一次性全打掉。 */
         MINE,
-        /** 挖完再放一遍（新挖出来的洞）。 */
-        PLACE_AGAIN,
         /** 放完之后先等 10 tick。 */
         VERIFY_WAIT,
         /** 确认刚才要填的地方都填上了；没填就再填一遍。 */
@@ -182,10 +181,6 @@ class SingleStageStage1 extends SingleStageStep {
     private int verifyAttempts;
 
 
-    /** 这一轮要挖的含水方块。 */
-    private final List<BlockPos> mineList = new ArrayList<>();
-    private int mineIndex;
-    private boolean minePrepared;
 
     private int stops;
 
@@ -287,30 +282,20 @@ class SingleStageStage1 extends SingleStageStep {
                     phase = afterTake;
                 }
                 case TRAVEL -> {
-                    startChild(new SingleStageSnapAction(ctx, travelTarget), Phase.PLACE);
+                    startChild(new SingleStageSnapAction(ctx, travelTarget), Phase.MINE);
                     return;
+                }
+                case MINE -> {
+                    // 先把够得着的含水方块一次性全打掉（同时发包，不等），再统一放粘液块
+                    List<BlockPos> targets = reachableWaterlogged(mc.world);
+                    if (!targets.isEmpty()) {
+                        startChild(new SingleStageMineBatchAction(ctx, targets), Phase.PLACE);
+                        return;
+                    }
+                    phase = Phase.PLACE;
                 }
                 case PLACE -> {
                     verifyAttempts = 0;
-                    if (!placeHere(mc, Phase.MINE, false)) return;
-                }
-                case MINE -> {
-                    if (!minePrepared) {
-                        mineList.clear();
-                        mineList.addAll(reachableWaterlogged(mc.world));
-                        mineIndex = 0;
-                        minePrepared = true;
-                    }
-                    if (mineIndex < mineList.size()) {
-                        BlockPos pos = mineList.get(mineIndex++);
-                        BlockState state = mc.world.getBlockState(pos);
-                        startChild(new MineBlockAction(pos, toolSlotFor(state)), Phase.MINE);
-                        return;
-                    }
-                    minePrepared = false;
-                    phase = Phase.PLACE_AGAIN;
-                }
-                case PLACE_AGAIN -> {
                     if (!placeHere(mc, Phase.NEXT, true)) return;
                 }
                 case VERIFY_WAIT -> {

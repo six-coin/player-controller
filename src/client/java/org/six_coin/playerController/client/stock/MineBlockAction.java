@@ -4,10 +4,14 @@ import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.registry.Registries;
+import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import org.six_coin.playerController.client.mixin.ClientPlayerInteractionManagerAccessor;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.owner.Owner;
@@ -145,6 +149,29 @@ public class MineBlockAction extends Action {
     private boolean broken(BlockState state) {
         if (state.isAir()) return true;
         return original != null && !state.isOf(original);
+    }
+
+    /**
+     * **立刻**发包打掉一个方块：START → 挥手 → STOP，不等它真的没了。
+     *
+     * <p>和 {@link MineBlockAction} 那套「按原版流程一点点累进度」不一样，这个是 nuker 的打法
+     * （和 {@code MineManager} 里的一样）：一次把一堆方块全发出去，之后再统一按世界方块核对。
+     * 用原版的 {@code sendSequencedPacket} 带 sequence 号。
+     */
+    public static void breakNow(MinecraftClient mc, ClientPlayerEntity player, BlockPos pos) {
+        if (mc.world == null || mc.interactionManager == null) return;
+        Direction side = PlayerUtils.facingSide(pos);
+        ClientWorld world = mc.world;
+        ClientPlayerInteractionManagerAccessor accessor =
+            (ClientPlayerInteractionManagerAccessor) mc.interactionManager;
+
+        accessor.playerController$sendSequencedPacket(world, sequence ->
+            new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, side,
+                sequence));
+        player.swingHand(Hand.MAIN_HAND);
+        accessor.playerController$sendSequencedPacket(world, sequence ->
+            new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, side,
+                sequence));
     }
 
     private static String describe(ItemStack stack) {
