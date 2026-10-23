@@ -39,7 +39,8 @@ import java.util.function.Predicate;
  *         <li>「目标区域」里面：**只替换水和熔岩**（空气 / 草 / 藤蔓不碰，反正马上要挖掉）；</li>
  *       </ul>
  *       含水方块照旧在全量目标区域（区域 + 壳）里找；</li>
- *   <li>粘液块用完了会自动回临时站立点、开盒子再拿一趟，然后飞回原来的位置接着补；</li>
+ *   <li>粘液块用完了会自动补一趟：先 snap 回走位层的 1 1、再回临时站立点开盒子拿，
+ *       然后飞回原来的位置接着补；</li>
  *   <li>「下一个位置」的挑法：在走位层（目标区域上面那一层）的 256 个格子里，
  *       找**能放的洞最多**的那一个；一样多就取**离当前位置最近**的；还要走得过去
  *       （snap 得通）。一个都挑不出来（剩下的洞哪个位置都放不了）就结束这一阶段；</li>
@@ -86,10 +87,14 @@ class SingleStageStage1 extends SingleStageStep {
         PLACE_AGAIN,
         /** 挑下一个位置。 */
         NEXT,
-        /** 粘液块用完了：飞回临时站立点。 */
+        /** 粘液块用完了：先飞回走位层的 1 1（回临时站立点的必经之路）。 */
+        REFILL_UP,
+        /** 再从 1 1 飞回临时站立点。 */
         REFILL_GO,
-        /** 补完货飞回原来那个位置。 */
+        /** 补完货先飞回走位层的 1 1。 */
         REFILL_BACK,
+        /** 再从 1 1 飞回原来那个位置。 */
+        REFILL_RETURN,
         /** 回临时站立点。 */
         BACK,
         /** 把多余的粘液块放回盒子里。 */
@@ -265,12 +270,25 @@ class SingleStageStage1 extends SingleStageStep {
                         phase = Phase.BACK;
                     }
                 }
+                case REFILL_UP -> {
+                    // 直接飞临时站立点可能没有沿轴走得通的路（人在矿洞深处），
+                    // 先回到走位层的 1 1 —— 那儿和临时站立点之间一定通
+                    startChild(new SingleStageSnapAction(ctx, ctx.routePoint(walkLayer, 1, 1)),
+                        Phase.REFILL_GO);
+                    return;
+                }
                 case REFILL_GO -> {
-                    // 粘液块用完了：先回临时站立点（盒子在那儿），拿完再飞回来
+                    // 从 1 1 回临时站立点（盒子在那儿），拿完再飞回来
                     startChild(new SingleStageSnapAction(ctx, ctx.standPoint()), Phase.TAKE);
                     return;
                 }
                 case REFILL_BACK -> {
+                    // 回程一样要经过 1 1：从临时站立点直接飞矿洞深处可能没有沿轴的路
+                    startChild(new SingleStageSnapAction(ctx, ctx.routePoint(walkLayer, 1, 1)),
+                        Phase.REFILL_RETURN);
+                    return;
+                }
+                case REFILL_RETURN -> {
                     startChild(new SingleStageSnapAction(ctx, refillReturn), Phase.PLACE);
                     return;
                 }
@@ -312,7 +330,7 @@ class SingleStageStage1 extends SingleStageStep {
                 boxes = boxesLeastFull();
                 boxIndex = 1;
                 afterTake = Phase.REFILL_BACK;
-                phase = Phase.REFILL_GO;
+                phase = Phase.REFILL_UP;
                 ChatUtils.info(phase() + "：粘液块用完了，回去补一趟（盒子里还有 " + left + " 个）");
                 return true;
             }
