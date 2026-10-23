@@ -36,7 +36,8 @@ import java.util.function.Predicate;
  *       就算中途碰到也有食物顶着）；</li>
  *   <li>每到一个位置就：先把**够得着的含水方块一次性全打掉**（同时发包、一个都不等，
  *       发完等几 tick 按世界里的方块核对一遍），再把**这个位置能放的洞全部放完**
- *       （放完等 10 tick 再核对一遍，没填上就再填）；然后挑下一个位置；</li>
+ *       （放完拿剑把这些格子挨个右键一遍，逼服务端回推真实方块状态，再核对；
+ *       没填上就再填一遍）；然后挑下一个位置；</li>
  *   <li><b>两个区域规则不一样</b>：
  *       <ul>
  *         <li>「边缘目标区域」（外面那一圈壳）：**能替换的全替换**（空气、水、熔岩、藤蔓、草…）；</li>
@@ -74,9 +75,6 @@ class SingleStageStage1 extends SingleStageStep {
     /** 一阶段里最多换几次盒子（把放着的空盒换成背包里的备用盒）。 */
     private static final int MAX_SWAPS = 3;
 
-    /** 放完之后等几 tick 再确认填没填上（服务端回推方块状态要一点时间）。 */
-    private static final int VERIFY_TICKS = 10;
-
     /** 同一个落点最多重填几次。 */
     private static final int MAX_VERIFY = 3;
 
@@ -103,8 +101,8 @@ class SingleStageStage1 extends SingleStageStep {
         PLACE,
         /** 把够得着的含水方块一次性全打掉。 */
         MINE,
-        /** 放完之后先等 10 tick。 */
-        VERIFY_WAIT,
+        /** 放完之后拿剑把这些格子挨个右键一遍（逼服务端回推真实方块状态）。 */
+        POKE,
         /** 确认刚才要填的地方都填上了；没填就再填一遍。 */
         VERIFY_CHECK,
         /** 挑下一个位置。 */
@@ -177,7 +175,6 @@ class SingleStageStage1 extends SingleStageStep {
 
     /** 刚才这一批要填的格子（等 10 tick 之后拿它核对）。 */
     private List<BlockPos> lastPlaceTargets = List.of();
-    private int verifyTicks;
     private int verifyAttempts;
 
 
@@ -298,10 +295,16 @@ class SingleStageStage1 extends SingleStageStep {
                     verifyAttempts = 0;
                     if (!placeHere(mc, Phase.NEXT, true)) return;
                 }
-                case VERIFY_WAIT -> {
-                    if (++verifyTicks < VERIFY_TICKS) return;
-                    verifyTicks = 0;
-                    phase = Phase.VERIFY_CHECK;
+                case POKE -> {
+                    // 放完可能「客户端看着放上了、服务端没放上」：拿剑挨个右键一遍，
+                    // 服务端会把这些位置的真实方块状态推回来，之后一查就知道漏了哪些
+                    if (lastPlaceTargets.isEmpty()) {
+                        phase = Phase.VERIFY_CHECK;
+                    } else {
+                        startChild(new SingleStagePokeAction(ctx, lastPlaceTargets),
+                            Phase.VERIFY_CHECK);
+                        return;
+                    }
                 }
                 case VERIFY_CHECK -> {
                     if (!verifyFilled(mc)) return;
@@ -440,12 +443,12 @@ class SingleStageStage1 extends SingleStageStep {
 
         lastPlaceTargets = gaps;
         startChild(new SingleStagePlaceBatchAction(ctx, gaps, SLIME, HOTBAR_SLOTS, MAIN_SLOTS,
-            "粘液块"), verify ? Phase.VERIFY_WAIT : next);
+            "粘液块"), verify ? Phase.POKE : next);
         return false;
     }
 
     /**
-     * 等 10 tick 之后核对：刚才要填的那些格子现在填上了没有。
+     * 核对（前面已经右键同步过了）：刚才要填的那些格子现在填上了没有。
      *
      * <p>没填上就**再填一遍**（最多 {@value #MAX_VERIFY} 次）；实在填不上才跳过。
      *
