@@ -74,6 +74,7 @@ public class MineComplexSingleStageN extends Action {
             MineFilterConfig.get().filter(), collectorItems, data);
 
         List<String> problems = new ArrayList<>(SingleStageCheck.checkSubChunks(mc.world, ctx));
+        problems.addAll(SingleStageCheck.checkReach());
         problems.addAll(SingleStageCheck.checkInventory(ctx));
         if (!problems.isEmpty()) {
             ChatUtils.error("单段挖掘不能开始（" + problems.size() + " 条）：");

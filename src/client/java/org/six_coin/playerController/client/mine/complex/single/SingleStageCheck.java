@@ -9,6 +9,7 @@ import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import org.six_coin.playerController.client.mine.station.MineToolRules;
+import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 
 import java.util.ArrayList;
@@ -42,6 +43,9 @@ public final class SingleStageCheck {
 
     /** 食物最少要多少个。 */
     public static final int FOOD_MIN = 16;
+
+    /** 这个功能要求的 `actions.reach` 下限。 */
+    public static final double MIN_REACH = 5.0;
 
     /** 潜影盒的三种装满程度。 */
     public enum Fill {
@@ -128,6 +132,22 @@ public final class SingleStageCheck {
 
     private static String idOf(World world, BlockPos pos) {
         return Registries.BLOCK.getId(world.getBlockState(pos).getBlock()).toString();
+    }
+
+    // ------------------------------------------------------------------
+    // (3) 配置
+    // ------------------------------------------------------------------
+
+    /**
+     * (3)：{@code actions.reach} 必须 ≥ {@value #MIN_REACH}。
+     *
+     * <p>这个功能是「站在区域上面那一层挖」「按 7×7×7 放方块」，reach 小了会够不着。
+     */
+    public static List<String> checkReach() {
+        double reach = PlayerUtils.reach();
+        if (reach >= MIN_REACH) return List.of();
+        return List.of("actions.reach 现在是 " + reach + "，这个功能要求 ≥ " + MIN_REACH
+            + "（用 /pc config actions reach 5 改）");
     }
 
     // ------------------------------------------------------------------

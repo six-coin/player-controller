@@ -72,7 +72,7 @@ public final class PlayerControllerConfig {
      * <p>注意：这只是本模组自己的判断标准；服务端还有它自己的一套距离检查，
      * 调大之后对服务端不认的交互依然会被服务端拒绝。
      */
-    public static final double DEFAULT_REACH = 4.5;
+    public static final double DEFAULT_REACH = 5.0;
     public static final double MIN_REACH = 0.5;
     public static final double MAX_REACH = 64.0;
 
