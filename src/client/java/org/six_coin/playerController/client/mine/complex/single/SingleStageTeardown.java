@@ -44,10 +44,15 @@ class SingleStageTeardown extends SingleStageStep {
     /** 等快挖挖完最多等多久。 */
     private static final int MAX_DIG_WAIT_TICKS = 20 * 120;
 
+    /** 盒子顺序最多整理几轮（每轮换完都会复核一次）。 */
+    private static final int MAX_ORDER_ROUNDS = 3;
+
     private final SingleStageQueue queue = new SingleStageQueue();
 
     /** 是不是我们自己开的 mine simple（关的时候只关自己开的那个）。 */
     private boolean mining;
+    /** 盒子顺序整理了几轮。 */
+    private int orderRounds;
 
     SingleStageTeardown(SingleStageCtx ctx) {
         super(ctx);
@@ -122,45 +127,61 @@ class SingleStageTeardown extends SingleStageStep {
     /**
      * 拆完再核对一遍：这几组盒子里的东西必须是**单调递减**的，不是就把两格换过来。
      *
-     * <p>（装回去的时候已经按内容多少排过了，但中途可能被别的东西影响，这里兜一道。）
+     * <p>换的时候用 `SlotActionType.SWAP`（点格子 + 按数字键）三下完成一次交换：
+     * `a↔临时快捷栏格`、`b↔临时格`、`a↔临时格` —— 全程不碰光标，比「拿起 / 放下」稳。
+     * 换完再复核一遍（最多 {@value #MAX_ORDER_ROUNDS} 轮）。
      */
     private void queueFixOrder() {
+        if (orderRounds >= MAX_ORDER_ROUNDS) return;
+        orderRounds++;
+
         List<SingleStageInventoryAction.Op> ops = new ArrayList<>();
+        List<String> report = new ArrayList<>();
         ops.addAll(orderOps(new int[]{SingleStageCtx.COBBLE_BOX_A, SingleStageCtx.COBBLE_BOX_B,
-            SingleStageCtx.COBBLE_BOX_FULL}));
+            SingleStageCtx.COBBLE_BOX_FULL}, report));
         ops.addAll(orderOps(new int[]{SingleStageCtx.SLIME_BOX_A, SingleStageCtx.SLIME_BOX_B,
-            SingleStageCtx.SLIME_BOX_FULL}));
-        ops.addAll(orderOps(new int[]{ctx.collectSlot, ctx.collectSlot + 1}));
+            SingleStageCtx.SLIME_BOX_FULL}, report));
+        ops.addAll(orderOps(new int[]{ctx.collectSlot, ctx.collectSlot + 1}, report));
 
         if (ops.isEmpty()) {
-            ChatUtils.debug("盒子数量本来就是递减的，不用换");
+            ChatUtils.debug("盒子顺序本来就是递减的（" + String.join("，", report) + "）");
             return;
         }
-        ChatUtils.info("盒子数量不是递减的，调换一下顺序");
+
+        ChatUtils.info("盒子数量不是递减的，调换一下顺序（" + String.join("，", report) + "）");
         queue.child("调换盒子顺序", () -> new SingleStageInventoryAction(ctx, ops));
+        // 换完再复核一遍
+        queue.sync("复核盒子顺序", this::queueFixOrder);
     }
 
-    /** 让这几格按「多 → 少」排好，返回要做的调换操作（冒泡，几格而已）。 */
-    private List<SingleStageInventoryAction.Op> orderOps(int[] slots) {
+    /**
+     * 让这几格按「多 → 少」排好，返回要做的交换操作（冒泡，几格而已）。
+     *
+     * @param report 顺便把「第几格 = 多少个」记下来，日志里好定位
+     */
+    private List<SingleStageInventoryAction.Op> orderOps(int[] slots, List<String> report) {
         List<SingleStageInventoryAction.Op> ops = new ArrayList<>();
         int n = slots.length;
         int[] cur = slots.clone();
         int[] counts = new int[n];
         for (int i = 0; i < n; i++) counts[i] = boxItems(cur[i]);
 
+        StringBuilder line = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            if (i > 0) line.append('/');
+            line.append(cur[i]).append('=').append(counts[i]);
+        }
+        report.add(line.toString());
+
         for (int pass = 0; pass < n; pass++) {
             boolean swapped = false;
             for (int i = 0; i + 1 < n; i++) {
                 if (counts[i] >= counts[i + 1]) continue;
 
-                int temp = firstFreeHotbar();
-                if (temp < 0) return ops;          // 没地方周转，先这样
+                List<SingleStageInventoryAction.Op> swap = swapOps(cur[i], cur[i + 1]);
+                if (swap.isEmpty()) return ops;      // 没地方周转，先这样
 
-                // a → 临时格，b → a，临时格 → b
-                ops.add(SingleStageInventoryAction.move(cur[i], temp));
-                ops.add(SingleStageInventoryAction.move(cur[i + 1], cur[i]));
-                ops.add(SingleStageInventoryAction.move(temp, cur[i + 1]));
-
+                ops.addAll(swap);
                 int c = counts[i];
                 counts[i] = counts[i + 1];
                 counts[i + 1] = c;
@@ -172,6 +193,19 @@ class SingleStageTeardown extends SingleStageStep {
             if (!swapped) break;
         }
         return ops;
+    }
+
+    /**
+     * 交换物品栏里两格的三个操作（用 SWAP 点格子，不碰光标）：
+     * {@code a↔h}、{@code b↔h}、{@code a↔h}，{@code h} 是一格空的快捷栏。
+     */
+    private List<SingleStageInventoryAction.Op> swapOps(int a, int b) {
+        int hotbar = firstFreeHotbar();
+        if (hotbar < 0) return List.of();
+        return List.of(
+            SingleStageInventoryAction.swap(a, hotbar),
+            SingleStageInventoryAction.swap(b, hotbar),
+            SingleStageInventoryAction.swap(a, hotbar));
     }
 
     private int boxItems(int slot) {

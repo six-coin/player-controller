@@ -54,8 +54,8 @@ class SingleStageStage2 extends SingleStageStep {
     /** 落地之后至少待这么多 tick 再判断「挖完了」（给 mine simple 一点启动时间）。 */
     private static final int SETTLE_TICKS = 5;
 
-    /** 附近有沙砾的时候，挖完之后等多久让它落下来（1 秒）。 */
-    private static final int GRAVEL_WAIT_TICKS = 20;
+    /** 目标区域里还有沙砾的时候，挖完之后等多久让它落下来（0.5 秒）。 */
+    private static final int GRAVEL_WAIT_TICKS = 10;
 
     private enum Phase {
         /** 挖，挖不动了就去下一个点。 */
@@ -199,9 +199,10 @@ class SingleStageStage2 extends SingleStageStep {
         quietTicks = 0;
         settledTicks = 0;
 
-        // 这一站挖完了：先看看附近有没有沙砾 —— 沙砾会往下掉，掉进区域里得再挖一次，
-        // 所以先别走，等 1 秒让它落稳，再让 mine simple 把它挖掉，然后才去下一个点
-        if (!gravelChecked && hasGravel(mc)) {
+        // 这一站挖完了：先看看**目标区域里**还有没有沙砾 —— 沙砾会往下掉，掉进区域里得再挖一次，
+        // 所以先别走，等 0.5 秒让它落稳，再让 mine simple 把它挖掉，然后才去下一个点
+        // （只有区域里有沙砾才等；外面 / 附近的不等）
+        if (!gravelChecked && regionHasGravel(mc)) {
             gravelChecked = true;
             gravelWait = GRAVEL_WAIT_TICKS;
             ChatUtils.debug(phase() + "：附近有沙砾，等它落下来再走");
@@ -225,21 +226,10 @@ class SingleStageStage2 extends SingleStageStep {
         startChild(new SingleStageSnapAction(ctx, next), Phase.MINE);
     }
 
-    /** 触及范围内有没有沙砾（沙砾会往下掉，掉进区域就得再挖一次）。 */
-    private boolean hasGravel(MinecraftClient mc) {
-        BlockPos here = PlayerUtils.currentBlockPos();
-        if (here == null) return false;
-
-        BlockPos.Mutable pos = new BlockPos.Mutable();
-        for (int dx = -5; dx <= 5; dx++) {
-            for (int dy = -5; dy <= 5; dy++) {
-                for (int dz = -5; dz <= 5; dz++) {
-                    pos.set(here.getX() + dx, here.getY() + dy, here.getZ() + dz);
-                    if (!mc.world.getBlockState(pos).isOf(Blocks.GRAVEL)) continue;
-                    if (!PlayerUtils.isWithinReach(pos)) continue;
-                    return true;
-                }
-            }
+    /** **目标区域里**还有没有沙砾（沙砾会往下掉，掉进区域就得再挖一次）。 */
+    private boolean regionHasGravel(MinecraftClient mc) {
+        for (BlockPos pos : ctx.regionCells(iteration)) {
+            if (mc.world.getBlockState(pos).isOf(Blocks.GRAVEL)) return true;
         }
         return false;
     }
