@@ -27,8 +27,8 @@ import java.util.List;
  * <ol>
  *   <li>把 mine simple 的范围设成目标区域（{@link MineManager#startTransient}，不写 mine.json）；</li>
  *   <li>snap 到走位层的 1 1；</li>
- *   <li>挖到「附近没东西可挖了」就挪窝：挑**还能挖到东西的、离当前位置最远**的那一格
- *       （走位层 16×16 都是空气，随便挑）；</li>
+ *   <li>挖到「附近没东西可挖了」就挪窝：挑**能挖到最多方块的那一格**，一样多就取**离当前位置最近**的
+ *       （走位层 16×16 都是空气，随便挑，不做 snap 检查）；</li>
  *   <li>目标区域里没有 mine simple 会挖的方块了 → 停掉 mine simple。</li>
  * </ol>
  *
@@ -221,7 +221,7 @@ class SingleStageStage2 extends SingleStageStep {
             return;
         }
 
-        BlockPos next = farthestUseful(mc, remaining);
+        BlockPos next = bestNext(mc, remaining);
         if (next == null) {
             if (count > 0) {
                 ChatUtils.error(phase() + "：走位层上已经没有能挖到东西的位置了，先停下（区域里还剩 "
@@ -235,19 +235,19 @@ class SingleStageStage2 extends SingleStageStep {
     }
 
     /**
-     * 走位层里「还能挖到东西、而且离当前位置最远」的那一格。
+     * 走位层里「能挖到最多方块、而且离当前位置最近」的那一格。
      *
-     * <p>走位层是清过的（全是空气），所以不做 snap 检查，直接按距离挑。
+     * <p>走位层是清过的（全是空气），所以不做 snap 检查，直接按「能挖到几个 → 距离」挑。
      *
      * @param remaining 区域里还没挖掉的方块
      * @return 没有就返回 null（说明剩下的方块从走位层哪个位置都够不着了）
      */
     @Nullable
-    private BlockPos farthestUseful(MinecraftClient mc, List<BlockPos> remaining) {
+    private BlockPos bestNext(MinecraftClient mc, List<BlockPos> remaining) {
         BlockPos here = PlayerUtils.currentBlockPos();
         if (here == null || remaining.isEmpty()) return null;
 
-        record Stand(BlockPos pos, double distance) {
+        record Stand(BlockPos pos, int cover, double distance) {
         }
 
         List<Stand> candidates = new ArrayList<>();
@@ -255,24 +255,31 @@ class SingleStageStage2 extends SingleStageStep {
             for (int z = 0; z < 16; z++) {
                 BlockPos stand = ctx.routePoint(walkLayer, x, z);
                 if (stand.equals(here)) continue;
-                if (!useful(stand, remaining)) continue;
-                candidates.add(new Stand(stand, here.getSquaredDistance(stand)));
+
+                int cover = 0;
+                for (BlockPos pos : remaining) {
+                    if (reachable(stand, pos)) cover++;
+                }
+                if (cover == 0) continue;
+                candidates.add(new Stand(stand, cover, here.getSquaredDistance(stand)));
             }
         }
         if (candidates.isEmpty()) return null;
 
-        candidates.sort(Comparator.comparingDouble(Stand::distance).reversed());
-        return candidates.get(0).pos();
+        // 能挖到的方块最多的优先；一样多就取离得最近的
+        candidates.sort(Comparator.comparingInt(Stand::cover).reversed()
+            .thenComparingDouble(Stand::distance));
+        Stand best = candidates.get(0);
+        ChatUtils.debug(phase() + "：下一站 " + best.pos().toShortString() + " 能挖到 "
+            + best.cover() + " 个");
+        return best.pos();
     }
 
-    /** 站在 {@code stand} 还能挖到 {@code remaining} 里的方块吗。 */
-    private static boolean useful(BlockPos stand, List<BlockPos> remaining) {
-        for (BlockPos pos : remaining) {
-            int dx = pos.getX() - stand.getX();
-            int dz = pos.getZ() - stand.getZ();
-            if (dx * dx + dz * dz <= REACH * REACH) return true;
-        }
-        return false;
+    /** 站在 {@code stand} 挖得到 {@code pos} 吗（水平距离够近就算，竖直方向反正只差 2~3 格）。 */
+    private static boolean reachable(BlockPos stand, BlockPos pos) {
+        int dx = pos.getX() - stand.getX();
+        int dz = pos.getZ() - stand.getZ();
+        return dx * dx + dz * dz <= REACH * REACH;
     }
 
     /** 区域里还没挖掉的方块（mine simple 眼里的「有东西」：非空气、非流体）。 */

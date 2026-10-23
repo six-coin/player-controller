@@ -91,11 +91,6 @@ class SingleStageSetup extends SingleStageStep {
             queuePlaceBox(ctx.cobbleSpotB(), slots.get(1), "圆石", true);
         });
 
-        // 建平台的时候人贴着平台飞，旁边有东西很容易被吸进「该空」的格子里
-        // （吸进来以后放盒子、卸货全都会对不上），所以先清一遍。
-        // 必须在「取圆石」之前：快捷栏第 6 格待会儿要装搭平台用的圆石。
-        queue.sync("清掉该空的格子", this::queueCleanJunk);
-
         queue.sync("取圆石搭平台", this::queueTakeCobble);
 
         queue.sync("搭平台", () -> {
@@ -109,6 +104,11 @@ class SingleStageSetup extends SingleStageStep {
                 List.of(ctx.marker()), COBBLE, new int[]{SingleStageCtx.HOTBAR_FREE_1},
                 new int[0], "圆石"));
         });
+
+        // 建平台的时候人贴着平台飞，旁边有东西很容易被吸进「该空」的格子里
+        // （吸进来以后放盒子、卸货全都会对不上）。**一定要等平台建完再扔**：
+        // 一边扔一边搭的话，扔东西的动作会把搭到一半的平台打断。
+        queue.sync("清掉该空的格子", this::queueCleanJunk);
 
         queue.sync("放收集盒", this::queuePlaceCollectBoxes);
     }
@@ -151,7 +151,9 @@ class SingleStageSetup extends SingleStageStep {
      * 「该空」的格子里有东西就低头扔掉。
      *
      * <p>建平台的时候人就贴着平台飞，旁边掉的东西（上一轮留下的圆石、挖下来的杂物）很容易被吸进来；
-     * 一旦占了快捷栏 6~8 / 背包 22~27，后面放盒子、卸货、扔垃圾全会对不上，所以先清一遍。
+     * 一旦占了快捷栏 6~8 / 背包 22~27，后面放盒子、卸货、扔垃圾全会对不上。
+     *
+     * <p><b>只在平台建完之后扔</b>：搭到一半去扔东西会把流程打断（而且圆石刚拿好，扔了就更搭不成了）。
      */
     private void queueCleanJunk() {
         List<Integer> junk = new ArrayList<>();
@@ -160,7 +162,7 @@ class SingleStageSetup extends SingleStageStep {
         }
         if (junk.isEmpty()) return;
 
-        ChatUtils.info("搭平台前先扔掉 " + junk.size() + " 格里不该有的东西");
+        ChatUtils.info("平台建完了，扔掉 " + junk.size() + " 格里多出来的东西");
         queue.child("扔掉多出来的东西",
             () -> new SingleStageThrowAction(ctx, junk, "多出来的东西"));
     }
