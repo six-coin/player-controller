@@ -77,6 +77,9 @@ class SingleStageSetup extends SingleStageStep {
         queue.child("snap 到临时站立点",
             () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
 
+        // 快捷栏 6~8 被占着的话，放盒子时找不到空的快捷栏格，整个任务都开不了头 —— 直接扔掉
+        queue.sync("清掉快捷栏 6~8", this::queueCleanHotbar);
+
         queue.sync("放粘液块盒", () -> {
             List<Integer> slots = chooseTwo(SingleStageCtx.SLIME_BOX_A,
                 SingleStageCtx.SLIME_BOX_B, SingleStageCtx.SLIME_BOX_FULL, SLIME_NEED);
@@ -145,6 +148,19 @@ class SingleStageSetup extends SingleStageStep {
         int total = 0;
         for (ItemStack stack : ShulkerUtils.contents(ctx.live(slot))) total += stack.getCount();
         return total;
+    }
+
+    /** 快捷栏 6~8 有东西就低头扔掉（开局那三格必须是空的）。 */
+    private void queueCleanHotbar() {
+        List<Integer> junk = new ArrayList<>();
+        for (int slot = SingleStageCtx.HOTBAR_FREE_1; slot <= SingleStageCtx.HOTBAR_FREE_3; slot++) {
+            if (!ctx.live(slot).isEmpty()) junk.add(slot);
+        }
+        if (junk.isEmpty()) return;
+
+        ChatUtils.info("快捷栏 6~8 有 " + junk.size() + " 格东西，先扔掉");
+        queue.child("扔掉快捷栏 6~8 的东西",
+            () -> new SingleStageThrowAction(ctx, junk, "快捷栏 6~8 的东西"));
     }
 
     /**

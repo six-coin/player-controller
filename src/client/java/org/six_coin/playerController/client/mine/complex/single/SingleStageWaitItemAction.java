@@ -25,15 +25,27 @@ class SingleStageWaitItemAction extends SingleStageStep {
 
     private final List<ItemStack> contents;
     private final Map<Integer, String> before;
+    /** true = 不接受「挖之前就是同样内容」的格子（挖空盒时用，见 {@link SingleStageCtx#findPickedBoxStrict}）。 */
+    private final boolean strict;
 
     private int ticks;
     private int slot = -1;
 
     SingleStageWaitItemAction(SingleStageCtx ctx, List<ItemStack> contents,
                               Map<Integer, String> before) {
+        this(ctx, contents, before, false);
+    }
+
+    SingleStageWaitItemAction(SingleStageCtx ctx, List<ItemStack> contents,
+                              Map<Integer, String> before, boolean strict) {
         super(ctx);
         this.contents = List.copyOf(contents);
         this.before = Map.copyOf(before);
+        this.strict = strict;
+    }
+
+    private int find() {
+        return strict ? ctx.findPickedBoxStrict(before, contents) : ctx.findPickedBox(before, contents);
     }
 
     /** 吸到的那一格；没吸到是 -1。 */
@@ -53,7 +65,7 @@ class SingleStageWaitItemAction extends SingleStageStep {
             fail("玩家不存在");
             return;
         }
-        slot = ctx.findPickedBox(before, contents);
+        slot = find();
         if (slot >= 0) {
             ChatUtils.debug("盒子已经在物品栏第 " + slot + " 格了");
             finish();
@@ -68,7 +80,7 @@ class SingleStageWaitItemAction extends SingleStageStep {
             return;
         }
 
-        slot = ctx.findPickedBox(before, contents);
+        slot = find();
         if (slot >= 0) {
             ChatUtils.debug("吸到盒子了（物品栏第 " + slot + " 格，" + (ticks + 1) + " tick）");
             finish();

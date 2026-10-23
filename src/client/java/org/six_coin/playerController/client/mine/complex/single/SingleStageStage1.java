@@ -15,10 +15,12 @@ import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.stock.MineBlockAction;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
+import org.six_coin.playerController.client.util.ShulkerUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -59,6 +61,9 @@ class SingleStageStage1 extends SingleStageStep {
     /** 一阶段里最多回盒子补几次粘液块。 */
     private static final int MAX_REFILLS = 6;
 
+    /** 一阶段里最多换几次盒子（把放着的空盒换成背包里的备用盒）。 */
+    private static final int MAX_SWAPS = 3;
+
     /** 放粘液块时可以用的快捷栏格（快捷栏 6~8）。 */
     private static final int[] HOTBAR_SLOTS = {SingleStageCtx.HOTBAR_FREE_1,
         SingleStageCtx.HOTBAR_FREE_2, SingleStageCtx.HOTBAR_FREE_3};
@@ -90,6 +95,10 @@ class SingleStageStage1 extends SingleStageStep {
         REFILL_UP,
         /** 再从 1 1 飞回临时站立点。 */
         REFILL_GO,
+        /** 补完货：看看盒子是不是已经空了。 */
+        REFILL_CHECK,
+        /** 盒子空了：把放着的那盒换成背包里的备用盒。 */
+        SWAP,
         /** 补完货先飞回走位层的 1 1。 */
         REFILL_BACK,
         /** 再从 1 1 飞回原来那个位置。 */
@@ -128,6 +137,16 @@ class SingleStageStage1 extends SingleStageStep {
     /** 补货时要飞回的位置。 */
     private BlockPos refillReturn;
     private int refills;
+    private int swaps;
+
+    /** 换盒子那一小串步骤（挖掉 → 吸进来 → 放备用盒 → 换格）；每次换都新建一个。 */
+    @Nullable
+    private SingleStageQueue swapQueue;
+    private boolean swapping;
+    private BlockPos swapSpot;
+    private List<ItemStack> swapContents = List.of();
+    private Map<Integer, String> swapBefore = Map.of();
+    private int swapReserve = -1;
 
 
     /** 这一轮要挖的含水方块。 */
@@ -284,6 +303,32 @@ class SingleStageStage1 extends SingleStageStep {
                     startChild(new SingleStageSnapAction(ctx, ctx.standPoint()), Phase.TAKE);
                     return;
                 }
+                case REFILL_CHECK -> {
+                    if (swaps < MAX_SWAPS && needSwap()) {
+                        swaps++;
+                        phase = Phase.SWAP;
+                    } else {
+                        phase = Phase.REFILL_BACK;
+                    }
+                }
+                case SWAP -> {
+                    if (!swapping) {
+                        swapping = true;
+                        buildSwapPlan();
+                    }
+                    if (!swapQueue.tick()) return;
+                    if (swapQueue.failed() != null) {
+                        fail(swapQueue.failed().failureReason());
+                        return;
+                    }
+                    swapping = false;
+                    // 换上新盒子之后再拿一次
+                    boxes = boxesLeastFull();
+                    boxIndex = 1;
+                    afterTake = Phase.REFILL_CHECK;
+                    phase = Phase.TAKE;
+                    return;
+                }
                 case REFILL_BACK -> {
                     // 回程一样要经过 1 1：从临时站立点直接飞矿洞深处可能没有沿轴的路
                     startChild(new SingleStageSnapAction(ctx, ctx.routePoint(walkLayer, 1, 1)),
@@ -337,7 +382,7 @@ class SingleStageStage1 extends SingleStageStep {
                 refillReturn = here;
                 boxes = boxesLeastFull();
                 boxIndex = 1;
-                afterTake = Phase.REFILL_BACK;
+                afterTake = Phase.REFILL_CHECK;
                 phase = Phase.REFILL_UP;
                 ChatUtils.info(phase() + "：粘液块用完了，回去补一趟（盒子里还有 " + left + " 个）");
                 return true;
@@ -554,6 +599,92 @@ class SingleStageStage1 extends SingleStageStep {
         List<BlockPos> sorted = new ArrayList<>(List.of(ctx.slimeSpotA(), ctx.slimeSpotB()));
         sorted.sort(Comparator.comparingInt(ctx.data::boxItems));
         return sorted;
+    }
+
+    // ------------------------------------------------------------------
+    // 盒子空了：把放着的那盒换成背包里的备用盒
+    // ------------------------------------------------------------------
+
+    /** 放着的两盒都空了、而背包里还有一盒有货 → 该换了。 */
+    private boolean needSwap() {
+        int left = ctx.data.boxItems(ctx.slimeSpotA()) + ctx.data.boxItems(ctx.slimeSpotB());
+        return left <= 0 && fullestSlimeBoxSlot() >= 0;
+    }
+
+    /** 背包 9 / 10 / 11 里内容最多的那盒粘液块；都空就返回 -1。 */
+    private int fullestSlimeBoxSlot() {
+        int best = -1;
+        int bestItems = 0;
+        for (int slot : new int[]{SingleStageCtx.SLIME_BOX_A, SingleStageCtx.SLIME_BOX_B,
+            SingleStageCtx.SLIME_BOX_FULL}) {
+            int items = 0;
+            for (ItemStack stack : ShulkerUtils.contents(ctx.live(slot))) items += stack.getCount();
+            if (items > bestItems) {
+                bestItems = items;
+                best = slot;
+            }
+        }
+        return best;
+    }
+
+    private int firstFreeHotbar() {
+        for (int slot = SingleStageCtx.HOTBAR_FREE_1; slot <= SingleStageCtx.HOTBAR_FREE_3; slot++) {
+            if (ctx.live(slot).isEmpty()) return slot;
+        }
+        return -1;
+    }
+
+    /** 换盒子的那一串：挖掉最空的那盒 → 吸进来 → 把背包里最多的那盒放上去 → 挖下来的装回背包。 */
+    private void buildSwapPlan() {
+        swapQueue = new SingleStageQueue();
+        swapSpot = boxesLeastFull().get(0);
+        swapContents = new ArrayList<>(ctx.data.box(swapSpot));
+        swapBefore = ctx.boxSignatures();
+        swapReserve = fullestSlimeBoxSlot();
+
+        ChatUtils.info(phase() + "：盒子里的粘液块不够了，把 " + swapSpot.toShortString()
+            + " 换成背包第 " + swapReserve + " 格那盒");
+
+        swapQueue.child("挖掉 " + swapSpot.toShortString(),
+            () -> new MineBlockAction(swapSpot, SingleStageCtx.HOTBAR_PICKAXE));
+        swapQueue.child("snap 到 " + swapSpot.toShortString(),
+            () -> new SingleStageSnapAction(ctx, swapSpot));
+        swapQueue.child("等物品栏吸到盒子",
+            () -> new SingleStageWaitItemAction(ctx, swapContents, swapBefore, true));
+        swapQueue.child("snap 回临时站立点",
+            () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
+        swapQueue.sync("换上新盒子", this::queuePlaceReserve);
+    }
+
+    private void queuePlaceReserve() {
+        int found = ctx.findPickedBoxStrict(swapBefore, swapContents);
+        if (found < 0) {
+            fail("找不到刚挖下来的粘液块盒（" + swapSpot.toShortString() + "）");
+            swapQueue.cancel();
+            return;
+        }
+        if (swapReserve < 0) {
+            fail("背包里没有能顶上的粘液块盒了");
+            swapQueue.cancel();
+            return;
+        }
+        int hotbar = firstFreeHotbar();
+        if (hotbar < 0) {
+            fail("快捷栏 6~8 都占着，没地方放备用盒");
+            swapQueue.cancel();
+            return;
+        }
+
+        List<ItemStack> newContents = SingleStageData.contentsOf(ctx.live(swapReserve));
+        swapQueue.child("把备用盒挪到快捷栏第 " + (hotbar + 1) + " 格",
+            () -> new SingleStageInventoryAction(ctx,
+                List.of(SingleStageInventoryAction.move(swapReserve, hotbar))));
+        swapQueue.child("放到 " + swapSpot.toShortString(),
+            () -> new SingleStagePlaceAction(ctx, swapSpot, hotbar));
+        swapQueue.sync("记缓存", () -> ctx.data.setBox(swapSpot, newContents));
+        swapQueue.child("把挖下来的盒子挪到背包第 " + swapReserve + " 格",
+            () -> new SingleStageInventoryAction(ctx,
+                List.of(SingleStageInventoryAction.move(found, swapReserve))));
     }
 
     /** 挖这个方块该用快捷栏第几格（剑镐斧铲锄，下标 0~4）。 */

@@ -473,6 +473,24 @@ public final class SingleStageCtx {
         return fallback;
     }
 
+    /**
+     * 和 {@link #findPickedBox} 一样，但**不接受**「挖之前这一格就是同样内容」的格子。
+     *
+     * <p>挖一个**空盒**的时候用：物品栏里本来就可能有别的空盒（背包 10 / 11 常常是空的），
+     * 宽松版会立刻认成「已经吸到了」，结果拿错盒子。
+     */
+    public int findPickedBoxStrict(Map<Integer, String> before, List<ItemStack> contents) {
+        String want = signature(contents);
+        for (int slot = 0; slot <= FILLER_END; slot++) {
+            ItemStack stack = live(slot);
+            if (!ShulkerUtils.isShulkerBox(stack)) continue;
+            if (!signature(ShulkerUtils.contents(stack)).equals(want)) continue;
+            String was = before.get(slot);
+            if (was == null || !was.equals(want)) return slot;
+        }
+        return -1;
+    }
+
     /** 一盒东西的指纹：物品 id -> 个数（顺序无关，方便比较）。 */
     public static String signature(List<ItemStack> contents) {
         Map<String, Integer> counts = new TreeMap<>();
