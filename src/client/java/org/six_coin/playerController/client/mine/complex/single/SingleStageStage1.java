@@ -40,8 +40,10 @@ import java.util.function.Predicate;
  *         <li>「目标区域」里面：**只替换水和熔岩**（空气 / 草 / 藤蔓不碰，反正马上要挖掉）；</li>
  *       </ul>
  *       含水方块照旧在全量目标区域（区域 + 壳）里找；</li>
- *   <li>粘液块用完了会自动补一趟：先 snap 回走位层的 1 1、再回临时站立点开盒子拿，
- *       然后飞回原来的位置接着补；</li>
+ *   <li>粘液块用完了会自动补一趟：先 snap 回走位层的 1 1、再回临时站立点开盒子拿
+ *       （**每次只拿 6 组**，装进背包 22~27，快捷栏 6~8 留空），然后飞回原来的位置接着补。
+ *       盒子里的不够 6 组就把剩下的全拿出来，再换一盒（背包里那盒最多的）；
+ *       换盒前快捷栏 6~8 要是被占着，先跑去圆石那儿把垃圾扔了。多出来的最后会放回盒子；</li>
  *   <li>「下一个位置」的挑法：在走位层（目标区域上面那一层）的 256 个格子里，
  *       找**能放的洞最多**的那一个；一样多就取**离当前位置最近**的；还要走得过去
  *       （snap 得通）。一个都挑不出来（剩下的洞哪个位置都放不了）就结束这一阶段；</li>
@@ -52,14 +54,19 @@ import java.util.function.Predicate;
  */
 class SingleStageStage1 extends SingleStageStep {
 
-    /** 从盒子里拿几组粘液块。 */
-    private static final int SLIME_STACKS = 9;
+    /**
+     * 一次拿几组粘液块。
+     *
+     * <p>6 组 = 背包 22~27 这六格，**快捷栏 6~8 留空**（放盒子 / 扔垃圾都要用）。
+     * 不用估「还剩多少地方要补」，每次拿满 6 组就行，多出来的最后会放回盒子。
+     */
+    private static final int SLIME_STACKS = 6;
 
     /** 最多挪几次窝（防止「怎么放都放不上」的时候空转）。 */
     private static final int MAX_STOPS = 64;
 
-    /** 一阶段里最多回盒子补几次粘液块。 */
-    private static final int MAX_REFILLS = 6;
+    /** 一阶段里最多回盒子补几次粘液块（一次只拿 6 组，所以给得宽一点）。 */
+    private static final int MAX_REFILLS = 12;
 
     /** 一阶段里最多换几次盒子（把放着的空盒换成背包里的备用盒）。 */
     private static final int MAX_SWAPS = 3;
@@ -97,7 +104,9 @@ class SingleStageStage1 extends SingleStageStep {
         REFILL_GO,
         /** 补完货：看看盒子是不是已经空了。 */
         REFILL_CHECK,
-        /** 盒子空了：把放着的那盒换成背包里的备用盒。 */
+        /** 快捷栏 6~8 被占着：先跑去圆石那儿把垃圾扔了。 */
+        JUNK,
+        /** 盒子里的不够了：把放着的那盒换成背包里的备用盒。 */
         SWAP,
         /** 补完货先飞回走位层的 1 1。 */
         REFILL_BACK,
@@ -147,6 +156,11 @@ class SingleStageStage1 extends SingleStageStep {
     private List<ItemStack> swapContents = List.of();
     private Map<Integer, String> swapBefore = Map.of();
     private int swapReserve = -1;
+
+    /** 扔垃圾那一小串步骤；每次扔都新建一个。 */
+    @Nullable
+    private SingleStageQueue junkQueue;
+    private boolean junking;
 
 
     /** 这一轮要挖的含水方块。 */
@@ -304,12 +318,30 @@ class SingleStageStage1 extends SingleStageStep {
                     return;
                 }
                 case REFILL_CHECK -> {
-                    if (swaps < MAX_SWAPS && needSwap()) {
+                    if (!shortAfterTake() || swaps >= MAX_SWAPS || fullestSlimeBoxSlot() < 0) {
+                        // 拿满了 / 换过太多次 / 背包里没备用盒了 → 回去接着补
+                        phase = Phase.REFILL_BACK;
+                    } else if (firstFreeHotbar() < 0) {
+                        // 快捷栏 6~8 被占着（放备用盒要一格空的）：先把垃圾扔了
+                        phase = Phase.JUNK;
+                    } else {
                         swaps++;
                         phase = Phase.SWAP;
-                    } else {
-                        phase = Phase.REFILL_BACK;
                     }
+                }
+                case JUNK -> {
+                    if (!junking) {
+                        junking = true;
+                        buildJunkPlan();
+                    }
+                    if (!junkQueue.tick()) return;
+                    if (junkQueue.failed() != null) {
+                        fail(junkQueue.failed().failureReason());
+                        return;
+                    }
+                    junking = false;
+                    swaps++;
+                    phase = Phase.SWAP;
                 }
                 case SWAP -> {
                     if (!swapping) {
@@ -448,11 +480,9 @@ class SingleStageStage1 extends SingleStageStep {
         return wants;
     }
 
+    /** 拿粘液块用的格子：只有背包 22~27（6 组），快捷栏 6~8 留着别占。 */
     private static List<Integer> slimeSlots() {
         List<Integer> slots = new ArrayList<>();
-        slots.add(SingleStageCtx.HOTBAR_FREE_1);
-        slots.add(SingleStageCtx.HOTBAR_FREE_2);
-        slots.add(SingleStageCtx.HOTBAR_FREE_3);
         for (int i = SingleStageCtx.FILLER_START; i <= SingleStageCtx.FILLER_END; i++) slots.add(i);
         return slots;
     }
@@ -605,10 +635,38 @@ class SingleStageStage1 extends SingleStageStep {
     // 盒子空了：把放着的那盒换成背包里的备用盒
     // ------------------------------------------------------------------
 
-    /** 放着的两盒都空了、而背包里还有一盒有货 → 该换了。 */
-    private boolean needSwap() {
-        int left = ctx.data.boxItems(ctx.slimeSpotA()) + ctx.data.boxItems(ctx.slimeSpotB());
-        return left <= 0 && fullestSlimeBoxSlot() >= 0;
+    /**
+     * 这一轮没拿满 6 组（盒子里的不够了）。
+     *
+     * <p>判据很土：拿完之后背包 22~27 还有空格 → 说明没拿够。
+     */
+    private boolean shortAfterTake() {
+        for (int slot = SingleStageCtx.FILLER_START; slot <= SingleStageCtx.FILLER_END; slot++) {
+            if (ctx.live(slot).isEmpty()) return true;
+        }
+        return false;
+    }
+
+    /** 快捷栏 6~8 里还有东西 → 先扔垃圾腾地方（换盒子要用一格空的快捷栏）。 */
+    private void buildJunkPlan() {
+        junkQueue = new SingleStageQueue();
+
+        List<Integer> junk = new ArrayList<>();
+        for (int slot = SingleStageCtx.HOTBAR_FREE_1; slot <= SingleStageCtx.HOTBAR_FREE_3; slot++) {
+            if (!ctx.live(slot).isEmpty()) junk.add(slot);
+        }
+        if (junk.isEmpty()) return;
+
+        ChatUtils.info(phase() + "：快捷栏 6~8 被占着，先去把垃圾扔了");
+        BlockPos high = ctx.initialMin.add(6, 14, 6);
+        BlockPos drop = ctx.initialMin.add(4, 14, 4);
+
+        junkQueue.child("snap 到 6 14 6", () -> new SingleStageSnapAction(ctx, high));
+        junkQueue.child("snap 到 4 14 4", () -> new SingleStageSnapAction(ctx, drop));
+        junkQueue.child("低头扔掉", () -> new SingleStageThrowAction(ctx, junk, "快捷栏 6~8 的东西"));
+        junkQueue.child("snap 回 6 14 6", () -> new SingleStageSnapAction(ctx, high));
+        junkQueue.child("snap 回临时站立点",
+            () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
     }
 
     /** 背包 9 / 10 / 11 里内容最多的那盒粘液块；都空就返回 -1。 */
