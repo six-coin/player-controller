@@ -45,8 +45,8 @@ import java.util.function.Predicate;
  */
 class SingleStageStage3 extends SingleStageStep {
 
-    /** 同一个掉落物连着这么多次都捡不到就先跳过（免得死循环）。 */
-    private static final int MAX_REPEATS = 5;
+    /** 同一个掉落物连着这么多次都没捡到就先跳过（免得死循环；捡起来是瞬发的，一般两三次就没了）。 */
+    private static final int MAX_REPEATS = 8;
 
     /** 保险丝：一次卸货算一轮，太多轮说明卡住了。 */
     private static final int MAX_UNLOADS = 200;
