@@ -490,6 +490,17 @@ public final class SingleStageCtx {
     public static final int PLACE_RANGE = 3;
 
     /**
+     * 站在 {@code stand} 这一格的时候，{@code pos} 放不放得上去。
+     *
+     * <p>规则见 {@link #canPlaceAt}：以脚下那格为中心 7×7×7 的正方体。
+     */
+    public static boolean canPlaceFrom(BlockPos stand, BlockPos pos) {
+        return Math.abs(pos.getX() - stand.getX()) <= PLACE_RANGE
+            && Math.abs(pos.getY() - stand.getY()) <= PLACE_RANGE
+            && Math.abs(pos.getZ() - stand.getZ()) <= PLACE_RANGE;
+    }
+
+    /**
      * 这个位置现在放不放得上去。
      *
      * <p><b>不用 {@code actions.reach}</b>：需求里实测服务端那边松得多（7 格都能放），
@@ -498,9 +509,6 @@ public final class SingleStageCtx {
      */
     public boolean canPlaceAt(BlockPos pos) {
         BlockPos here = PlayerUtils.currentBlockPos();
-        if (here == null) return false;
-        return Math.abs(pos.getX() - here.getX()) <= PLACE_RANGE
-            && Math.abs(pos.getY() - here.getY()) <= PLACE_RANGE
-            && Math.abs(pos.getZ() - here.getZ()) <= PLACE_RANGE;
+        return here != null && canPlaceFrom(here, pos);
     }
 }
