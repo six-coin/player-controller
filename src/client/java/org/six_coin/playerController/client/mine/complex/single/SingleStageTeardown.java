@@ -1,5 +1,7 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
+import net.minecraft.block.BlockState;
+import net.minecraft.block.FluidBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
@@ -208,7 +210,7 @@ class SingleStageTeardown extends SingleStageStep {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.world == null) return true;
         for (BlockPos cell : ctx.platform()) {
-            if (!mc.world.getBlockState(cell).isAir()) return false;
+            if (!cleared(mc.world.getBlockState(cell))) return false;
         }
         return true;
     }
@@ -216,7 +218,17 @@ class SingleStageTeardown extends SingleStageStep {
     /** 4 5 4 那个圆石是不是挖掉了。 */
     private boolean markerCleared() {
         MinecraftClient mc = MinecraftClient.getInstance();
-        return mc.world == null || mc.world.getBlockState(ctx.marker()).isAir();
+        return mc.world == null || cleared(mc.world.getBlockState(ctx.marker()));
+    }
+
+    /**
+     * 这一格算不算「挖掉了」。
+     *
+     * <p>空气或者流体都算：圆石挖掉之后如果被水 / 熔岩填了，就不是空气了，
+     * 只看空气会一直等到超时。
+     */
+    private static boolean cleared(BlockState state) {
+        return state.isAir() || state.getBlock() instanceof FluidBlock;
     }
 
     @Override

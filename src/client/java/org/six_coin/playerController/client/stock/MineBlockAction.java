@@ -1,5 +1,6 @@
 package org.six_coin.playerController.client.stock;
 
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
@@ -34,6 +35,14 @@ public class MineBlockAction extends Action {
 
     private Direction side = Direction.UP;
     private int mineTicks;
+
+    /**
+     * 挖之前那一格是什么方块。
+     *
+     * <p>判「挖掉了没有」**不能只看空气**：水里的海草 / 海带挖掉之后那一格变成**水**，
+     * 一直不是空气，就会白白等到超时。
+     */
+    private Block original;
 
     public MineBlockAction(BlockPos pos, int hotbarIndex) {
         this.pos = pos.toImmutable();
@@ -82,6 +91,7 @@ public class MineBlockAction extends Action {
         side = PlayerUtils.facingSide(pos);
         RotateManager.get().rotateTo(Owner.STOCK, pos);
 
+        original = state.getBlock();
         ChatUtils.debug("开始挖 %s（%s，面 %s，手上 %s）",
             pos.toShortString(), Registries.BLOCK.getId(state.getBlock()), side.asString(), describe(tool));
         if (!mc.interactionManager.attackBlock(pos, side)) {
@@ -98,8 +108,9 @@ public class MineBlockAction extends Action {
         }
 
         BlockState state = mc.world.getBlockState(pos);
-        if (state.isAir()) {
-            ChatUtils.debug(pos.toShortString() + " 已经挖掉了（用了 " + mineTicks + " tick）");
+        if (broken(state)) {
+            ChatUtils.debug(pos.toShortString() + " 已经挖掉了（用了 " + mineTicks + " tick，现在是 "
+                + Registries.BLOCK.getId(state.getBlock()) + "）");
             finish();
             return;
         }
@@ -120,9 +131,20 @@ public class MineBlockAction extends Action {
 
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.interactionManager == null || mc.world == null) return;
-        if (!mc.world.getBlockState(pos).isAir()) {
+        if (!broken(mc.world.getBlockState(pos))) {
             mc.interactionManager.cancelBlockBreaking();
         }
+    }
+
+    /**
+     * 这一格现在算不算「已经挖掉了」。
+     *
+     * <p>不是空气也算：挖水里的海草 / 海带之后那一格是**水**（不是空气），
+     * 只要「已经不是原来那个方块」就算挖掉了。
+     */
+    private boolean broken(BlockState state) {
+        if (state.isAir()) return true;
+        return original != null && !state.isOf(original);
     }
 
     private static String describe(ItemStack stack) {
