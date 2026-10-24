@@ -931,6 +931,8 @@ public class MineStationCheckAction extends Action {
             entry.add("access_position", accessJson(survey));
             entry.add("usable", kindCountJson(survey, true));
             entry.add("repair", kindCountJson(survey, false));
+            // 具体有哪些物品：d_start_mining 备货时要按它挑「哪个工具缓存里有这种工具」
+            entry.add("items", itemsJson(survey.items()));
             tools.add(String.valueOf(survey.id()), entry);
         }
         root.add("tool_cache", tools);

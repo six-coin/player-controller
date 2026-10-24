@@ -26,6 +26,7 @@ import org.six_coin.playerController.client.mine.MineRegion;
 import org.six_coin.playerController.client.mine.complex.MineComplexManager;
 import org.six_coin.playerController.client.mine.complex.MineRegionInspectAction;
 import org.six_coin.playerController.client.mine.complex.MineTaskRegion;
+import org.six_coin.playerController.client.mine.complex.task.MineTaskMiningAction;
 import org.six_coin.playerController.client.mine.station.MineStationCheckAction;
 import org.six_coin.playerController.client.mine.complex.single.MineComplexSingleStageN;
 import org.six_coin.playerController.client.mine.complex.single.SingleStageDetail;
@@ -65,6 +66,7 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
  *                                            写 region.json（范围原样记下，inspected = false）
  * /pc mine task &lt;task_name&gt; b_inspect_region  检查这个任务的挖掘区
  * /pc mine task &lt;task_name&gt; c_station_check   跑一遍 /pc mine station check，通过就写 checked: true
+ * /pc mine task &lt;task_name&gt; d_start_mining    开始挖（预检查 → 备货 → 按区块逐个挖）
  *                                            （{@code /pc mine complex task <task_name> …} 是同一套）
  * </pre>
  *
@@ -406,6 +408,8 @@ public final class MineCommand {
         source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "task <task_name> c_station_check§7 - 跑挖掘站检查，通过就写 checked: true"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
+            + "task <task_name> d_start_mining§7 - §a开始挖§7（预检查 → 备货 → 按区块逐个挖）"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "debug_chunk_miner <detail>§7 - §c【临时调试】§7挖掉下面那个子区块（detail 是必填的 JSON）"));
         source.sendFeedback(Component.literal("§7    §8例：§f{\"item_collector_list\":[\"minecraft:coal\"],"
             + "\"north\":\"cobblestone\",\"south\":\"cobblestone\",\"west\":\"auto\",\"east\":\"auto\","
@@ -417,8 +421,15 @@ public final class MineCommand {
 
     private static int cancel(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        if (MineManager.get().cancel()) {
-            source.sendFeedback(Component.literal("已取消所有挖掘任务"));
+
+        // 正在跑 d_start_mining 的话，它是一个动作（不是 mine simple），要一起停掉
+        boolean cancelledTask = ActionManager.get().currentAction() instanceof MineTaskMiningAction;
+        boolean stoppedSimple = MineManager.get().cancel();
+        if (cancelledTask) ActionManager.get().cancelAll();
+
+        if (stoppedSimple || cancelledTask) {
+            source.sendFeedback(Component.literal("已取消所有挖掘任务"
+                + (cancelledTask ? "（包括正在跑的 d_start_mining）" : "")));
         } else {
             source.sendFeedback(Component.literal("当前没有挖掘任务"));
         }
@@ -510,6 +521,48 @@ public final class MineCommand {
         return 1;
     }
 
+    /**
+     * {@code /pc mine task <task_name> d_start_mining}：开始挖这个任务。
+     *
+     * <p>这里只做「能不能开始」的快速判断（任务在不在、区域设没设、两个检查过没过），
+     * 剩下的预检查（安全点、物品栏、mending 站立点、check.json …）在
+     * {@link MineTaskMiningAction} 里做 —— 那些要看世界状态，放命令里不合适。
+     */
+    private static int startMining(CommandContext<FabricClientCommandSource> context, String name) {
+        FabricClientCommandSource source = context.getSource();
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
+            return 0;
+        }
+
+        MineComplexManager manager = MineComplexManager.get();
+        if (!manager.has(name)) {
+            source.sendError(Component.literal("没有这个挖掘任务：" + name
+                + "（先 " + ROOT + "complex add_task " + name + "）"));
+            return 0;
+        }
+
+        MineTaskRegion region = manager.region(name);
+        if (region == null) {
+            source.sendError(Component.literal("挖掘任务 " + name + " 还没设区域（"
+                + ROOT + "task " + name + " a_set_region …）"));
+            return 0;
+        }
+        if (!region.inspected() || !region.checked()) {
+            source.sendError(Component.literal("任务 " + name + " 还没准备好（inspected="
+                + region.inspected() + "，checked=" + region.checked() + "）：先跑 "
+                + ROOT + "task " + name + " b_inspect_region 和 c_station_check"));
+            return 0;
+        }
+
+        ActionManager.get().submit(new MineTaskMiningAction(name, region));
+        source.sendFeedback(Component.literal("开始挖掘任务 §f" + name + "§r：" + region.describe()));
+        source.sendFeedback(Component.literal("§7  预检查（安全点 / 物品栏 / mending 站立点 / check.json）→ "
+            + "备货 → 按区块逐个挖；中途要补货时会去站里补一趟"));
+        return 1;
+    }
+
     // ------------------------------------------------------------------
     // debug_chunk_miner
     // ------------------------------------------------------------------
@@ -585,6 +638,8 @@ public final class MineCommand {
             + "task <task_name> b_inspect_region§7 - 检查挖掘区"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "task <task_name> c_station_check§7 - 跑挖掘站检查，通过就写 checked: true"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
+            + "task <task_name> d_start_mining§7 - §a开始挖§7（预检查 → 备货 → 按区块逐个挖）"));
         source.sendFeedback(Component.literal("§7    §8（`complex task <task_name> ...` 是同一套，两种写法都行）"));
         source.sendFeedback(Component.literal("  文件: " + manager.currentFile()));
     }
@@ -684,6 +739,9 @@ public final class MineCommand {
                         StringArgumentType.getString(context, "task_name"))))
                 .then(ClientCommands.literal("c_station_check")
                     .executes(context -> stationCheck(context,
+                        StringArgumentType.getString(context, "task_name"))))
+                .then(ClientCommands.literal("d_start_mining")
+                    .executes(context -> startMining(context,
                         StringArgumentType.getString(context, "task_name")))));
     }
 
@@ -724,6 +782,8 @@ public final class MineCommand {
             + " b_inspect_region§7 - 检查这个区域"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT + "task " + name
             + " c_station_check§7 - 跑挖掘站检查（要先 inspected: true）"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "task " + name
+            + " d_start_mining§7 - §a开始挖§7（要 inspected + checked）"));
         source.sendFeedback(Component.literal("  文件: " + manager.currentRegionFile(name)));
         return 1;
     }

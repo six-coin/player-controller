@@ -2,6 +2,10 @@ package org.six_coin.playerController.client.mine.station;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
@@ -99,7 +103,16 @@ public final class MineStationManager {
         }
 
         try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-            MineStationData loaded = GSON.fromJson(reader, MineStationData.class);
+            JsonElement element = JsonParser.parseReader(reader);
+            if (element == null || !element.isJsonObject()) {
+                throw new IllegalStateException("文件里要是一个 JSON 对象");
+            }
+            JsonObject object = element.getAsJsonObject();
+            // 老文件里 slime_cache / cobblestone_cache 是数组，现在是单点：取第一个，没有就删掉
+            migrateToSingle(object, "slime_cache");
+            migrateToSingle(object, "cobblestone_cache");
+
+            MineStationData loaded = GSON.fromJson(object, MineStationData.class);
             if (loaded != null) data = loaded;
             data.resequence();
             loadedOk = true;
@@ -134,6 +147,27 @@ public final class MineStationManager {
         }
     }
 
+    /**
+     * 老文件里的「列表版」单点字段改成单点：数组就取第一个，空数组就删掉。
+     *
+     * <p>{@code slime_cache} / {@code cobblestone_cache} 以前是列表（{@code add} / {@code del}），
+     * 现在只有一个容器（{@code set} / {@code set_target}）。不迁移的话 Gson 会拿数组去填一个对象，
+     * 直接抛异常、整个 station.json 都读不出来。
+     */
+    private static void migrateToSingle(JsonObject object, String key) {
+        JsonElement element = object.get(key);
+        if (element == null || !element.isJsonArray()) return;
+
+        JsonArray array = element.getAsJsonArray();
+        if (array.isEmpty()) {
+            object.remove(key);
+            ChatUtils.debug("station.json 里 " + key + " 是空数组，已按「没设置」处理");
+            return;
+        }
+        object.add(key, array.get(0));
+        ChatUtils.debug("station.json 里 " + key + " 是旧格式（数组），已取第一个当单点");
+    }
+
     // ------------------------------------------------------------------
     // 查询
     // ------------------------------------------------------------------
@@ -147,6 +181,8 @@ public final class MineStationManager {
             case TOTEM_PROVIDER -> data.totemProvider();
             case EMPTY_SHULKER_BOX_RECYCLER -> data.emptyShulkerBoxRecycler();
             case INVENTORY_TEMP -> data.inventoryTemp();
+            case SLIME_CACHE -> data.slimeCache();
+            case COBBLESTONE_CACHE -> data.cobblestoneCache();
             default -> null;
         };
     }
@@ -156,8 +192,6 @@ public final class MineStationManager {
         return switch (part) {
             case ITEM_COLLECTOR -> List.copyOf(data.itemCollector());
             case TOOL_CACHE -> List.copyOf(data.toolCache());
-            case SLIME_CACHE -> List.copyOf(data.slimeCache());
-            case COBBLESTONE_CACHE -> List.copyOf(data.cobblestoneCache());
             case ITEM_TEMP -> List.copyOf(data.itemTemp());
             case UNLOADING_PLACEMENT -> List.copyOf(data.unloadingShulkerBoxPlacement());
             case SUPPLEMENT_PLACEMENT -> List.copyOf(data.supplementShulkerBoxPlacement());
@@ -210,6 +244,8 @@ public final class MineStationManager {
             case TOTEM_PROVIDER -> data.totemProvider(value);
             case EMPTY_SHULKER_BOX_RECYCLER -> data.emptyShulkerBoxRecycler(value);
             case INVENTORY_TEMP -> data.inventoryTemp(value);
+            case SLIME_CACHE -> data.slimeCache(value);
+            case COBBLESTONE_CACHE -> data.cobblestoneCache(value);
             default -> throw new IllegalArgumentException(part + " 不是单点");
         }
         save();
@@ -264,8 +300,6 @@ public final class MineStationManager {
         return switch (part) {
             case ITEM_COLLECTOR -> data.itemCollector();
             case TOOL_CACHE -> data.toolCache();
-            case SLIME_CACHE -> data.slimeCache();
-            case COBBLESTONE_CACHE -> data.cobblestoneCache();
             case ITEM_TEMP -> data.itemTemp();
             case UNLOADING_PLACEMENT -> data.unloadingShulkerBoxPlacement();
             case SUPPLEMENT_PLACEMENT -> data.supplementShulkerBoxPlacement();

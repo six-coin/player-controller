@@ -16,10 +16,12 @@ public final class MineStationData {
     private MinePlace totem_provider;
     private MinePlace empty_shulker_box_recycler;
     private MinePlace inventory_temp;
+    /** 黏液块缓存：只有一个容器（取货也只有这一处）。 */
+    private MinePlace slime_cache;
+    /** 圆石缓存：只有一个容器（取货也只有这一处）。 */
+    private MinePlace cobblestone_cache;
     private List<MinePlace> item_collector = new ArrayList<>();
     private List<MinePlace> tool_cache = new ArrayList<>();
-    private List<MinePlace> slime_cache = new ArrayList<>();
-    private List<MinePlace> cobblestone_cache = new ArrayList<>();
     private List<MinePlace> item_temp = new ArrayList<>();
     private List<MinePlace> unloading_shulker_box_placement = new ArrayList<>();
     private List<MinePlace> supplement_shulker_box_placement = new ArrayList<>();
@@ -75,14 +77,20 @@ public final class MineStationData {
         return tool_cache;
     }
 
-    List<MinePlace> slimeCache() {
-        if (slime_cache == null) slime_cache = new ArrayList<>();
+    MinePlace slimeCache() {
         return slime_cache;
     }
 
-    List<MinePlace> cobblestoneCache() {
-        if (cobblestone_cache == null) cobblestone_cache = new ArrayList<>();
+    void slimeCache(MinePlace value) {
+        this.slime_cache = value;
+    }
+
+    MinePlace cobblestoneCache() {
         return cobblestone_cache;
+    }
+
+    void cobblestoneCache(MinePlace value) {
+        this.cobblestone_cache = value;
     }
 
     List<MinePlace> itemTemp() {
@@ -116,15 +124,13 @@ public final class MineStationData {
         if (totem_provider != null) totem_provider.id(1);
         if (empty_shulker_box_recycler != null) empty_shulker_box_recycler.id(1);
         if (inventory_temp != null) inventory_temp.id(1);
+        if (slime_cache != null) slime_cache.id(1);
+        if (cobblestone_cache != null) cobblestone_cache.id(1);
 
         int id = 1;
         for (MinePlace place : itemCollector()) place.id(id++);
         id = 1;
         for (MinePlace place : toolCache()) place.id(id++);
-        id = 1;
-        for (MinePlace place : slimeCache()) place.id(id++);
-        id = 1;
-        for (MinePlace place : cobblestoneCache()) place.id(id++);
         id = 1;
         for (MinePlace place : itemTemp()) place.id(id++);
         id = 1;

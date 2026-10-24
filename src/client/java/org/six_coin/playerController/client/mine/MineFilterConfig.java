@@ -28,7 +28,7 @@ import java.util.Set;
  *
  * <pre>
  * config/player-controller/mine/mode.json       {"mode": "blacklist"}          默认黑名单
- * config/player-controller/mine/whitelist.json  ["minecraft:oak_log", …]       默认空
+ * config/player-controller/mine/whitelist.json  ["minecraft:air"]              默认只有空气
  * config/player-controller/mine/blacklist.json  ["minecraft:bedrock"]          默认只有基岩
  * </pre>
  *
@@ -43,6 +43,15 @@ public final class MineFilterConfig {
     private static final String BLACKLIST_FILE = "blacklist.json";
 
     private static final List<String> DEFAULT_BLACKLIST = List.of("minecraft:bedrock");
+
+    /**
+     * 白名单文件不存在时的默认值。
+     *
+     * <p>只有 {@code minecraft:air}：白名单模式的意思就是「只挖表里的方块」，空气本来就不算要挖的，
+     * 所以默认什么都不挖 —— 要用白名单就得自己往里加。这里不做任何特判（空气是不是自动算、
+     * 白名单为空是不是等于全挖），一律按表来。
+     */
+    private static final List<String> DEFAULT_WHITELIST = List.of("minecraft:air");
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -100,7 +109,7 @@ public final class MineFilterConfig {
         }
 
         loadMode();
-        loadBlocks(whitelistFile(), whitelist, List.of());
+        loadBlocks(whitelistFile(), whitelist, DEFAULT_WHITELIST);
         loadBlocks(blacklistFile(), blacklist, DEFAULT_BLACKLIST);
 
         ChatUtils.debug("挖掘过滤器：mode=" + mode.id() + "，白名单 " + whitelist.size()

@@ -99,6 +99,28 @@ public final class SingleStageDetail {
         return itemCollectorList;
     }
 
+    /**
+     * 直接构造一份 detail（不走 JSON）。
+     *
+     * <p>{@code d_start_mining} 用它：收集清单就是当前 item_collector 里那些物品，
+     * <b>可以是空的</b>（没配产物收集的时候就是什么都不收）。命令那一侧仍然要求非空
+     * （见 {@link #parse}）。
+     */
+    public static SingleStageDetail of(java.util.Collection<String> collectorItems,
+                                       Map<Direction, WallMode> walls, int levels) {
+        Set<String> ids = new LinkedHashSet<>();
+        if (collectorItems != null) {
+            for (String id : collectorItems) {
+                if (id == null || id.isBlank()) continue;
+                ids.add(id.trim());
+            }
+        }
+        Map<Direction, WallMode> copy = new EnumMap<>(Direction.class);
+        if (walls != null) copy.putAll(walls);
+        int value = Math.max(1, Math.min(MAX_LEVELS, levels));
+        return new SingleStageDetail(new ArrayList<>(ids), copy, value);
+    }
+
     /** 挖几层（1~{@value #MAX_LEVELS}）。 */
     public int levels() {
         return levels;

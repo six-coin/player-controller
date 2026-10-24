@@ -49,6 +49,8 @@ import java.util.concurrent.CompletableFuture;
  * /pc mine station totem_provider set &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | set_target
  * /pc mine station empty_shulker_box_recycler set … | set_target
  * /pc mine station inventory_temp set … | set_target
+ * /pc mine station slime_cache set … | set_target        （只有一个容器）
+ * /pc mine station cobblestone_cache set … | set_target  （只有一个容器）
  *
  * /pc mine station item_collector add &lt;item_id&gt; &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt;
  * /pc mine station item_collector add_target &lt;item_id&gt;
@@ -58,8 +60,6 @@ import java.util.concurrent.CompletableFuture;
  *
  * /pc mine station tool_cache add &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | add_target
  *                          del &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | del_target | list
- * /pc mine station slime_cache 同上
- * /pc mine station cobblestone_cache 同上
  * /pc mine station item_temp 同上（要求 ≥162 个空闲格子、不能有潜影盒）
  * /pc mine station unloading_shulker_box_placement 同上（要正好 9 个，而且都空着）
  * /pc mine station supplement_shulker_box_placement 同上（要正好 6 个）

@@ -41,6 +41,14 @@ public class MineComplexSingleStageN extends Action {
     private int totalTicks;
     private boolean flying;
 
+    /**
+     * 这一趟跑完之后要不要补货（物品栏已经不符合 {@link SingleStageCheck#checkInventory} 的要求了）。
+     *
+     * <p>给 {@code d_start_mining} 用：它每次挖完一个子区块就问一次
+     * （见 {@link #needsResupply()}），需要补货就先回站里补一趟再接着挖。
+     */
+    private boolean needsResupply;
+
     /** 整个任务最久（20 tick = 1 秒；这里给 6 小时）。 */
     private static final int MAX_TOTAL_TICKS = 20 * 60 * 60 * 6;
 
@@ -51,6 +59,16 @@ public class MineComplexSingleStageN extends Action {
     @Override
     public String name() {
         return "单段挖掘（debug_chunk_miner）";
+    }
+
+    /**
+     * 这一趟跑完要不要补货。
+     *
+     * <p>只有正常跑完才有意义（{@link #restockCheck()} 里算的）；中途失败的话整个任务就停了，
+     * 调用方看 {@link #failureReason()}。
+     */
+    public boolean needsResupply() {
+        return needsResupply;
     }
 
     // ------------------------------------------------------------------
@@ -209,6 +227,7 @@ public class MineComplexSingleStageN extends Action {
     private void restockCheck() {
         ctx.refresh();
         List<String> problems = SingleStageCheck.checkInventory(ctx);
+        needsResupply = !problems.isEmpty();
         if (problems.isEmpty()) {
             ChatUtils.info("补货检查：物品栏仍然符合要求 —— §a无需补货");
         } else {
