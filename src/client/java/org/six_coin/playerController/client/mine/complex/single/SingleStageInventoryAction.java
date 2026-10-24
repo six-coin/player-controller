@@ -8,6 +8,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.inventory.ContainerInput;
 import org.six_coin.playerController.client.container.ContainerClicks;
 import org.six_coin.playerController.client.container.InventoryUtils;
+import org.six_coin.playerController.client.util.ChatUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -90,9 +91,14 @@ class SingleStageInventoryAction extends SingleStageStep {
             fail("现在开着别的界面，没法整理物品栏");
             return;
         }
+        // 光标上有东西（多半是上一步容器动作收尾没清干净）：先塞回物品栏，别在这儿卡死
         if (!handler.getCarried().isEmpty()) {
-            fail("光标上还有 " + SingleStageData.idOf(handler.getCarried()) + "，先放下");
-            return;
+            ChatUtils.debug("光标上还有 " + SingleStageData.idOf(handler.getCarried()) + "，先放回物品栏");
+            InventoryUtils.clearCarried(handler, player);
+            if (!handler.getCarried().isEmpty()) {
+                fail("光标上还有 " + SingleStageData.idOf(handler.getCarried()) + "，放不回去");
+                return;
+            }
         }
 
         while (index < ops.size()) {

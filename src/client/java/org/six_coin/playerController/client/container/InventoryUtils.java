@@ -2,7 +2,9 @@ package org.six_coin.playerController.client.container;
 
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
+import org.jetbrains.annotations.Nullable;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
 
 import java.util.ArrayList;
@@ -167,6 +169,42 @@ public final class InventoryUtils {
             if (slot.container == inventory && slot.getContainerSlot() == index) return slot;
         }
         return null;
+    }
+
+    /**
+     * 把「光标上」的东西放回界面里（先塞同类半叠，再找空格；实在放不下就扔到地上）。
+     *
+     * <p>为什么要有这个：关掉容器界面的时候，服务端会把光标上的东西**转交给物品栏界面**
+     * （{@code ServerPlayer#doCloseContainer} → {@code inventoryMenu.transferState}），
+     * 于是之后所有「在物品栏里搬东西」的动作都会撞上「光标上还有 X，先放下」。
+     * 容器动作收尾时清一下，光标就不会漏到外面去。
+     */
+    public static void clearCarried(AbstractContainerMenu handler,
+                                    @Nullable net.minecraft.client.player.LocalPlayer player) {
+        ItemStack carried = handler.getCarried();
+        if (carried.isEmpty()) return;
+
+        Slot empty = null;
+        for (Slot slot : handler.slots) {
+            if (!slot.isActive() || !slot.mayPlace(carried)) continue;
+            if (slot.getItem().isEmpty()) {
+                if (empty == null) empty = slot;
+                continue;
+            }
+            if (!ItemStack.isSameItemSameComponents(slot.getItem(), carried)) continue;
+            if (roomFor(slot, carried) <= 0) continue;
+            ContainerClicks.click(handler, slot, 0, ContainerInput.PICKUP, "把光标上的东西放回去");
+            if (handler.getCarried().isEmpty()) return;
+        }
+        if (empty != null) {
+            ContainerClicks.click(handler, empty, 0, ContainerInput.PICKUP, "把光标上的东西放进空格");
+            if (handler.getCarried().isEmpty()) return;
+        }
+
+        if (player != null) {
+            player.drop(carried, false, net.minecraft.util.Prediction.PREDICTED);
+            handler.setCarried(ItemStack.EMPTY);
+        }
     }
 
     /** 日志用：一个槽位的简单描述。 */

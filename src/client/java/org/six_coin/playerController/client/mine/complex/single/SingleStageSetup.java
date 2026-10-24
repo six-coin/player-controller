@@ -100,12 +100,12 @@ class SingleStageSetup extends SingleStageStep {
             // 从临时站立点放不到最远的那个角（超出服务端允许的交互距离），先挪到平台正上方
             queue.child("挪到平台上方", () -> new SingleStageSnapAction(ctx, ctx.platformHover()));
             queue.child("放平台 20 格", () -> new SingleStagePlaceBatchAction(ctx, ctx.platform(),
-                COBBLE, new int[]{SingleStageCtx.HOTBAR_FREE_1}, new int[0], "圆石"));
+                COBBLE, new int[]{SingleStageCtx.HOTBAR_FREE_1}, new int[0], "圆石").strict());
             queue.child("回临时站立点", () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
             // 4 5 4 那个单独放的圆石（从站立点够得着）
             queue.child("放 4 5 4 的那个圆石", () -> new SingleStagePlaceBatchAction(ctx,
                 List.of(ctx.marker()), COBBLE, new int[]{SingleStageCtx.HOTBAR_FREE_1},
-                new int[0], "圆石"));
+                new int[0], "圆石").strict());
         });
 
         // 建平台的时候人贴着平台飞，旁边有东西很容易被吸进「该空」的格子里

@@ -195,6 +195,10 @@ public final class ContainerSession {
     /** 收尾：刷新容器缓存 → 关掉界面 → 解除「不显示界面」→ 把朝向还回去。 */
     public void close(Minecraft mc) {
         refreshCache(mc);
+        // 光标上还有东西的话先放回去：不然关界面时会被转交给物品栏界面，之后所有物品栏操作都会报「光标上还有…」
+        if (handler != null && mc.player != null) {
+            InventoryUtils.clearCarried(handler, mc.player);
+        }
         if (mc.player != null && handler != null && mc.player.containerMenu == handler) {
             mc.player.closeContainer();
         }

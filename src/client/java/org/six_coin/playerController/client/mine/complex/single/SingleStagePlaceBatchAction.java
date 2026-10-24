@@ -5,6 +5,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.component.SwingAnimation;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -54,6 +55,12 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
 
     private final Map<Long, Integer> attempts = new LinkedHashMap<>();
 
+    /** 原来的目标（校验用：放完要一个个核对世界里的方块）。 */
+    private final List<BlockPos> targets;
+
+    /** 放不齐就报错（搭平台 / 放 marker 用；黏液块补洞允许留几个够不着的）。 */
+    private boolean strict;
+
     private int placed;
     private int failed;
     private int skipped;
@@ -65,10 +72,17 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
                                 int[] hotbarSlots, int[] mainSlots, String what) {
         super(ctx);
         this.pending = new ArrayList<>(spots);
+        this.targets = List.copyOf(spots);
         this.blockFilter = blockFilter;
         this.hotbarSlots = hotbarSlots;
         this.mainSlots = mainSlots;
         this.what = what;
+    }
+
+    /** 放不齐就报错（不等下一步自己撞墙）。 */
+    SingleStagePlaceBatchAction strict() {
+        this.strict = true;
+        return this;
     }
 
     @Override
@@ -127,6 +141,29 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
         if (pending.isEmpty() || outOfBlocks) finish();
     }
 
+    /**
+     * 核对世界：每个目标格现在都必须真的是「要放的方块」。
+     *
+     * <p>只靠「放完那一瞬间查一次」不够 —— 客户端预测和服务器可能对不上，
+     * 这一步等真正结束之后再逐格复查一遍（客户端的方块状态就是服务端同步过来的）。
+     */
+    private List<BlockPos> unplaced() {
+        Minecraft mc = Minecraft.getInstance();
+        List<BlockPos> left = new ArrayList<>();
+        if (mc.level == null) return left;
+        for (BlockPos pos : targets) {
+            BlockState state = mc.level.getBlockState(pos);
+            if (SingleStagePlaceAction.replaceable(state)) {
+                left.add(pos);
+                continue;
+            }
+            if (!blockFilter.test(state.getBlock().asItem().getDefaultInstance())) {
+                left.add(pos);
+            }
+        }
+        return left;
+    }
+
     @Override
     protected void onEnd() {
         if (hotbarHeld) {
@@ -143,6 +180,17 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
         }
         if (failed > 0) {
             ChatUtils.error("有 " + failed + " 个" + what + "放不上去");
+        }
+
+        // 放完再核对一遍世界：真的没放上就不能往下走（下一步会莫名其妙地失败）
+        List<BlockPos> left = unplaced();
+        if (!left.isEmpty()) {
+            String sample = left.size() <= 5 ? left.toString() : left.subList(0, 5) + "…";
+            if (strict) {
+                fail("有 " + left.size() + " 个" + what + "没放上（例如 " + sample + "），不能继续");
+            } else {
+                ChatUtils.error("有 " + left.size() + " 个" + what + "没放上（例如 " + sample + "）");
+            }
         }
     }
 
@@ -230,6 +278,9 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
         mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit);
         player.swing(InteractionHand.MAIN_HAND, SwingAnimation.DEFAULT, false);
 
-        return !SingleStagePlaceAction.replaceable(mc.level.getBlockState(pos));
+        BlockState after = mc.level.getBlockState(pos);
+        if (SingleStagePlaceAction.replaceable(after)) return false;
+        // 放上去了，但得是**我们要的那种方块**（不是水/别的东西）
+        return blockFilter.test(after.getBlock().asItem().getDefaultInstance());
     }
 }

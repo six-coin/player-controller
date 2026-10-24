@@ -28,6 +28,7 @@ import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.mine.complex.MineComplexData;
 import org.six_coin.playerController.client.mine.complex.MineComplexManager;
+import org.six_coin.playerController.client.feature.MovePackets;
 import org.six_coin.playerController.client.mixin.ClientPlayerInteractionManagerAccessor;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.rotate.RotateManager;
@@ -669,6 +670,11 @@ public final class MineManager {
             target = candidates.get(0);
             targetTool = MineTools.required(mc.level.getBlockState(target));
         }
+
+        // 让服务端按「站在地上」算破坏速度（见 MovePackets#overrideOnGround）：
+        // 悬停飞行时客户端 onGround 是 false，服务端 Player#getDestroySpeed 会把速度除以 5，
+        // 客户端算出来的「秒破」到服务端就不够了 —— 每个方块都要多等好几 tick，速度直接掉下来。
+        MovePackets.overrideOnGround(true);
 
         int limit = PlayerControllerConfig.getMineMaxBlocksPerTick();
         int mined = 0;

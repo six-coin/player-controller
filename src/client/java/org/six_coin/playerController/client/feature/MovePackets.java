@@ -93,6 +93,10 @@ public final class MovePackets {
     /** 下一次要用的 onGround。 */
     private static boolean pendingOnGround;
 
+    /** 只改 onGround（挖掘时用，见 {@link #overrideOnGround}）。 */
+    private static boolean pendingGround;
+    private static boolean pendingGroundSet;
+
     /** 下一次要用的朝向；{@code NaN} = 不改。 */
     private static float pendingYaw = Float.NaN;
     private static float pendingPitch = Float.NaN;
@@ -158,6 +162,20 @@ public final class MovePackets {
     }
 
     /**
+     * 让下一个发出去的移动包把 onGround 报成 {@code onGround}（位置不动）。
+     *
+     * <p>挖掘时用：悬停飞行的时候客户端自己的 {@code onGround} 是 false，
+     * 服务端 {@code Player#getDestroySpeed} 会把破坏速度**除以 5** ——
+     * 客户端算出来的「秒破」到服务端就不够了，于是每个方块都要多等好几 tick。
+     * 把移动包里的 onGround 报成 true，服务端就按「站在地上」算，和客户端的门槛一致。
+     */
+    public static void overrideOnGround(boolean onGround) {
+        pendingGround = onGround;
+        pendingGroundSet = true;
+        pendingExpire = window + 2;
+    }
+
+    /**
      * 让下一个发出去的移动包带上这个朝向（只改服务端看到的，客户端视角一动不动）。
      *
      * <p>这就是「自动转头」唯一的出口：不再额外发 {@code Rot} 包，
@@ -201,6 +219,7 @@ public final class MovePackets {
 
         boolean wantY = !Double.isNaN(pendingY) && window <= pendingExpire;
         boolean wantRot = !Float.isNaN(pendingYaw) && window <= pendingExpire;
+        boolean wantGround = pendingGroundSet && window <= pendingExpire;
 
         // ---------------- 带位置的包（Pos / PosRot）：一个窗口只准一个 ----------------
         if (move.hasPosition()) {
@@ -223,12 +242,15 @@ public final class MovePackets {
                 clearY();
             }
 
+            boolean onGround = wantGround ? pendingGround : move.isOnGround();
+
             if (wantRot && !move.hasRotation()) {
                 // Pos 没有朝向字段，换成 PosRot（还是只发一个包）
                 sendReplacement(new ServerboundMovePlayerPacket.PosRot(
                     clampHorizontal(x), clampVertical(y), clampHorizontal(z),
-                    pendingYaw, pendingPitch, move.isOnGround(), move.horizontalCollision()));
+                    pendingYaw, pendingPitch, onGround, move.horizontalCollision()));
                 clearRotation();
+                if (wantGround) pendingGroundSet = false;
                 return false;
             }
 
@@ -237,6 +259,10 @@ public final class MovePackets {
                 wantRot ? pendingYaw : saneRot(move.getYRot(0), player, true),
                 wantRot ? pendingPitch : saneRot(move.getXRot(0), player, false));
             if (wantRot) clearRotation();
+            if (wantGround) {
+                setOnGround(move, pendingGround);
+                pendingGroundSet = false;
+            }
             return true;
         }
 
@@ -259,6 +285,10 @@ public final class MovePackets {
 
             writeRotation(move, yaw, pitch);
             if (wantRot) clearRotation();
+            if (wantGround) {
+                setOnGround(move, pendingGround);
+                pendingGroundSet = false;
+            }
             return true;
         }
 
@@ -283,11 +313,17 @@ public final class MovePackets {
 
         if (wantRot) {
             sendReplacement(new ServerboundMovePlayerPacket.Rot(
-                pendingYaw, pendingPitch, move.isOnGround(), move.horizontalCollision()));
+                pendingYaw, pendingPitch,
+                wantGround ? pendingGround : move.isOnGround(), move.horizontalCollision()));
             clearRotation();
+            if (wantGround) pendingGroundSet = false;
             return false;
         }
 
+        if (wantGround) {
+            setOnGround(move, pendingGround);
+            pendingGroundSet = false;
+        }
         return true;
     }
 
@@ -307,6 +343,7 @@ public final class MovePackets {
     private static void clearPending() {
         clearY();
         clearRotation();
+        pendingGroundSet = false;
         pendingExpire = -1;
     }
 
