@@ -12,7 +12,7 @@ import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
 /**
- * 把挖掘站相关的方块按部分的颜色画成方块描边（{@code /pc mine complex station show} 开关）。
+ * 把挖掘站相关的方块按部分的颜色画成方块描边（{@code /pc mine station show} 开关）。
  *
  * <p>颜色见 {@link MineStationPart}；只画当前维度的，太远的（超过 {@link #MAX_DISTANCE}）不画。
  */

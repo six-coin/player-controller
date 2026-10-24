@@ -17,14 +17,15 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
+import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.mine.MineFilter;
 import org.six_coin.playerController.client.mine.MineFilterConfig;
 import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.mine.MineRegion;
-import org.six_coin.playerController.client.mine.complex.MineBeaconPlanner;
 import org.six_coin.playerController.client.mine.complex.MineComplexManager;
+import org.six_coin.playerController.client.mine.complex.MineRegionInspectAction;
 import org.six_coin.playerController.client.mine.complex.MineTaskRegion;
 import org.six_coin.playerController.client.mine.complex.single.MineComplexSingleStageN;
 import org.six_coin.playerController.client.mine.complex.single.SingleStageDetail;
@@ -56,11 +57,13 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
  * /pc mine list whitelist del &lt;block_id&gt;
  * /pc mine list blacklist list|add|del …     黑名单同理
  *
+ * /pc mine station ...                       挖掘站（见 MineStationCommand）
+ *
  * /pc mine complex add_task &lt;task_name&gt;      建一个复杂挖掘任务（mine.json + mine/&lt;task&gt;/region.json）
  * /pc mine complex del_task &lt;task_name&gt;      删任务（整个 mine/&lt;task&gt;/ 目录一起删）
  * /pc mine complex task &lt;task_name&gt; a_set_region &lt;x1&gt; &lt;y1&gt; &lt;z1&gt; &lt;x2&gt; &lt;y2&gt; &lt;z2&gt; &lt;dim&gt;
- *                                            写 region.json（范围 + 信标位置）
- * /pc mine complex station ...               挖掘站（见 MineStationCommand）
+ *                                            写 region.json（范围原样记下，inspected = false）
+ * /pc mine b_inspect_region [task_name]      检查 region.json 记的那个范围
  * </pre>
  *
  * <p>simple 的范围会记进 {@code world_<n>/mine.json}，重新进世界自动接回来
@@ -85,6 +88,8 @@ public final class MineCommand {
                 .executes(MineCommand::cancel))
             .then(simple())
             .then(lists())
+            .then(MineStationCommand.build())
+            .then(inspectRegion())
             .then(ClientCommands.literal("debug_chunk_miner")
                 .then(ClientCommands.argument("detail", StringArgumentType.greedyString())
                     .executes(MineCommand::debugChunkMiner)))
@@ -92,8 +97,7 @@ public final class MineCommand {
                 .executes(MineCommand::complexStatus)
                 .then(addTask())
                 .then(delTask())
-                .then(taskCommand())
-                .then(MineStationCommand.build()));
+                .then(taskCommand()));
     }
 
     // ------------------------------------------------------------------
@@ -390,11 +394,13 @@ public final class MineCommand {
             + "simple <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 在框里挖方块"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT + "cancel§7 - 取消所有挖掘任务"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT + "list ...§7 - 白名单 / 黑名单（mode、add、del、list）"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "station ...§7 - 挖掘站（list / check / show / 各处坐标）"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "complex add_task|del_task <task_name>§7 - 建 / 删复杂挖掘任务"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
-            + "complex task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区 + 算信标"));
-        source.sendFeedback(Component.literal("§7  §f" + ROOT + "complex station ...§7 - 挖掘站（list / check / show / 各处坐标）"));
+            + "complex task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
+            + "b_inspect_region [task_name]§7 - 检查挖掘区（路径点 / 安全点 / 区块里的方块）"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "debug_chunk_miner <detail>§7 - §c【临时调试】§7挖掉下面那个子区块（detail 是必填的 JSON）"));
         source.sendFeedback(Component.literal("§7    §8例：§f{\"item_collector_list\":[\"minecraft:coal\"],"
@@ -412,6 +418,77 @@ public final class MineCommand {
         } else {
             source.sendFeedback(Component.literal("当前没有挖掘任务"));
         }
+        return 1;
+    }
+
+    // ------------------------------------------------------------------
+    // b_inspect_region
+    // ------------------------------------------------------------------
+
+    /**
+     * {@code /pc mine b_inspect_region [task_name]}：检查一个任务的挖掘区。
+     *
+     * <p>不写任务名就检查「最近一次 {@code a_set_region} 的那个任务」；要是没记过、或者记的那个
+     * 已经没有区域了，就看是不是只有一个任务设过区域，只有一个就用它，否则要求写清楚。
+     */
+    private static LiteralArgumentBuilder<FabricClientCommandSource> inspectRegion() {
+        return ClientCommands.literal("b_inspect_region")
+            .executes(context -> inspectRegion(context, null))
+            .then(ClientCommands.argument("task_name", StringArgumentType.word())
+                .suggests(MineCommand::suggestTasks)
+                .executes(context -> inspectRegion(context,
+                    StringArgumentType.getString(context, "task_name"))));
+    }
+
+    private static int inspectRegion(CommandContext<FabricClientCommandSource> context,
+                                     @Nullable String explicitName) {
+        FabricClientCommandSource source = context.getSource();
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
+            return 0;
+        }
+
+        MineComplexManager manager = MineComplexManager.get();
+        String name = explicitName;
+
+        if (name == null) {
+            name = manager.lastTask();
+            if (name == null) {
+                List<String> withRegion = manager.tasksWithRegion();
+                if (withRegion.isEmpty()) {
+                    source.sendError(Component.literal("还没有设过区域的任务（先 " + ROOT
+                        + "complex task <task_name> a_set_region …）"));
+                    return 0;
+                }
+                if (withRegion.size() > 1) {
+                    source.sendError(Component.literal("有好几个任务设过区域（"
+                        + String.join("、", withRegion) + "），写清楚检查哪一个："
+                        + ROOT + "b_inspect_region <task_name>"));
+                    return 0;
+                }
+                name = withRegion.get(0);
+            }
+        }
+
+        if (!manager.has(name)) {
+            source.sendError(Component.literal("没有这个挖掘任务：" + name
+                + "（先 " + ROOT + "complex add_task " + name + "）"));
+            return 0;
+        }
+
+        MineTaskRegion region = manager.region(name);
+        if (region == null) {
+            source.sendError(Component.literal("挖掘任务 " + name + " 还没设区域（"
+                + ROOT + "complex task " + name + " a_set_region …）"));
+            return 0;
+        }
+
+        ActionManager.get().submit(new MineRegionInspectAction(name, region));
+        source.sendFeedback(Component.literal("开始检查挖掘区 §f" + name + "§r：" + region.describe()));
+        source.sendFeedback(Component.literal("§7  先查路径点（入口 + 安全点 + 区域里不能有路），"
+            + "再逐个区块扫 y " + region.min().getY() + " ~ " + region.max().getY()
+            + "（没加载的区块会等着）"));
         return 1;
     }
 
@@ -468,8 +545,7 @@ public final class MineCommand {
     }
 
     private static int complexStatus(CommandContext<FabricClientCommandSource> context) {
-        FabricClientCommandSource source = context.getSource();
-        showTasks(source);        MineStationCommand.showStatus(source);
+        showTasks(context.getSource());
         return 1;
     }
 
@@ -608,7 +684,14 @@ public final class MineCommand {
         }
 
         source.sendFeedback(Component.literal("挖掘任务 " + name + "：" + region.describe()));
-        printBeacons(source, region.beacons());
+        source.sendFeedback(Component.literal("  范围: " + region.min().toShortString() + " ~ "
+            + region.max().toShortString() + "（" + region.volume() + " 格，"
+            + region.chunkCount() + " 个区块）"));
+        source.sendFeedback(Component.literal("  入口（x1, y2+1, z1）: "
+            + region.headPos().toShortString()));
+        source.sendFeedback(Component.literal("  inspected: " + region.inspected()));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "b_inspect_region " + name
+            + "§7 - 检查这个区域"));
         source.sendFeedback(Component.literal("  文件: " + manager.currentRegionFile(name)));
         return 1;
     }
@@ -637,24 +720,22 @@ public final class MineCommand {
         int y2 = IntegerArgumentType.getInteger(context, "y2");
         int z2 = IntegerArgumentType.getInteger(context, "z2");
 
-        int spanX = Math.abs(x2 - x1);
-        int spanY = Math.abs(y2 - y1);
-        int spanZ = Math.abs(z2 - z1);
-        if (spanX < MineTaskRegion.MIN_XZ_SPAN || spanZ < MineTaskRegion.MIN_XZ_SPAN
-            || spanY < MineTaskRegion.MIN_Y_SPAN) {
-            source.sendError(Component.literal("区域太小：要求 |x1-x2| >= "
-                + MineTaskRegion.MIN_XZ_SPAN + "、|z1-z2| >= " + MineTaskRegion.MIN_XZ_SPAN
-                + "、|y1-y2| >= " + MineTaskRegion.MIN_Y_SPAN
-                + "（你现在是 " + spanX + " / " + spanZ + " / " + spanY + "）"));
+        String dim = dimension.toString();
+        int maxY = DimensionUtils.buildMaxY(dim);
+
+        // 不再由机器校准：输入必须自己就满足规则，不满足就原样报错，不做任何「帮你排好序」的事
+        List<String> problems = MineTaskRegion.validate(dim, x1, y1, z1, x2, y2, z2, maxY);
+        if (!problems.isEmpty()) {
+            source.sendError(Component.literal("区域不合法（" + problems.size() + " 条）："));
+            for (String problem : problems) source.sendError(Component.literal("  · " + problem));
+            source.sendFeedback(Component.literal("§7  规则：x1<x2、y1<y2、z1<z2；y1 是偶数；(y2+1) 是 16 的倍数；"
+                + "y2-y1 >= " + MineTaskRegion.MIN_Y_SPAN + "；y2+" + MineTaskRegion.HEAD_ROOM
+                + " <= 建筑高度限制（" + DimensionUtils.display(dim) + " 是 " + maxY + "）；"
+                + "x1、z1 是 16 的倍数，x2+1、z2+1 是 16 的倍数"));
             return 0;
         }
 
-        // 用户写的两个角谁大谁小都行：落盘前统一排成 min / max
-        BlockPos min = new BlockPos(Math.min(x1, x2), Math.min(y1, y2), Math.min(z1, z2));
-        BlockPos max = new BlockPos(Math.max(x1, x2), Math.max(y1, y2), Math.max(z1, z2));
-
-        List<BlockPos> beacons = MineBeaconPlanner.plan(min, max);
-        MineTaskRegion region = MineTaskRegion.of(dimension.toString(), min, max, beacons);
+        MineTaskRegion region = MineTaskRegion.of(dim, x1, y1, z1, x2, y2, z2);
 
         Path file = manager.currentRegionFile(name);
         try {
@@ -664,30 +745,16 @@ public final class MineCommand {
             return 0;
         }
 
-        source.sendFeedback(Component.literal("已更新任务 §f" + name + "§r 的挖掘区：" + region.describe()));
-        printBeacons(source, beacons);
-        source.sendFeedback(Component.literal("§e支持钻石工具 / 下界合金工具，但这两个效率几乎一致。"));
-        source.sendFeedback(Component.literal("§7  信标记的是塔底（9x9 那层）的坐标，信标方块本身在 y+"
-            + MineBeaconPlanner.TOWER_HEIGHT + "；文件：" + file));
-        return 1;
-    }
+        // b_inspect_region 不写任务名的时候检查的就是这个
+        manager.setLastTask(name);
 
-    /** 把信标坐标打到聊天栏（太多就只打前 30 个，剩下的在 region.json 里）。 */
-    private static void printBeacons(FabricClientCommandSource source, List<BlockPos> beacons) {
-        int shown = Math.min(beacons.size(), 30);
-        for (int start = 0; start < shown; start += 5) {
-            StringBuilder line = new StringBuilder("  §8");
-            for (int i = start; i < Math.min(start + 5, shown); i++) {
-                BlockPos pos = beacons.get(i);
-                if (i > start) line.append(' ');
-                line.append('(').append(pos.getX()).append(',').append(pos.getY()).append(',')
-                    .append(pos.getZ()).append(')');
-            }
-            source.sendFeedback(Component.literal(line.toString()));
-        }
-        if (beacons.size() > shown) {
-            source.sendFeedback(Component.literal("  §8…… 还有 " + (beacons.size() - shown)
-                + " 个，全部写在 region.json 的 beacon 里"));
-        }
+        source.sendFeedback(Component.literal("已写入任务 §f" + name + "§r 的挖掘区：" + region.describe()));
+        source.sendFeedback(Component.literal("  范围: " + region.min().toShortString() + " ~ "
+            + region.max().toShortString() + "（" + region.volume() + " 格，"
+            + region.chunkCount() + " 个区块）"));
+        source.sendFeedback(Component.literal("  入口（x1, y2+1, z1）: " + region.headPos().toShortString()));
+        source.sendFeedback(Component.literal("§7  下一步：§f" + ROOT + "b_inspect_region " + name
+            + "§7；文件：" + file));
+        return 1;
     }
 }

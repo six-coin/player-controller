@@ -1,8 +1,11 @@
 package org.six_coin.playerController.client.util;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.dimension.DimensionType;
 
 /** 维度相关的常量与换算。 */
 public final class DimensionUtils {
@@ -59,5 +62,36 @@ public final class DimensionUtils {
     /** 末地出生平台方块（末地传送门的落点）。 */
     public static BlockPos endSpawnPos() {
         return END_SPAWN_POS;
+    }
+
+    /**
+     * 这个维度的建筑高度限制：<b>最高能放方块的那一格 y</b>（主世界是 319）。
+     *
+     * <p>当前维度直接用客户端的 {@code level.getMaxY() - 1}；别的维度（{@code dim} 参数写的不是
+     * 自己站的这个）去注册表里查 {@code LevelStem -> DimensionType}，查不到就退回当前维度的值。
+     */
+    public static int buildMaxY(String dimension) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return 319;
+
+        int here = mc.level.getMaxY() - 1;
+        if (dimension == null || dimension.equals(current())) return here;
+
+        Identifier id = Identifier.tryParse(dimension);
+        if (id == null) return here;
+
+        try {
+            var lookup = mc.level.registryAccess().lookup(Registries.LEVEL_STEM);
+            if (lookup.isEmpty()) return here;
+
+            var stem = lookup.get().get(ResourceKey.create(Registries.LEVEL_STEM, id));
+            if (stem.isEmpty()) return here;
+
+            DimensionType type = stem.get().value().type().value();
+            return type.minY() + type.height() - 1;
+        } catch (Exception e) {
+            ChatUtils.debug("查不到维度 " + dimension + " 的高度限制（" + e + "），按当前维度的算");
+            return here;
+        }
     }
 }

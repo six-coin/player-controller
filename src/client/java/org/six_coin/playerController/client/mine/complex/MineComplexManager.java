@@ -29,7 +29,7 @@ import java.util.stream.Stream;
  *     station.json           ← 挖掘站（MineStationManager）
  *     check.json             ← 挖掘站检查报告
  *     &lt;task&gt;/
- *       region.json          ← 任务范围 + 信标（MineTaskRegion）
+ *       region.json          ← 任务范围 + inspected（MineTaskRegion）
  * </pre>
  *
  * <p>任务名只允许 {@code [A-Za-z0-9_-]}（1~64 个字符）：它会直接变成目录名，
@@ -231,6 +231,7 @@ public final class MineComplexManager {
         }
 
         data.complex().remove(name);
+        if (name.equals(data.lastTask())) data.lastTask(null);
         save();
         ChatUtils.debug("删除挖掘任务 " + name + "（" + dir + "）");
         return null;
@@ -240,6 +241,31 @@ public final class MineComplexManager {
     @Nullable
     public MineTaskRegion region(String name) {
         return MineTaskRegion.load(currentRegionFile(name));
+    }
+
+    /**
+     * 最近一次 {@code a_set_region} 的那个任务名（{@code /pc mine b_inspect_region} 不写任务名时用它）。
+     *
+     * <p>记的名字已经不在了（任务被删 / 手改过 mine.json）就返回 null。
+     */
+    @Nullable
+    public String lastTask() {
+        String name = data.lastTask();
+        return name != null && has(name) ? name : null;
+    }
+
+    public void setLastTask(String name) {
+        data.lastTask(name);
+        save();
+    }
+
+    /** 已经设过区域的任务（region.json 里有维度）。 */
+    public List<String> tasksWithRegion() {
+        List<String> result = new ArrayList<>();
+        for (String name : data.complex()) {
+            if (region(name) != null) result.add(name);
+        }
+        return result;
     }
 
     // ------------------------------------------------------------------

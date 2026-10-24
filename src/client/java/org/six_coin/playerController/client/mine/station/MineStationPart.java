@@ -3,7 +3,7 @@ package org.six_coin.playerController.client.mine.station;
 /**
  * 挖掘站的各个部分：json 里的字段名、中文名、高亮颜色、是单点还是一个列表、是不是可选的。
  *
- * <p>颜色是 {@code /pc mine complex station show} 用的 ARGB（随手挑的，要改就改这里的数字）：
+ * <p>颜色是 {@code /pc mine station show} 用的 ARGB（随手挑的，要改就改这里的数字）：
  * 安全点青色、食物补给橙色、图腾补给黄色、产物收集绿色、工具缓存蓝色、黏液块缓存紫色、
  * 圆石缓存灰色、卸货潜影盒摆放处橙红色。
  *

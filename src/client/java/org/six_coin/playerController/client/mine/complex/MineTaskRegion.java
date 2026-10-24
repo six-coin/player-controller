@@ -17,29 +17,42 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * {@code world_<n>/mine/<task>/region.json} 的结构：一个复杂挖掘任务的挖掘区 + 信标位置。
+ * {@code world_<n>/mine/<task>/region.json} 的结构：一个复杂挖掘任务的挖掘区。
  *
  * <pre>
  * {
  *   "dimension": "minecraft:overworld",
- *   "x1": 1, "y1": 0, "z1": 1,
- *   "x2": 100, "y2": 384, "z2": 100,
- *   "beacon": [{"x": 50, "y": 0, "z": 50}, ...]
+ *   "x1": 0, "y1": -59, "z1": 0,
+ *   "x2": 271, "y2": 106, "z2": 271,
+ *   "inspected": false
  * }
  * </pre>
  *
  * <p>刚建任务的时候文件里是空的 {@code {}}（什么都还没设）；{@code a_set_region} 之后才是上面这样。
  *
- * <p>坐标落盘前一定是 {@code x1 < x2}、{@code y1 < y2}、{@code z1 < z2}（用户输入的顺序会被换过来）。
- * {@code beacon} 里记的是<em>塔底</em>（9x9 那层）的坐标，信标方块本身在 {@code y + 4}。
+ * <p><b>范围原样记下</b>：{@code a_set_region} 不再做任何「机器校准」（以前会把两个角排序、算信标），
+ * 只按 {@link #validate} 检查用户写进来的两个角，过了就照抄进文件。所以
+ * {@code x1 < x2}、{@code y1 < y2}、{@code z1 < z2} 是硬要求，不会帮你换过来。
+ *
+ * <p>几个数是挖矿机自己要用到的（都是 16 / 2 的整数倍，好让机器正好对齐子区块）：
+ * <ul>
+ *   <li>{@code y1} 是偶数、{@code y2 + 1} 是 16 的倍数：挖的是整层子区块；</li>
+ *   <li>{@code x1}、{@code z1} 是 16 的倍数，{@code x2 + 1}、{@code z2 + 1} 是 16 的倍数：
+ *       正好盖住整数个区块；</li>
+ *   <li>{@code y2 - y1 >= 16}（至少一层子区块）、{@code y2 + 16 <= 建筑高度限制}
+ *       （机器站在区域顶上，还要留 16 格）。</li>
+ * </ul>
+ *
+ * <p>{@code inspected} 是 {@code /pc mine b_inspect_region} 写进去的：检查通过才是 {@code true}，
+ * 每次 {@code a_set_region} 都会重置成 {@code false}。
  */
 public final class MineTaskRegion {
 
-    /** 挖掘区至少这么宽（|x1-x2| / |z1-z2|，方块数 = 这个值 + 1）。 */
-    public static final int MIN_XZ_SPAN = 70;
+    /** 挖掘区最少要有一层子区块高。 */
+    public static final int MIN_Y_SPAN = 16;
 
-    /** 挖掘区至少这么高（|y1-y2|）。 */
-    public static final int MIN_Y_SPAN = 10;
+    /** 区域顶上要留出来的高度（机器自己占的地方）。 */
+    public static final int HEAD_ROOM = 16;
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -53,58 +66,75 @@ public final class MineTaskRegion {
     private int x2;
     private int y2;
     private int z2;
-    private List<Beacon> beacon = new ArrayList<>();
+    private boolean inspected;
 
-    /** 信标塔底的位置。 */
-    public static final class Beacon {
-
-        private int x;
-        private int y;
-        private int z;
-
-        /** 给 Gson 用。 */
-        private Beacon() {
-        }
-
-        public Beacon(int x, int y, int z) {
-            this.x = x;
-            this.y = y;
-            this.z = z;
-        }
-
-        public int x() {
-            return x;
-        }
-
-        public int y() {
-            return y;
-        }
-
-        public int z() {
-            return z;
-        }
-
-        public BlockPos pos() {
-            return new BlockPos(x, y, z);
-        }
-    }
-
-    /** 建一个区域（min / max 必须是已经排好序的角）。 */
-    public static MineTaskRegion of(String dimension, BlockPos min, BlockPos max,
-                                    List<BlockPos> beacons) {
+    /** 建一个区域（两个角必须已经满足 {@link #validate}；{@code inspected} 从 false 开始）。 */
+    public static MineTaskRegion of(String dimension,
+                                    int x1, int y1, int z1,
+                                    int x2, int y2, int z2) {
         MineTaskRegion region = new MineTaskRegion();
         region.dimension = dimension;
-        region.x1 = min.getX();
-        region.y1 = min.getY();
-        region.z1 = min.getZ();
-        region.x2 = max.getX();
-        region.y2 = max.getY();
-        region.z2 = max.getZ();
-
-        List<Beacon> list = new ArrayList<>();
-        for (BlockPos pos : beacons) list.add(new Beacon(pos.getX(), pos.getY(), pos.getZ()));
-        region.beacon = list;
+        region.x1 = x1;
+        region.y1 = y1;
+        region.z1 = z1;
+        region.x2 = x2;
+        region.y2 = y2;
+        region.z2 = z2;
+        region.inspected = false;
         return region;
+    }
+
+    /**
+     * 检查一组角合不合法。
+     *
+     * @param maxY 这个维度的建筑高度限制（最高能放方块的 y，见
+     *             {@link DimensionUtils#buildMaxY(String)}）
+     * @return 问题列表；空表示通过
+     */
+    public static List<String> validate(String dimension,
+                                        int x1, int y1, int z1,
+                                        int x2, int y2, int z2, int maxY) {
+        List<String> problems = new ArrayList<>();
+
+        // 1) 两个角必须是「小 -> 大」，而且不能是同一个面
+        if (x1 >= x2) problems.add("x1 必须小于 x2（现在是 " + x1 + " / " + x2 + "）");
+        if (y1 >= y2) problems.add("y1 必须小于 y2（现在是 " + y1 + " / " + y2 + "）");
+        if (z1 >= z2) problems.add("z1 必须小于 z2（现在是 " + z1 + " / " + z2 + "）");
+
+        // 2) y1 是偶数、y2 + 1 是 16 的倍数（挖的是整层子区块）
+        if (Math.floorMod(y1, 2) != 0) {
+            problems.add("y1 必须是偶数（现在是 " + y1 + "）");
+        }
+        if (Math.floorMod(y2 + 1, 16) != 0) {
+            problems.add("y2 + 1 必须是 16 的倍数（现在是 " + y2 + "，y2+1 = " + (y2 + 1) + "）");
+        }
+
+        // 3) 至少一层子区块高
+        if (y2 - y1 < MIN_Y_SPAN) {
+            problems.add("y2 - y1 至少要 " + MIN_Y_SPAN + "（现在是 " + (y2 - y1) + "）");
+        }
+
+        // 4) 顶上还要留出机器的高度
+        if (y2 + HEAD_ROOM > maxY) {
+            problems.add("y2 + " + HEAD_ROOM + " 不能超过建筑高度限制 " + maxY
+                + "（现在是 y2 = " + y2 + "，y2+" + HEAD_ROOM + " = " + (y2 + HEAD_ROOM) + "）");
+        }
+
+        // 5) x / z 必须正好落在区块边界上
+        if (Math.floorMod(x1, 16) != 0) {
+            problems.add("x1 必须是 16 的倍数（现在是 " + x1 + "）");
+        }
+        if (Math.floorMod(z1, 16) != 0) {
+            problems.add("z1 必须是 16 的倍数（现在是 " + z1 + "）");
+        }
+        if (Math.floorMod(x2 + 1, 16) != 0) {
+            problems.add("x2 + 1 必须是 16 的倍数（现在是 " + x2 + "，x2+1 = " + (x2 + 1) + "）");
+        }
+        if (Math.floorMod(z2 + 1, 16) != 0) {
+            problems.add("z2 + 1 必须是 16 的倍数（现在是 " + z2 + "，z2+1 = " + (z2 + 1) + "）");
+        }
+
+        return problems;
     }
 
     /**
@@ -119,7 +149,6 @@ public final class MineTaskRegion {
         try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
             MineTaskRegion loaded = GSON.fromJson(reader, MineTaskRegion.class);
             if (loaded == null || loaded.dimension == null) return null;
-            if (loaded.beacon == null) loaded.beacon = new ArrayList<>();
             return loaded;
         } catch (Exception e) {
             ChatUtils.error("读取挖掘区失败（" + file + "）：" + e.getMessage());
@@ -146,16 +175,41 @@ public final class MineTaskRegion {
         return new BlockPos(x2, y2, z2);
     }
 
-    /** 信标塔底的坐标（拷贝，改它没用）。 */
-    public List<BlockPos> beacons() {
-        List<BlockPos> result = new ArrayList<>();
-        for (Beacon entry : beacon) result.add(entry.pos());
-        return result;
+    /** 区域顶上的那个角 + 1（机器站位 / {@code b_inspect_region} 检查的入口）。 */
+    public BlockPos headPos() {
+        return new BlockPos(x1, y2 + 1, z1);
     }
 
-    /** 「主世界 [1, 0, 1] ~ [100, 384, 100]，信标 4 个」这种一行。 */
+    /** 检查通过了没有（{@code /pc mine b_inspect_region} 写的）。 */
+    public boolean inspected() {
+        return inspected;
+    }
+
+    public void setInspected(boolean value) {
+        this.inspected = value;
+    }
+
+    /** 这个方块在不在框里（端点算在里面）。 */
+    public boolean contains(BlockPos pos) {
+        return pos.getX() >= x1 && pos.getX() <= x2
+            && pos.getY() >= y1 && pos.getY() <= y2
+            && pos.getZ() >= z1 && pos.getZ() <= z2;
+    }
+
+    /** 框里一共多少格（含端点）。 */
+    public long volume() {
+        return (long) (x2 - x1 + 1) * (y2 - y1 + 1) * (z2 - z1 + 1);
+    }
+
+    /** 盖住几个区块（16×16 那种）。 */
+    public int chunkCount() {
+        return ((x2 >> 4) - (x1 >> 4) + 1) * ((z2 >> 4) - (z1 >> 4) + 1);
+    }
+
+    /** 「主世界 [0, -59, 0] ~ [271, 106, 271]，17×17 区块，未检查」这种一行。 */
     public String describe() {
         return DimensionUtils.display(dimension) + " " + min().toShortString() + " ~ "
-            + max().toShortString() + "，信标 " + beacon.size() + " 个";
+            + max().toShortString() + "，" + chunkCount() + " 个区块，"
+            + (inspected ? "§a已检查" : "§c未检查");
     }
 }

@@ -37,28 +37,28 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * {@code /pc mine complex station ...} —— 挖掘站。
+ * {@code /pc mine station ...} —— 挖掘站。
  *
  * <pre>
- * /pc mine complex station list                    列出所有部分的坐标 + 落点
- * /pc mine complex station check                   算落点、查可达性，再走过去逐个开箱检查，写 mine/check.json
- * /pc mine complex station show                    开关高亮（各部分颜色见 MineStationPart）
+ * /pc mine station list                    列出所有部分的坐标 + 落点
+ * /pc mine station check                   算落点、查可达性，再走过去逐个开箱检查，写 mine/check.json
+ * /pc mine station show                    开关高亮（各部分颜色见 MineStationPart）
  *
- * /pc mine complex station safe_point set &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | set_here
- * /pc mine complex station food_provider set &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | set_target
- * /pc mine complex station totem_provider set &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | set_target
+ * /pc mine station safe_point set &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | set_here
+ * /pc mine station food_provider set &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | set_target
+ * /pc mine station totem_provider set &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | set_target
  *
- * /pc mine complex station item_collector add &lt;item_id&gt; &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt;
- * /pc mine complex station item_collector add_target &lt;item_id&gt;
- * /pc mine complex station item_collector del &lt;item_id&gt;
- * /pc mine complex station item_collector del &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt;
- * /pc mine complex station item_collector del_target
+ * /pc mine station item_collector add &lt;item_id&gt; &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt;
+ * /pc mine station item_collector add_target &lt;item_id&gt;
+ * /pc mine station item_collector del &lt;item_id&gt;
+ * /pc mine station item_collector del &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt;
+ * /pc mine station item_collector del_target
  *
- * /pc mine complex station tool_cache add &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | add_target
- *                                del &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | del_target | list
- * /pc mine complex station slime_cache 同上
- * /pc mine complex station cobblestone_cache 同上
- * /pc mine complex station unloading_shulker_box_placement 同上（要正好 9 个，而且都空着）
+ * /pc mine station tool_cache add &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | add_target
+ *                          del &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | del_target | list
+ * /pc mine station slime_cache 同上
+ * /pc mine station cobblestone_cache 同上
+ * /pc mine station unloading_shulker_box_placement 同上（要正好 9 个，而且都空着）
  * </pre>
  *
  * <p>和备货的工作站不一样：挖掘站不要求所有容器都在触及范围内，所以 set / add 只记坐标、不查距离；
@@ -70,7 +70,7 @@ import java.util.concurrent.CompletableFuture;
  */
 public final class MineStationCommand {
 
-    private static final String ROOT = "/pc mine complex station ";
+    private static final String ROOT = "/pc mine station ";
 
     private MineStationCommand() {
     }
@@ -207,7 +207,7 @@ public final class MineStationCommand {
     private static int toggleShow(CommandContext<FabricClientCommandSource> context) {
         boolean showing = MineStationManager.get().toggleShow();
         context.getSource().sendFeedback(Component.literal("挖掘站高亮已"
-            + (showing ? "§a开启" : "§c关闭") + "§r（各部分的颜色见 /pc mine complex station list 的行首标签）"));
+            + (showing ? "§a开启" : "§c关闭") + "§r（各部分的颜色见 /pc mine station list 的行首标签）"));
         return 1;
     }
 
