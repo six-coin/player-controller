@@ -145,6 +145,8 @@ public final class MineStationManager {
             case SAFE_POINT -> data.safePoint();
             case FOOD_PROVIDER -> data.foodProvider();
             case TOTEM_PROVIDER -> data.totemProvider();
+            case EMPTY_SHULKER_BOX_RECYCLER -> data.emptyShulkerBoxRecycler();
+            case INVENTORY_TEMP -> data.inventoryTemp();
             default -> null;
         };
     }
@@ -156,7 +158,10 @@ public final class MineStationManager {
             case TOOL_CACHE -> List.copyOf(data.toolCache());
             case SLIME_CACHE -> List.copyOf(data.slimeCache());
             case COBBLESTONE_CACHE -> List.copyOf(data.cobblestoneCache());
+            case ITEM_TEMP -> List.copyOf(data.itemTemp());
             case UNLOADING_PLACEMENT -> List.copyOf(data.unloadingShulkerBoxPlacement());
+            case SUPPLEMENT_PLACEMENT -> List.copyOf(data.supplementShulkerBoxPlacement());
+            case TEMP_PLACEMENT -> List.copyOf(data.tempShulkerBoxPlacement());
             default -> List.of();
         };
     }
@@ -203,6 +208,8 @@ public final class MineStationManager {
             case SAFE_POINT -> data.safePoint(value);
             case FOOD_PROVIDER -> data.foodProvider(value);
             case TOTEM_PROVIDER -> data.totemProvider(value);
+            case EMPTY_SHULKER_BOX_RECYCLER -> data.emptyShulkerBoxRecycler(value);
+            case INVENTORY_TEMP -> data.inventoryTemp(value);
             default -> throw new IllegalArgumentException(part + " 不是单点");
         }
         save();
@@ -259,7 +266,10 @@ public final class MineStationManager {
             case TOOL_CACHE -> data.toolCache();
             case SLIME_CACHE -> data.slimeCache();
             case COBBLESTONE_CACHE -> data.cobblestoneCache();
+            case ITEM_TEMP -> data.itemTemp();
             case UNLOADING_PLACEMENT -> data.unloadingShulkerBoxPlacement();
+            case SUPPLEMENT_PLACEMENT -> data.supplementShulkerBoxPlacement();
+            case TEMP_PLACEMENT -> data.tempShulkerBoxPlacement();
             default -> throw new IllegalArgumentException(part + " 不是列表");
         };
     }

@@ -26,7 +26,7 @@ import java.nio.file.Path;
  *   "actions": {
  *     "move_speed": 5.0,
  *     "move_max_descent_speed_blocks_per_tick": 3.0,
- *     "reach": 4.5,
+ *     "reach": 5.0,
  *     "move_anti_kick_delay_ticks": 40,
  *     "move_anti_kick_off_time_ticks": 1,
  *     "network_delay_ticks": 2,
@@ -202,7 +202,7 @@ public final class PlayerControllerConfig {
         private double moveMaxDescentSpeedBlocksPerTick = DEFAULT_MOVE_MAX_DESCENT_SPEED_BLOCKS_PER_TICK;
 
         /**
-         * 触及 / 攻击距离，单位：方块（默认 4.5）。
+         * 触及 / 攻击距离，单位：方块（默认 {@value #DEFAULT_REACH}）。
          *
          * <p>开容器、挖方块、打怪、算工作站 / 挖掘站落点都用它，不区分看不看得见。
          */

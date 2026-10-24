@@ -204,7 +204,7 @@ public final class SingleStageCtx {
      *
      * <p>从临时站立点 6 4 6 看，平台最远那个角（10 2 9）离眼睛差不多 6 格，
      * 超过服务端允许的交互距离（{@code actions.reach} + 1 = 5.5），放不上去也挖不到；
-     * 站到平台正上方就全都在 4.5 格以内了。
+     * 站到平台正上方就全都在 5 格以内了。
      */
     public BlockPos platformHover() {
         return initialMin.offset(8, 4, 8);

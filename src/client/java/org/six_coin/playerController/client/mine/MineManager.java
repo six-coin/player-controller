@@ -920,7 +920,13 @@ public final class MineManager {
     private boolean blockedByGravity(ClientLevel level, BlockPos pos, BlockState state) {
         if (!gravityGuard) return false;
         if (!isGravity(state)) return false;
-        return isGravity(level.getBlockState(pos.above()));
+
+        BlockPos above = pos.above();
+        // 上面那块不在这次的挖掘范围里：我们永远挖不到它，再拦着就等于永远不挖这一块。
+        // 让它掉进来反而是好事 —— 掉进区域之后它自己就变成「范围内的方块」，下一轮就能挖掉。
+        if (region == null || !region.contains(above)) return false;
+
+        return isGravity(level.getBlockState(above));
     }
 
     /** 会不会往下掉（沙砾、沙子、混凝土粉末、铁砧……）。 */

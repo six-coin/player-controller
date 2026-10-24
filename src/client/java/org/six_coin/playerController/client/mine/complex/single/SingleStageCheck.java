@@ -32,14 +32,8 @@ public final class SingleStageCheck {
     /** 圆石一满盒是 27 × 64。 */
     public static final int FULL_BOX = 27 * 64;
 
-    /** 黏液块那盒的最低要求。 */
-    public static final int SLIME_BOX_MIN = 1600;
-
-    /** 背包 7 那盒圆石的最低要求。 */
-    public static final int COBBLE_BOX_MIN = 64;
-
-    /** 背包 10 那盒黏液块 / 树脂块的最低要求。 */
-    public static final int SLIME_BOX_B_MIN = 192;
+    /** 「半盒」的门槛：5 组（5 × 64）。 */
+    public static final int HALF_BOX = 5 * 64;
 
     /** 食物最少要多少个。 */
     public static final int FOOD_MIN = 16;
@@ -194,23 +188,19 @@ public final class SingleStageCheck {
         toolSlot(data, problems, SingleStageCtx.SPARE_START + 3, MineToolRules.Kind.SHOVEL, "背包 4", true);
         toolSlot(data, problems, SingleStageCtx.SPARE_START + 4, MineToolRules.Kind.HOE, "背包 5", true);
 
-        // 背包 6~8：圆石。6 必须是装满的（1728）；7 至少 64 个；8 随便（空 / 半满 / 满都行），
-        // 只要 7 不比 8 少（倒序 —— 拆站装回去的时候也是按这个顺序放的）
+        // 背包 6~8：圆石。9~11：黏液块 / 树脂块。两组规则一样：
+        // 第一盒必须满（1728）、第二盒至少 5 组（320）、第三盒不要求；
+        // 三盒的组合只能是 满满满 / 满满半 / 满满空 / 满半空 这四种
         Set<Item> cobble = Set.of(Items.COBBLESTONE);
-        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_A, "背包 6", "圆石", cobble, FULL_BOX);
-        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_B, "背包 7", "圆石", cobble, COBBLE_BOX_MIN);
-        boxSlot(data, problems, SingleStageCtx.COBBLE_BOX_FULL, "背包 8", "圆石", cobble, 0);
-        descending(problems, data, "圆石", "背包 7", SingleStageCtx.COBBLE_BOX_B,
+        boxTrio(data, problems, "圆石", cobble,
+            "背包 6", SingleStageCtx.COBBLE_BOX_A,
+            "背包 7", SingleStageCtx.COBBLE_BOX_B,
             "背包 8", SingleStageCtx.COBBLE_BOX_FULL);
 
-        // 背包 9~11：黏液块 / 树脂块。9 必须装满（≥1600）；10 至少 192；11 随便，但要倒序
         Set<Item> slime = Set.of(Items.SLIME_BLOCK, Items.RESIN_BLOCK);
-        boxSlot(data, problems, SingleStageCtx.SLIME_BOX_A, "背包 9", "黏液块 / 树脂块", slime,
-            SLIME_BOX_MIN);
-        boxSlot(data, problems, SingleStageCtx.SLIME_BOX_B, "背包 10", "黏液块 / 树脂块", slime,
-            SLIME_BOX_B_MIN);
-        boxSlot(data, problems, SingleStageCtx.SLIME_BOX_FULL, "背包 11", "黏液块 / 树脂块", slime, 0);
-        descending(problems, data, "黏液块 / 树脂块", "背包 10", SingleStageCtx.SLIME_BOX_B,
+        boxTrio(data, problems, "黏液块 / 树脂块", slime,
+            "背包 9", SingleStageCtx.SLIME_BOX_A,
+            "背包 10", SingleStageCtx.SLIME_BOX_B,
             "背包 11", SingleStageCtx.SLIME_BOX_FULL);
 
         // 背包 12：熔岩桶（拆平台前拿去烧垃圾，烧完归位）
@@ -311,51 +301,66 @@ public final class SingleStageCheck {
     }
 
     /**
-     * 潜影盒格子：必须是潜影盒、里面只有 {@code allowed}，数量至少 {@code minItems}
-     * （0 = 只要是这类东西就行，空盒子也算）。
+     * 三盒一组的检查（圆石 / 黏液块都用这一套）。
+     *
+     * <p>规则：第一盒必须<b>满</b>（{@value #FULL_BOX}）；第二盒至少 {@value #HALF_BOX}（5 组）；
+     * 第三盒不要求。合起来只能是这四种：满满满 / 满满半 / 满满空 / 满半空 ——
+     * 也就是说第二盒是半满的时候，第三盒必须是空的。
      */
-    private static void boxSlot(SingleStageData data, List<String> problems, int index, String label,
-                                String what, Set<Item> allowed, int minItems) {
+    private static void boxTrio(SingleStageData data, List<String> problems, String what,
+                                Set<Item> allowed,
+                                String labelA, int indexA,
+                                String labelB, int indexB,
+                                String labelC, int indexC) {
+        int a = boxItemsIn(data, problems, indexA, labelA, what, allowed);
+        int b = boxItemsIn(data, problems, indexB, labelB, what, allowed);
+        int c = boxItemsIn(data, problems, indexC, labelC, what, allowed);
+        if (a < 0 || b < 0 || c < 0) return;      // 盒子本身有问题，已经报过了
+
+        if (a != FULL_BOX) {
+            problems.add(labelA + " 的盒子里有 " + a + " 个" + what
+                + "，第一盒必须装满 " + FULL_BOX + " 个");
+        }
+        if (b < HALF_BOX) {
+            problems.add(labelB + " 的盒子里只有 " + b + " 个" + what
+                + "（至少要 " + HALF_BOX + " 个 = 5 组）");
+            return;
+        }
+        if (b == FULL_BOX) return;                // 第二盒满：第三盒随便
+
+        // 第二盒是半满：第三盒必须空
+        if (c != 0) {
+            problems.add(labelC + " 的盒子里有 " + c + " 个" + what
+                + "，第二盒是半满的时候第三盒必须空着"
+                + "（只允许 满满满 / 满满半 / 满满空 / 满半空 这四种）");
+        }
+    }
+
+    /**
+     * 一个潜影盒格子：必须是潜影盒、里面只有 {@code allowed}。
+     *
+     * @return 盒子里一共有几个；盒子本身不对返回 -1（问题已经记过了）
+     */
+    private static int boxItemsIn(SingleStageData data, List<String> problems, int index,
+                                  String label, String what, Set<Item> allowed) {
         ItemStack stack = data.stack(index);
         if (stack.isEmpty()) {
             problems.add(label + " 是空的，要放装" + what + "的潜影盒");
-            return;
+            return -1;
         }
         if (!ShulkerUtils.isShulkerBox(stack)) {
             problems.add(label + " 是 " + SingleStageData.idOf(stack) + "，要放潜影盒");
-            return;
+            return -1;
         }
 
         int total = 0;
         for (ItemStack inner : ShulkerUtils.contents(stack)) {
             if (!allowed.contains(inner.getItem())) {
-                problems.add(label + " 的盒子里有 " + SingleStageData.idOf(inner)
-                    + "，只能装" + what);
-                return;
+                problems.add(label + " 的盒子里有 " + SingleStageData.idOf(inner) + "，只能装" + what);
+                return -1;
             }
             total += inner.getCount();
         }
-        if (minItems > 0 && total < minItems) {
-            problems.add(label + " 的盒子里只有 " + total + " 个" + what + "（要 ≥" + minItems + "）");
-        }
-    }
-
-    /** 前面那格的东西不能比后面那格少（卸货装回去的时候也是按这个顺序放的）。 */
-    private static void descending(List<String> problems, SingleStageData data, String what,
-                                   String firstLabel, int firstIndex,
-                                   String secondLabel, int secondIndex) {
-        int first = boxItems(data.stack(firstIndex));
-        int second = boxItems(data.stack(secondIndex));
-        if (first < second) {
-            problems.add(firstLabel + " 的" + what + "（" + first + "）比 " + secondLabel
-                + " 的（" + second + "）还少，顺序反了（多的要在前面）");
-        }
-    }
-
-    /** 一盒东西一共几个。 */
-    public static int boxItems(ItemStack box) {
-        int total = 0;
-        for (ItemStack inner : ShulkerUtils.contents(box)) total += inner.getCount();
         return total;
     }
 }

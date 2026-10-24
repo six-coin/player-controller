@@ -14,11 +14,16 @@ public final class MineStationData {
     private MinePlace safe_point;
     private MinePlace food_provider;
     private MinePlace totem_provider;
+    private MinePlace empty_shulker_box_recycler;
+    private MinePlace inventory_temp;
     private List<MinePlace> item_collector = new ArrayList<>();
     private List<MinePlace> tool_cache = new ArrayList<>();
     private List<MinePlace> slime_cache = new ArrayList<>();
     private List<MinePlace> cobblestone_cache = new ArrayList<>();
+    private List<MinePlace> item_temp = new ArrayList<>();
     private List<MinePlace> unloading_shulker_box_placement = new ArrayList<>();
+    private List<MinePlace> supplement_shulker_box_placement = new ArrayList<>();
+    private List<MinePlace> temp_shulker_box_placement = new ArrayList<>();
 
     MinePlace safePoint() {
         return safe_point;
@@ -44,6 +49,22 @@ public final class MineStationData {
         this.totem_provider = value;
     }
 
+    MinePlace emptyShulkerBoxRecycler() {
+        return empty_shulker_box_recycler;
+    }
+
+    void emptyShulkerBoxRecycler(MinePlace value) {
+        this.empty_shulker_box_recycler = value;
+    }
+
+    MinePlace inventoryTemp() {
+        return inventory_temp;
+    }
+
+    void inventoryTemp(MinePlace value) {
+        this.inventory_temp = value;
+    }
+
     List<MinePlace> itemCollector() {
         if (item_collector == null) item_collector = new ArrayList<>();
         return item_collector;
@@ -64,9 +85,24 @@ public final class MineStationData {
         return cobblestone_cache;
     }
 
+    List<MinePlace> itemTemp() {
+        if (item_temp == null) item_temp = new ArrayList<>();
+        return item_temp;
+    }
+
     List<MinePlace> unloadingShulkerBoxPlacement() {
         if (unloading_shulker_box_placement == null) unloading_shulker_box_placement = new ArrayList<>();
         return unloading_shulker_box_placement;
+    }
+
+    List<MinePlace> supplementShulkerBoxPlacement() {
+        if (supplement_shulker_box_placement == null) supplement_shulker_box_placement = new ArrayList<>();
+        return supplement_shulker_box_placement;
+    }
+
+    List<MinePlace> tempShulkerBoxPlacement() {
+        if (temp_shulker_box_placement == null) temp_shulker_box_placement = new ArrayList<>();
+        return temp_shulker_box_placement;
     }
 
     /**
@@ -78,6 +114,8 @@ public final class MineStationData {
         if (safe_point != null) safe_point.id(1);
         if (food_provider != null) food_provider.id(1);
         if (totem_provider != null) totem_provider.id(1);
+        if (empty_shulker_box_recycler != null) empty_shulker_box_recycler.id(1);
+        if (inventory_temp != null) inventory_temp.id(1);
 
         int id = 1;
         for (MinePlace place : itemCollector()) place.id(id++);
@@ -88,6 +126,12 @@ public final class MineStationData {
         id = 1;
         for (MinePlace place : cobblestoneCache()) place.id(id++);
         id = 1;
+        for (MinePlace place : itemTemp()) place.id(id++);
+        id = 1;
         for (MinePlace place : unloadingShulkerBoxPlacement()) place.id(id++);
+        id = 1;
+        for (MinePlace place : supplementShulkerBoxPlacement()) place.id(id++);
+        id = 1;
+        for (MinePlace place : tempShulkerBoxPlacement()) place.id(id++);
     }
 }

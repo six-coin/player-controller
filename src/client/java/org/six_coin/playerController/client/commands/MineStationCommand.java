@@ -47,6 +47,8 @@ import java.util.concurrent.CompletableFuture;
  * /pc mine station safe_point set &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | set_here
  * /pc mine station food_provider set &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | set_target
  * /pc mine station totem_provider set &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | set_target
+ * /pc mine station empty_shulker_box_recycler set … | set_target
+ * /pc mine station inventory_temp set … | set_target
  *
  * /pc mine station item_collector add &lt;item_id&gt; &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt;
  * /pc mine station item_collector add_target &lt;item_id&gt;
@@ -58,8 +60,15 @@ import java.util.concurrent.CompletableFuture;
  *                          del &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | del_target | list
  * /pc mine station slime_cache 同上
  * /pc mine station cobblestone_cache 同上
+ * /pc mine station item_temp 同上（要求 ≥162 个空闲格子、不能有潜影盒）
  * /pc mine station unloading_shulker_box_placement 同上（要正好 9 个，而且都空着）
+ * /pc mine station supplement_shulker_box_placement 同上（要正好 6 个）
+ * /pc mine station temp_shulker_box_placement 同上（要正好 3 个）
  * </pre>
+ *
+ * <p>三个「潜影盒摆放处」的检查方式和别的部分不一样：不算 {@code access_position}，
+ * 而是要求<b>摆放处上面那一格是路径点</b>，而且那个路径点和安全点双向可达。
+ * 产物收集（{@code item_collector}）仍然按落点算。
  *
  * <p>和备货的工作站不一样：挖掘站不要求所有容器都在触及范围内，所以 set / add 只记坐标、不查距离；
  * 每个容器在哪里开（{@code access_position}）由 {@code check} 算出来。
@@ -373,12 +382,11 @@ public final class MineStationCommand {
             + " " + DimensionUtils.display(dimension) + " " + pos.toShortString()
             + "（现在 " + places.size() + " 个" + (added == null ? "" : "，#" + added.id()) + "）"));
 
-        // 卸货潜影盒摆放处要正好 9 个：允许先多配，但超了要说一声
-        if (part == MineStationPart.UNLOADING_PLACEMENT
-            && places.size() > MineStationCheckAction.UNLOADING_PLACEMENT_COUNT) {
+        // 潜影盒摆放处要正好 N 个：允许先多配，但超了要说一声
+        int required = MineStationCheckAction.requiredPlacements(part);
+        if (required > 0 && places.size() > required) {
             source.sendFeedback(Component.literal("§e提示：" + part.display() + " 必须正好 "
-                + MineStationCheckAction.UNLOADING_PLACEMENT_COUNT + " 个，现在有 " + places.size()
-                + " 个，check 会报错（多出来的请 del 掉）"));
+                + required + " 个，现在有 " + places.size() + " 个，check 会报错（多出来的请 del 掉）"));
         }
 
         hintBlockType(source, part, pos);

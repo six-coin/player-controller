@@ -34,7 +34,7 @@ import org.six_coin.playerController.client.util.ChatUtils;
  *
  * <p>和原版键位、和备货的动作队列都**无关**：它自己每 tick 跑一遍，不排队。
  * 挑目标的规则是「最近的优先，一次只打一个」，范围就是 {@code /pc config actions reach}
- * （默认 4.5，和挖方块、开容器用的是同一个数，不区分看不看得见）。
+ * （默认 5，和挖方块、开容器用的是同一个数，不区分看不看得见）。
  *
  * <p>固定开着的几件事（不给开关）：
  *

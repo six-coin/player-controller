@@ -65,6 +65,14 @@ class SingleStageStage2 extends SingleStageStep {
      */
     private static final int STUCK_TICKS = 20 * 10;
 
+    /**
+     * 12 个点走完、区域里还剩方块时，最多再补几轮。
+     *
+     * <p>沙砾 / 沙子会掉：在 A 点挖掉一块，B 点那边的沙砾可能过一会儿才落进已经走过的区域，
+     * 这时候那一块就没人管了。补几轮就能把它捡回来（每轮从离剩下的方块最近的点开始）。
+     */
+    private static final int MAX_EXTRA_PASSES = 3;
+
     private enum Phase {
         /** 挖，挖不动了就去下一个点。 */
         MINE,
@@ -91,6 +99,12 @@ class SingleStageStage2 extends SingleStageStep {
     private int progressTimer;
     private int lastRemaining = -1;
     private int stuckTicks;
+
+    /** 12 个点走完之后又补了几轮（见 {@link #MAX_EXTRA_PASSES}）。 */
+    private int extraPasses;
+
+    /** 这一轮已经走过几个点了（补轮的时候要重新数）。 */
+    private int visited;
 
     SingleStageStage2(SingleStageCtx ctx, int iteration) {
         super(ctx);
@@ -213,7 +227,7 @@ class SingleStageStage2 extends SingleStageStep {
         nextWaypoint(mc);
     }
 
-    /** 这一站结束了：去下一个走位点（走完了就收尾）。 */
+    /** 这一站结束了：去下一个走位点（走完了就收尾，或者补一轮）。 */
     private void nextWaypoint(Minecraft mc) {
         quietTicks = 0;
         settledTicks = 0;
@@ -221,16 +235,36 @@ class SingleStageStage2 extends SingleStageStep {
         lastRemaining = -1;
         stuckTicks = 0;
 
-        index++;
-        if (index >= WAYPOINTS.length) {
-            int left = remainingBlocks(mc).size();
-            if (left > 0) {
-                ChatUtils.error(phase() + "：12 个点都走完了，区域里还剩 " + left + " 个方块");
+        visited++;
+        if (visited >= WAYPOINTS.length) {
+            List<BlockPos> left = remainingBlocks(mc);
+
+            // 还剩东西（多半是掉下来的沙砾 / 沙子）：从离它最近的点再走一轮
+            if (!left.isEmpty() && extraPasses < MAX_EXTRA_PASSES) {
+                extraPasses++;
+                visited = 0;
+                index = nearestWaypoint(left.get(0)) - 1;     // 下面 +1 之后正好是那个点
+                ChatUtils.info(phase() + "：区域里还剩 " + left.size() + " 个方块（第一个 "
+                    + left.get(0).toShortString() + "），从第 " + (index + 2) + " 个点再走一轮（第 "
+                    + (extraPasses + 1) + " 轮）");
+                goToNextWaypoint();
+                return;
+            }
+
+            if (!left.isEmpty()) {
+                ChatUtils.error(phase() + "：12 个点走完了、又补了 " + extraPasses + " 轮，区域里还剩 "
+                    + left.size() + " 个方块（例如 " + left.get(0).toShortString() + "）");
             }
             phase = Phase.END;
             return;
         }
 
+        goToNextWaypoint();
+    }
+
+    /** 走到下一个走位点（环形，走完 12 个点回到 0）。 */
+    private void goToNextWaypoint() {
+        index = Math.floorMod(index + 1, WAYPOINTS.length);
         BlockPos next = waypoint(index);
         ChatUtils.debug(phase() + "：去第 " + (index + 1) + " 个点 " + next.toShortString());
         startChild(new SingleStageSnapAction(ctx, next), Phase.MINE);
@@ -260,6 +294,20 @@ class SingleStageStage2 extends SingleStageStep {
     /** 第 {@code i} 个走位点（走位层上）。 */
     private BlockPos waypoint(int i) {
         return ctx.routePoint(walkLayer, WAYPOINTS[i][0], WAYPOINTS[i][1]);
+    }
+
+    /** 离 {@code pos} 最近的那个走位点（补轮的时候从那儿开始，不用绕一圈）。 */
+    private int nearestWaypoint(BlockPos pos) {
+        int best = 0;
+        double bestDistance = Double.MAX_VALUE;
+        for (int i = 0; i < WAYPOINTS.length; i++) {
+            double distance = waypoint(i).distSqr(pos);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+        return best;
     }
 
     /** 区域里还没挖掉的方块（mine simple 眼里的「有东西」：非空气、非流体）。 */
