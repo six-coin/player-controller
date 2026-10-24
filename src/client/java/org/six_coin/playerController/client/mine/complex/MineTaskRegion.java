@@ -43,7 +43,7 @@ import java.util.List;
  *       （机器站在区域顶上，还要留 16 格）。</li>
  * </ul>
  *
- * <p>{@code inspected} 是 {@code /pc mine b_inspect_region} 写进去的：检查通过才是 {@code true}，
+ * <p>{@code inspected} 是 {@code /pc mine task <task_name> b_inspect_region} 写进去的：检查通过才是 {@code true}，
  * 每次 {@code a_set_region} 都会重置成 {@code false}。
  */
 public final class MineTaskRegion {
@@ -180,7 +180,7 @@ public final class MineTaskRegion {
         return new BlockPos(x1, y2 + 1, z1);
     }
 
-    /** 检查通过了没有（{@code /pc mine b_inspect_region} 写的）。 */
+    /** 检查通过了没有（{@code b_inspect_region} 写的）。 */
     public boolean inspected() {
         return inspected;
     }

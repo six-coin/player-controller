@@ -14,7 +14,6 @@ import java.util.List;
  * <pre>
  * {
  *   "complex": ["test_task"],
- *   "last_task": "test_task",
  *   "simple": {
  *     "dimension": "minecraft:overworld",
  *     "x1": 1, "y1": 0, "z1": 1,
@@ -26,29 +25,15 @@ import java.util.List;
  * <p>字段名（snake_case）就是文件里的键名 —— Gson 直接按字段名读写，所以别改名。
  * {@code simple} 是 {@code /pc mine simple} 的缓存：写进去之后重新进世界也还在（见
  * {@code MineManager#resumeSaved()}）；没有任务的时候是 null，Gson 就不会写出来。
- *
- * <p>{@code last_task} 是最近一次 {@code a_set_region} 的那个任务：{@code /pc mine b_inspect_region}
- * 不写任务名的时候就检查它。删任务的时候会一起清掉。
  */
 public final class MineComplexData {
 
     private List<String> complex = new ArrayList<>();
-    private String lastTask;
     private SimpleRegion simple;
 
     List<String> complex() {
         if (complex == null) complex = new ArrayList<>();
         return complex;
-    }
-
-    /** 最近一次 {@code a_set_region} 的任务名；没设过就是 null。 */
-    @Nullable
-    public String lastTask() {
-        return lastTask;
-    }
-
-    public void lastTask(@Nullable String value) {
-        this.lastTask = value;
     }
 
     /** simple 的缓存；没有就是 null。 */

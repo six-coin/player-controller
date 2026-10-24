@@ -17,7 +17,6 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
-import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.mine.MineFilter;
@@ -61,16 +60,15 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
  *
  * /pc mine complex add_task &lt;task_name&gt;      建一个复杂挖掘任务（mine.json + mine/&lt;task&gt;/region.json）
  * /pc mine complex del_task &lt;task_name&gt;      删任务（整个 mine/&lt;task&gt;/ 目录一起删）
- * /pc mine complex task &lt;task_name&gt; a_set_region &lt;x1&gt; &lt;y1&gt; &lt;z1&gt; &lt;x2&gt; &lt;y2&gt; &lt;z2&gt; &lt;dim&gt;
+ * /pc mine task &lt;task_name&gt; a_set_region &lt;x1&gt; &lt;y1&gt; &lt;z1&gt; &lt;x2&gt; &lt;y2&gt; &lt;z2&gt; &lt;dim&gt;
  *                                            写 region.json（范围原样记下，inspected = false）
- * /pc mine complex task &lt;task_name&gt; b_inspect_region
- *                                            检查这个任务的挖掘区（下面那个不带任务名的写法是同一件事）
- * /pc mine b_inspect_region [task_name]      同上，任务名可以省
+ * /pc mine task &lt;task_name&gt; b_inspect_region  检查这个任务的挖掘区
+ *                                            （{@code /pc mine complex task <task_name> …} 是同一套）
  * </pre>
  *
  * <p>simple 的范围会记进 {@code world_<n>/mine.json}，重新进世界自动接回来
  * （见 {@link MineManager#resumeSaved()}）。复杂任务的清单也在这个文件里，
- * 每个任务的挖掘区 / 信标单独放在 {@code world_<n>/mine/<task>/region.json}。
+ * 每个任务的挖掘区单独放在 {@code world_<n>/mine/<task>/region.json}。
  *
  * <p>过滤器是三份文件（{@link MineFilterConfig}）：{@code mine/mode.json} 决定用哪张表，
  * {@code whitelist.json} / {@code blacklist.json} 是方块 id 数组。开任务时取一份快照，
@@ -91,7 +89,7 @@ public final class MineCommand {
             .then(simple())
             .then(lists())
             .then(MineStationCommand.build())
-            .then(inspectRegion())
+            .then(taskCommand())
             .then(ClientCommands.literal("debug_chunk_miner")
                 .then(ClientCommands.argument("detail", StringArgumentType.greedyString())
                     .executes(MineCommand::debugChunkMiner)))
@@ -400,9 +398,9 @@ public final class MineCommand {
         source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "complex add_task|del_task <task_name>§7 - 建 / 删复杂挖掘任务"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
-            + "complex task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区"));
+            + "task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
-            + "b_inspect_region [task_name]§7 - 检查挖掘区（路径点 / 安全点 / 区块里的方块）"));
+            + "task <task_name> b_inspect_region§7 - 检查挖掘区（路径点 / 安全点 / 区块里的方块）"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "debug_chunk_miner <detail>§7 - §c【临时调试】§7挖掉下面那个子区块（detail 是必填的 JSON）"));
         source.sendFeedback(Component.literal("§7    §8例：§f{\"item_collector_list\":[\"minecraft:coal\"],"
@@ -428,22 +426,11 @@ public final class MineCommand {
     // ------------------------------------------------------------------
 
     /**
-     * {@code /pc mine b_inspect_region [task_name]}：检查一个任务的挖掘区。
+     * {@code /pc mine task <task_name> b_inspect_region}：检查这个任务的挖掘区。
      *
-     * <p>不写任务名就检查「最近一次 {@code a_set_region} 的那个任务」；要是没记过、或者记的那个
-     * 已经没有区域了，就看是不是只有一个任务设过区域，只有一个就用它，否则要求写清楚。
+     * <p>任务名是必填的（写在 {@code task} 那一层）。
      */
-    private static LiteralArgumentBuilder<FabricClientCommandSource> inspectRegion() {
-        return ClientCommands.literal("b_inspect_region")
-            .executes(context -> inspectRegion(context, null))
-            .then(ClientCommands.argument("task_name", StringArgumentType.word())
-                .suggests(MineCommand::suggestTasks)
-                .executes(context -> inspectRegion(context,
-                    StringArgumentType.getString(context, "task_name"))));
-    }
-
-    private static int inspectRegion(CommandContext<FabricClientCommandSource> context,
-                                     @Nullable String explicitName) {
+    private static int inspectRegion(CommandContext<FabricClientCommandSource> context, String name) {
         FabricClientCommandSource source = context.getSource();
         net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         if (mc.level == null || mc.player == null) {
@@ -452,26 +439,6 @@ public final class MineCommand {
         }
 
         MineComplexManager manager = MineComplexManager.get();
-        String name = explicitName;
-
-        if (name == null) {
-            name = manager.lastTask();
-            if (name == null) {
-                List<String> withRegion = manager.tasksWithRegion();
-                if (withRegion.isEmpty()) {
-                    source.sendError(Component.literal("还没有设过区域的任务（先 " + ROOT
-                        + "complex task <task_name> a_set_region …）"));
-                    return 0;
-                }
-                if (withRegion.size() > 1) {
-                    source.sendError(Component.literal("有好几个任务设过区域（"
-                        + String.join("、", withRegion) + "），写清楚检查哪一个："
-                        + ROOT + "b_inspect_region <task_name>"));
-                    return 0;
-                }
-                name = withRegion.get(0);
-            }
-        }
 
         if (!manager.has(name)) {
             source.sendError(Component.literal("没有这个挖掘任务：" + name
@@ -482,7 +449,7 @@ public final class MineCommand {
         MineTaskRegion region = manager.region(name);
         if (region == null) {
             source.sendError(Component.literal("挖掘任务 " + name + " 还没设区域（"
-                + ROOT + "complex task " + name + " a_set_region …）"));
+                + ROOT + "task " + name + " a_set_region …）"));
             return 0;
         }
 
@@ -564,10 +531,10 @@ public final class MineCommand {
         source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "complex add_task|del_task <task_name>§7 - 建 / 删任务"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
-            + "complex task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区"));
+            + "task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
-            + "complex task <task_name> b_inspect_region§7 - 检查挖掘区（也可以 §f" + ROOT
-            + "b_inspect_region <task_name>§7）"));
+            + "task <task_name> b_inspect_region§7 - 检查挖掘区"));
+        source.sendFeedback(Component.literal("§7    §8（`complex task <task_name> ...` 是同一套，两种写法都行）"));
         source.sendFeedback(Component.literal("  文件: " + manager.currentFile()));
     }
 
@@ -592,7 +559,7 @@ public final class MineCommand {
             + manager.taskCount() + " 个）"));
         source.sendFeedback(Component.literal("  目录: " + manager.currentTaskDir(name)
             + "（region.json 现在是空的 {}）"));
-        source.sendFeedback(Component.literal("§7  下一步：§f" + ROOT + "complex task " + name
+        source.sendFeedback(Component.literal("§7  下一步：§f" + ROOT + "task " + name
             + " a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>"));
         return 1;
     }
@@ -686,7 +653,7 @@ public final class MineCommand {
         MineTaskRegion region = manager.region(name);
         if (region == null) {
             source.sendFeedback(Component.literal("挖掘任务 " + name + " 还没设区域（"
-                + ROOT + "complex task " + name + " a_set_region …）"));
+                + ROOT + "task " + name + " a_set_region …）"));
             source.sendFeedback(Component.literal("  文件: " + manager.currentRegionFile(name)));
             return 1;
         }
@@ -698,9 +665,8 @@ public final class MineCommand {
         source.sendFeedback(Component.literal("  入口（x1, y2+1, z1）: "
             + region.headPos().toShortString()));
         source.sendFeedback(Component.literal("  inspected: " + region.inspected()));
-        source.sendFeedback(Component.literal("§7  §f" + ROOT + "complex task " + name
-            + " b_inspect_region§7 - 检查这个区域（也可以 §f" + ROOT
-            + "b_inspect_region " + name + "§7）"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "task " + name
+            + " b_inspect_region§7 - 检查这个区域"));
         source.sendFeedback(Component.literal("  文件: " + manager.currentRegionFile(name)));
         return 1;
     }
@@ -754,16 +720,13 @@ public final class MineCommand {
             return 0;
         }
 
-        // b_inspect_region 不写任务名的时候检查的就是这个
-        manager.setLastTask(name);
-
         source.sendFeedback(Component.literal("已写入任务 §f" + name + "§r 的挖掘区：" + region.describe()));
         source.sendFeedback(Component.literal("  范围: " + region.min().toShortString() + " ~ "
             + region.max().toShortString() + "（" + region.volume() + " 格，"
             + region.chunkCount() + " 个区块）"));
         source.sendFeedback(Component.literal("  入口（x1, y2+1, z1）: " + region.headPos().toShortString()));
-        source.sendFeedback(Component.literal("§7  下一步：§f" + ROOT + "b_inspect_region " + name
-            + "§7；文件：" + file));
+        source.sendFeedback(Component.literal("§7  下一步：§f" + ROOT + "task " + name
+            + " b_inspect_region§7；文件：" + file));
         return 1;
     }
 }

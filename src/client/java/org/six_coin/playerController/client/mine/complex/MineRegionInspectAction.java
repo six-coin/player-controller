@@ -28,7 +28,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * {@code /pc mine b_inspect_region [task_name]} 的执行体：检查一个任务的挖掘区。
+ * {@code /pc mine task <task_name> b_inspect_region} 的执行体：检查一个任务的挖掘区。
  *
  * <p>分三关，任何一关不过就失败（不写 {@code inspected}）：
  * <ol>
