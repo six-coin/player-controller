@@ -3,6 +3,7 @@ package org.six_coin.playerController.client.mine.complex.single;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.mine.MineFilter;
@@ -92,9 +93,6 @@ public final class SingleStageCtx {
     private static final int[][] ROUTE = {{14, 14}, {14, 1}, {10, 1}, {10, 14},
         {5, 14}, {5, 1}, {1, 1}, {1, 14}};
 
-    /** 每个子区块要挖 8 轮，每轮 2 层。 */
-    public static final int ITERATIONS = 8;
-
     // ------------------------------------------------------------------
 
     public final String dimension;
@@ -104,6 +102,8 @@ public final class SingleStageCtx {
     public final BlockPos targetMin;
     /** 本次用的方块过滤器（和 mine simple 是同一份快照）。 */
     public final MineFilter filter;
+    /** {@code detail}：收集清单、五个方向怎么填、挖几层。 */
+    public final SingleStageDetail detail;
     /** item_collector 里那些物品的 id。 */
     public final Set<String> collectorItems;
     /** 子区块数据缓存（物品栏 + 六个盒子）。 */
@@ -121,13 +121,24 @@ public final class SingleStageCtx {
     public final List<Integer> placedBoxSlots = new ArrayList<>();
 
     public SingleStageCtx(String dimension, BlockPos initialMin, MineFilter filter,
-                          Set<String> collectorItems, SingleStageData data) {
+                          SingleStageDetail detail, SingleStageData data) {
         this.dimension = dimension;
         this.initialMin = initialMin.immutable();
         this.targetMin = initialMin.below(16);
         this.filter = filter;
-        this.collectorItems = Set.copyOf(collectorItems);
+        this.detail = detail;
+        this.collectorItems = Set.copyOf(detail.itemCollectorList());
         this.data = data;
+    }
+
+    /** 这次要挖几层（一个 level = 2 格）。 */
+    public int levels() {
+        return detail.levels();
+    }
+
+    /** 最底层（最后一轮）的序号。 */
+    public int lastIteration() {
+        return detail.levels() - 1;
     }
 
     // ------------------------------------------------------------------
@@ -273,11 +284,18 @@ public final class SingleStageCtx {
     /**
      * 目标区域外面那一圈「壳」：东西南北 4 面 16×2 的墙 + 下面 16×16 的底，都是 1 格厚。
      *
-     * <p>就是需求里的「边缘目标区域」：包裹住目标区域的那一层，往这里补粘液块就不会漏
+     * <p>就是需求里的「边缘目标区域」：包裹住目标区域的那一层，往这里补方块就不会漏
      * （水 / 熔岩 / 空气都是漏洞）。上面那一层不算 —— 那是我们自己走位的地方。
      *
-     * <p><b>某一面旁边那个子区块整块都是空气的话，这一面的墙就不建</b>
-     * （见 {@link #subChunkEmpty}）：那边本来就是空的，挡了也没用，纯浪费粘液块。
+     * <p><b>每个方向单独配置</b>（见 {@link SingleStageDetail}）：
+     * <ul>
+     *   <li>{@code auto}：旁边那个子区块整块都是空气的话这一面墙就不建（挡了也没用，纯浪费）；
+     *       底部不看外面空不空，一律建；</li>
+     *   <li>{@code cobblestone}：不管外面空不空都建（这一面用圆石填，见 {@link #cobbleCells}）。</li>
+     * </ul>
+     *
+     * <p>底部还有一条固定规则：**不是最底层**的时候底部一律填黏液块（下一轮要把它挖掉），
+     * 只有最底层才看 {@code bottom} 的配置。
      *
      * @param level 拿不到世界（{@code null}）就按「四面都要建」算
      */
@@ -289,10 +307,10 @@ public final class SingleStageCtx {
         int top = regionTop(iteration);
         int subY = targetMin.getY();
 
-        boolean west = !skipWall(level, minX - 16, subY, minZ);
-        boolean east = !skipWall(level, minX + 16, subY, minZ);
-        boolean north = !skipWall(level, minX, subY, minZ - 16);
-        boolean south = !skipWall(level, minX, subY, minZ + 16);
+        boolean west = wallNeeded(Direction.WEST, level, minX - 16, subY, minZ);
+        boolean east = wallNeeded(Direction.EAST, level, minX + 16, subY, minZ);
+        boolean north = wallNeeded(Direction.NORTH, level, minX, subY, minZ - 16);
+        boolean south = wallNeeded(Direction.SOUTH, level, minX, subY, minZ + 16);
 
         for (int y = bottom; y <= top; y++) {
             for (int i = 0; i < 16; i++) {
@@ -308,6 +326,63 @@ public final class SingleStageCtx {
             }
         }
         return cells;
+    }
+
+    /**
+     * 这一轮里「要用圆石填」的壳格。
+     *
+     * <p>= 配置成 {@code cobblestone} 的那几面墙 + （最底层时配置成 {@code cobblestone} 的底面）。
+     * 不是最底层的时候底部一律是黏液块，所以不进这个列表。
+     */
+    public List<BlockPos> cobbleCells(int iteration, @Nullable Level level) {
+        List<BlockPos> cells = new ArrayList<>();
+        int minX = targetMin.getX();
+        int minZ = targetMin.getZ();
+        int bottom = regionBottom(iteration);
+        int top = regionTop(iteration);
+        int subY = targetMin.getY();
+
+        boolean west = wallNeeded(Direction.WEST, level, minX - 16, subY, minZ);
+        boolean east = wallNeeded(Direction.EAST, level, minX + 16, subY, minZ);
+        boolean north = wallNeeded(Direction.NORTH, level, minX, subY, minZ - 16);
+        boolean south = wallNeeded(Direction.SOUTH, level, minX, subY, minZ + 16);
+
+        boolean westCobble = west && detail.wall(Direction.WEST) == SingleStageDetail.WallMode.COBBLESTONE;
+        boolean eastCobble = east && detail.wall(Direction.EAST) == SingleStageDetail.WallMode.COBBLESTONE;
+        boolean northCobble = north && detail.wall(Direction.NORTH) == SingleStageDetail.WallMode.COBBLESTONE;
+        boolean southCobble = south && detail.wall(Direction.SOUTH) == SingleStageDetail.WallMode.COBBLESTONE;
+
+        if (westCobble || eastCobble || northCobble || southCobble) {
+            for (int y = bottom; y <= top; y++) {
+                for (int i = 0; i < 16; i++) {
+                    if (westCobble) cells.add(new BlockPos(minX - 1, y, minZ + i));
+                    if (eastCobble) cells.add(new BlockPos(minX + 16, y, minZ + i));
+                    if (northCobble) cells.add(new BlockPos(minX + i, y, minZ - 1));
+                    if (southCobble) cells.add(new BlockPos(minX + i, y, minZ + 16));
+                }
+            }
+        }
+
+        // 底部：只有最底层才可能用圆石
+        if (iteration == lastIteration()
+            && detail.bottom() == SingleStageDetail.WallMode.COBBLESTONE) {
+            for (int x = 0; x < 16; x++) {
+                for (int z = 0; z < 16; z++) {
+                    cells.add(new BlockPos(minX + x, bottom - 1, minZ + z));
+                }
+            }
+        }
+        return cells;
+    }
+
+    /**
+     * 这个方向的墙要不要建。
+     *
+     * <p>{@code cobblestone} 一律要（明确指定了）；{@code auto} 才看旁边那个子区块空不空。
+     */
+    private boolean wallNeeded(Direction direction, @Nullable Level level, int x, int y, int z) {
+        if (detail.wall(direction) == SingleStageDetail.WallMode.COBBLESTONE) return true;
+        return !skipWall(level, x, y, z);
     }
 
     /** 这一面旁边那个子区块是不是整块空气（是就不用建这面墙）。 */
@@ -435,6 +510,15 @@ public final class SingleStageCtx {
     // ------------------------------------------------------------------
     // 认「刚挖下来的盒子」
     // ------------------------------------------------------------------
+
+    /** 物品栏里现在有几个潜影盒（0 ~ 背包最后一格）。 */
+    public int shulkerBoxCount() {
+        int count = 0;
+        for (int slot = 0; slot <= FILLER_END; slot++) {
+            if (ShulkerUtils.isShulkerBox(live(slot))) count++;
+        }
+        return count;
+    }
 
     /**
      * 物品栏里每个潜影盒的「格子 -> 内容指纹」。

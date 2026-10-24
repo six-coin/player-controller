@@ -2,9 +2,19 @@ package org.six_coin.playerController.client.mine;
 
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffectUtil;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.tags.TagKey;
@@ -123,5 +133,81 @@ public final class MineTools {
     public static int remaining(ItemStack stack) {
         if (stack == null || stack.isEmpty() || !stack.isDamageableItem()) return Integer.MAX_VALUE;
         return stack.getMaxDamage() - stack.getDamageValue();
+    }
+
+    // ------------------------------------------------------------------
+    // 「秒破」判定
+    // ------------------------------------------------------------------
+
+    /**
+     * 发包挖（同一 tick 里 START + STOP）要求的最小破坏进度。
+     *
+     * <p>服务端 {@code ServerPlayerGameMode#handleBlockBreakAction} 的 STOP 分支是
+     * {@code getDestroyProgress * (elapsed + 1) >= 0.7}；我们同一 tick 就把 START / STOP 发完，
+     * {@code elapsed = 0}，所以门槛就是 <b>0.7</b>。低于这个值的方块发多少包都挖不掉。
+     */
+    public static final float INSTA_THRESHOLD = 0.7F;
+
+    /**
+     * 这个方块在「手上拿着 {@code tool}」的时候能不能被一个 START+STOP 秒掉。
+     *
+     * @param tool     {@code null} / 空 = 空手
+     * @param hardness 这个方块的硬度（{@code state.getDestroySpeed(level, pos)}）
+     */
+    public static boolean canInstaMine(BlockState state, @Nullable ItemStack tool,
+                                       @Nullable LivingEntity player, float hardness) {
+        if (hardness < 0.0F) return false;
+        return destroyProgress(state, tool, player, hardness) >= INSTA_THRESHOLD;
+    }
+
+    /**
+     * 复刻原版 {@code Player#getDestroySpeed} + {@code BlockState#getDestroyProgress} 的算法。
+     *
+     * <p>为什么不直接问游戏：{@code Player#getDestroySpeed} 用的是**当前选中格**的东西，
+     * 而这里要算的是「换成另一件工具会怎样」。
+     *
+     * <p>和原版的两点差异（都是故意的）：
+     * <ul>
+     *   <li><b>不算「人在空中 ÷ 5」那一项</b>：悬停飞行时服务端记的 onGround 是不是 true 说不准，
+     *       而实测挖得动，说明这一项没有生效；算上它会把几乎所有方块都判成「挖不动」；</li>
+     *   <li>不算「眼睛泡在水里」那一项（挖掘时本来就不下水）。</li>
+     * </ul>
+     */
+    public static float destroyProgress(BlockState state, @Nullable ItemStack tool,
+                                        @Nullable LivingEntity player, float hardness) {
+        boolean hasTool = tool != null && !tool.isEmpty();
+
+        float speed = hasTool ? tool.getDestroySpeed(state) : 1.0F;
+        if (speed > 1.0F && hasTool) {
+            int efficiency = efficiencyLevel(tool);
+            if (efficiency > 0) speed += efficiency * efficiency + 1.0F;
+        }
+
+        if (player != null) {
+            if (MobEffectUtil.hasDigSpeed(player)) {
+                speed *= 1.0F + (MobEffectUtil.getDigSpeedAmplification(player) + 1) * 0.2F;
+            }
+            MobEffectInstance fatigue = player.getEffect(MobEffects.MINING_FATIGUE);
+            if (fatigue != null) {
+                speed *= (float) Math.pow(0.3, fatigue.getAmplifier() + 1);
+            }
+            speed *= (float) player.getAttributeValue(Attributes.BLOCK_BREAK_SPEED);
+        }
+
+        boolean harvest = !state.requiresCorrectToolForDrops()
+            || (hasTool && tool.isCorrectToolForDrops(state));
+        int divisor = harvest ? 30 : 100;
+        return speed / hardness / (float) divisor;
+    }
+
+    /** 效率附魔的等级；没有是 0。 */
+    public static int efficiencyLevel(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return 0;
+        ItemEnchantments component =
+            stack.getOrDefault(DataComponents.ENCHANTMENTS, ItemEnchantments.EMPTY);
+        for (Holder<Enchantment> entry : component.keySet()) {
+            if (entry.is(Enchantments.EFFICIENCY)) return component.getLevel(entry);
+        }
+        return 0;
     }
 }

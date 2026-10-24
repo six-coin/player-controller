@@ -10,6 +10,7 @@ import net.minecraft.network.chat.Component;
 import org.six_coin.playerController.client.attack.AttackConfig;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
+import org.six_coin.playerController.client.eat.EatConfig;
 import org.six_coin.playerController.client.mending.MendingConfig;
 import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.mine.complex.MineComplexManager;
@@ -87,6 +88,7 @@ public final class ConfigCommand {
                     StationManager.get().switchWorld(num);
                     StockManager.get().switchWorld(num);
                     AttackConfig.get().switchWorld(num);
+                    EatConfig.get().switchWorld(num);
                     MendingConfig.get().switchWorld(num);
                     MineStationManager.get().switchWorld(num);
                     MineComplexManager.get().switchWorld(num);

@@ -73,6 +73,8 @@ public final class StationState {
     private final Map<Integer, Storage> itemStorage = new TreeMap<>();
     private final Map<Integer, Boolean> itemFinalFull = new TreeMap<>();
     private final Map<Integer, Map<String, Integer>> placements = new TreeMap<>();
+    /** 摆放处那个潜影盒还剩几个空格（check.json 数的；-1 = 不知道）。 */
+    private final Map<Integer, Integer> placementFreeSlots = new TreeMap<>();
     /** 下一个用哪个摆放处（初始 2；第一部分阶段3 结束时把值留给第二部分阶段3）。 */
     private int nextShulkerBoxPlacementId = 2;
 
@@ -132,9 +134,25 @@ public final class StationState {
                     int id = object.has("id") ? object.get("id").getAsInt() : parseInt(entry.getKey());
                     if (id <= 0) continue;
                     state.setPlacement(id, readItems(object.get("items")));
+                    state.setPlacementFreeSlots(id,
+                        object.has("free_slots") ? object.get("free_slots").getAsInt() : -1);
                 }
                 ChatUtils.debug("station_data：从 check.json 读到摆放处上的 "
                     + state.placements().size() + " 个潜影盒");
+            }
+
+            // 最终产物暂存盒（摆放处 #1）单独一份：备货要靠它判断「满了没有」
+            JsonElement stagingElement = root.getAsJsonObject().get("staging_placement");
+            if (stagingElement != null && stagingElement.isJsonObject()) {
+                JsonObject object = stagingElement.getAsJsonObject();
+                int id = object.has("id") ? object.get("id").getAsInt()
+                    : StationManager.STAGING_PLACEMENT_ID;
+                state.setPlacement(id, readItems(object.get("items")));
+                state.setPlacementFreeSlots(id,
+                    object.has("free_slots") ? object.get("free_slots").getAsInt() : -1);
+                ChatUtils.debug("station_data：最终产物暂存盒 #" + id + " 里有 "
+                    + state.placement(id).size() + " 种东西，剩 "
+                    + state.placementFreeSlots(id) + " 格");
             }
         } catch (Exception e) {
             ChatUtils.error("读 " + checkFile + " 失败：" + e.getMessage());
@@ -242,6 +260,7 @@ public final class StationState {
     /** 摆放处的潜影盒被拿走了。 */
     public void clearPlacement(int id) {
         placements.remove(id);
+        placementFreeSlots.remove(id);
     }
 
     public boolean hasPlacement(int id) {
@@ -250,6 +269,20 @@ public final class StationState {
 
     public Map<String, Integer> placement(int id) {
         return placements.getOrDefault(id, Map.of());
+    }
+
+    /** 摆放处那个盒子还剩几个空格；-1 = 不知道。 */
+    public int placementFreeSlots(int id) {
+        return placementFreeSlots.getOrDefault(id, -1);
+    }
+
+    /** 摆放处那个盒子满了没有（还剩 0 格）；不知道按「没满」算。 */
+    public boolean placementFull(int id) {
+        return placementFreeSlots(id) == 0;
+    }
+
+    public void setPlacementFreeSlots(int id, int freeSlots) {
+        placementFreeSlots.put(id, freeSlots);
     }
 
     public Map<Integer, Map<String, Integer>> placements() {

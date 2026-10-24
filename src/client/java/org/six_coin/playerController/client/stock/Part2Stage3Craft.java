@@ -90,7 +90,7 @@ final class Part2Stage3Craft extends StockStep {
     private static final int RESULT_FROM = RecipePlanner.RESULT_HOTBAR_FROM;
     private static final int RESULT_TO = RecipePlanner.RESULT_HOTBAR_TO;
 
-    private static final int PICKUP_WAIT_TICKS = 20 * 15;
+    private static final int PICKUP_WAIT_TICKS = 100;
 
     /** 往暂存盒放成品时，「物品栏放不下 → 先放进暂存盒腾地方 → 接着取」最多来回几次。 */
     private static final int MAX_STAGING_FLUSHES = 8;
@@ -166,6 +166,10 @@ final class Part2Stage3Craft extends StockStep {
     private boolean flightHeld;
 
     private int totalTicks;
+    /** 挖之前物品栏里有几个潜影盒（挖完必须比这个多一个才算「捡到了」）。 */
+    private int boxesBeforePickup;
+
+    /** 盒子捡起来以后落在哪一格（正常情况下就是快捷栏第二格）。 */
     private int pickupHotbar = PICKUP_HOTBAR;
     private int boxesMined;
     /** 刚刚那次合成**实际**做出来多少个（数量不是单次产量整数倍时会比要求的多）。 */
@@ -1318,6 +1322,8 @@ final class Part2Stage3Craft extends StockStep {
                 return;
             }
             pickupHotbar = PICKUP_HOTBAR;
+            boxesBeforePickup = countShulkerBoxes();
+            ChatUtils.debug("挖之前物品栏里有 " + boxesBeforePickup + " 个潜影盒");
         });
 
         pushChild("挖掉摆放处 #" + placementId + " 的潜影盒",
@@ -1330,16 +1336,19 @@ final class Part2Stage3Craft extends StockStep {
                 boxesMined++;
             });
 
+        // **必须真的看到盒子进了物品栏**（潜影盒个数比挖之前多一个）才能回站立点，等 5 秒
         pushMoveTo(spot.pos().above(), "走到潜影盒上面那一格 " + spot.pos().above().toShortString());
         pushChild("等自然下落并捡起潜影盒",
-            () -> new WaitAction("捡起潜影盒", this::hasPickupBox, PICKUP_WAIT_TICKS, false),
+            () -> new WaitAction("捡起潜影盒", this::pickedUpBox, PICKUP_WAIT_TICKS, false),
             action -> {
                 if (!((WaitAction) action).met()) {
-                    fail("等了 " + PICKUP_WAIT_TICKS + " tick，快捷栏第二格还是没有潜影盒");
+                    fail("等了 " + (PICKUP_WAIT_TICKS / 20) + " 秒，潜影盒还没进物品栏（挖之前 "
+                        + boxesBeforePickup + " 个，现在 " + countShulkerBoxes() + " 个）");
                     return;
                 }
                 pickupHotbar = PICKUP_HOTBAR;
-                ChatUtils.info("潜影盒已经捡到快捷栏第二格（" + describe(hotbarStack(PICKUP_HOTBAR)) + "）");
+                ChatUtils.info("潜影盒已经捡到物品栏（快捷栏第二格："
+                    + describe(hotbarStack(PICKUP_HOTBAR)) + "）");
             });
 
         pushChild("往上飞一格（move y 1）", () -> new MoveAction(Direction.Axis.Y, 1), null);
@@ -1632,8 +1641,20 @@ final class Part2Stage3Craft extends StockStep {
             : mc.level.getBlockState(pos);
     }
 
-    private boolean hasPickupBox() {
-        return ShulkerUtils.isShulkerBox(hotbarStack(PICKUP_HOTBAR));
+    /** 挖下来的盒子进物品栏了没有：潜影盒个数比挖之前多了一个。 */
+    private boolean pickedUpBox() {
+        return countShulkerBoxes() > boxesBeforePickup;
+    }
+
+    /** 物品栏 0~35 格里一共几个潜影盒。 */
+    private int countShulkerBoxes() {
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null) return 0;
+        int count = 0;
+        for (int i = 0; i < 36; i++) {
+            if (ShulkerUtils.isShulkerBox(player.getInventory().getItem(i))) count++;
+        }
+        return count;
     }
 
     private ItemStack hotbarStack(int index) {

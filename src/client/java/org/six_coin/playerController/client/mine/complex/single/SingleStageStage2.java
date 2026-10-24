@@ -1,7 +1,6 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -54,9 +53,6 @@ class SingleStageStage2 extends SingleStageStep {
     /** 落地之后至少待这么多 tick 再判断「挖完了」（给 mine simple 一点启动时间）。 */
     private static final int SETTLE_TICKS = 5;
 
-    /** 目标区域里还有沙砾的时候，挖完之后等多久让它落下来（0.5 秒）。 */
-    private static final int GRAVEL_WAIT_TICKS = 10;
-
     private enum Phase {
         /** 挖，挖不动了就去下一个点。 */
         MINE,
@@ -79,11 +75,6 @@ class SingleStageStage2 extends SingleStageStep {
     private boolean mineStarted;
     private boolean warnedNoBlocks;
 
-    /** 这一站是不是已经为沙砾等过一次了。 */
-    private boolean gravelChecked;
-    /** 正在等沙砾落下来的剩余 tick。 */
-    private int gravelWait;
-
     SingleStageStage2(SingleStageCtx ctx, int iteration) {
         super(ctx);
         this.iteration = iteration;
@@ -92,7 +83,7 @@ class SingleStageStage2 extends SingleStageStep {
 
     @Override
     protected String phase() {
-        return "第 " + (iteration + 1) + "/" + SingleStageCtx.ITERATIONS + " 层：挖目标区域";
+        return "第 " + (iteration + 1) + "/" + ctx.levels() + " 层：挖目标区域";
     }
 
     @Override
@@ -102,7 +93,8 @@ class SingleStageStage2 extends SingleStageStep {
             fail("玩家或世界不存在");
             return;
         }
-        MineManager.get().startTransient(ctx.region(iteration));
+        // 重力方块保护：上面还压着重力方块的那个先不挖（先挖最上面那个，落下来再挖）
+        MineManager.get().startTransient(ctx.region(iteration), true);
         mineStarted = true;
         ChatUtils.info(phase() + "：mine simple 范围设为 " + ctx.region(iteration).describe());
         index = 0;
@@ -171,12 +163,6 @@ class SingleStageStage2 extends SingleStageStep {
     // ------------------------------------------------------------------
 
     private void tickMine(Minecraft mc) {
-        // 正在等沙砾落下来：什么都不做，等时间到（mine simple 会把落下来的挖掉）
-        if (gravelWait > 0) {
-            gravelWait--;
-            return;
-        }
-
         if (regionCleared(mc)) {
             ChatUtils.debug(phase() + "：目标区域清空了（走到第 " + (index + 1) + " 个点）");
             phase = Phase.END;
@@ -199,19 +185,8 @@ class SingleStageStage2 extends SingleStageStep {
         quietTicks = 0;
         settledTicks = 0;
 
-        // 这一站挖完了：先看看**目标区域里**还有没有沙砾 —— 沙砾会往下掉，掉进区域里得再挖一次，
-        // 所以先别走，等 0.5 秒让它落稳，再让 mine simple 把它挖掉，然后才去下一个点
-        // （只有区域里有沙砾才等；外面 / 附近的不等）
-        if (!gravelChecked && regionHasGravel(mc)) {
-            gravelChecked = true;
-            gravelWait = GRAVEL_WAIT_TICKS;
-            ChatUtils.debug(phase() + "：附近有沙砾，等它落下来再走");
-            return;
-        }
-
         // 这个点挖完了：去下一个
         index++;
-        gravelChecked = false;
         if (index >= WAYPOINTS.length) {
             int left = remainingBlocks(mc).size();
             if (left > 0) {
@@ -224,14 +199,6 @@ class SingleStageStage2 extends SingleStageStep {
         BlockPos next = waypoint(index);
         ChatUtils.debug(phase() + "：去第 " + (index + 1) + " 个点 " + next.toShortString());
         startChild(new SingleStageSnapAction(ctx, next), Phase.MINE);
-    }
-
-    /** **目标区域里**还有没有沙砾（沙砾会往下掉，掉进区域就得再挖一次）。 */
-    private boolean regionHasGravel(Minecraft mc) {
-        for (BlockPos pos : ctx.regionCells(iteration)) {
-            if (mc.level.getBlockState(pos).is(Blocks.GRAVEL)) return true;
-        }
-        return false;
     }
 
     /** 第 {@code i} 个走位点（走位层上）。 */

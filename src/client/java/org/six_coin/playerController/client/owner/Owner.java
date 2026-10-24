@@ -10,17 +10,24 @@ package org.six_coin.playerController.client.owner;
  */
 public enum Owner {
 
-    /** 挖掘：动快捷栏、动朝向，优先级最低：攻击要打的时候先让给攻击。 */
+    /** 挖掘：动快捷栏、动朝向，优先级最低：攻击 / 吃东西要动手的时候先让出去。 */
     MINE(0),
 
-    /** 攻击：动快捷栏、动朝向，比挖掘强势，抢不过 mending / 备货。 */
-    ATTACK(1),
+    /**
+     * 自动进食（{@code /pc eat}）：只动快捷栏。
+     *
+     * <p>比挖掘高（挖掘不能把食物格抢走）、比攻击低（Killaura 要打的时候先让给攻击）。
+     */
+    EAT(1),
+
+    /** 攻击：动快捷栏、动朝向，比挖掘 / 进食强势，抢不过 mending / 备货。 */
+    ATTACK(2),
 
     /** mending：只动朝向（打开末影箱），比攻击强势，但抢不过备货。 */
-    MENDING(2),
+    MENDING(3),
 
     /** 备货：优先级最高，跑备货的时候别人的请求都不作数。 */
-    STOCK(3);
+    STOCK(4);
 
     private final int priority;
 

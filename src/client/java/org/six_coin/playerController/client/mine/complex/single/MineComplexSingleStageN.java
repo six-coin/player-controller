@@ -7,31 +7,31 @@ import net.minecraft.world.phys.Vec3;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.mine.MineFilterConfig;
+import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
- * {@code /pc mine debug_chunk_miner <item_collector_list>} 的执行体：挖掉**当前子区块正下方**那个子区块。
+ * {@code /pc mine debug_chunk_miner <detail>} 的执行体：挖掉**当前子区块正下方**那个子区块。
  *
  * <p><b>这是个临时的调试功能</b>（以后会删），所以整体结构就是「按需求的顺序把几段串起来」：
  * <pre>
- * 检查 (1)(2) → 搭工作站 (3)(4) → 8 轮 { 第一步 含水方块 → 第二步 mine simple → 第三步 捡东西+卸货 }
+ * 检查 (1)(2) → 搭工作站 (3)(4) → levels 轮 {
+ *     补圆石墙（detail 里配成 cobblestone 的方向）→ 第一步 含水方块 → 第二步 mine simple
+ *     → 第三步 捡东西+卸货 }
  *            → 拆工作站 (6) → 补货检查 (7)
  * </pre>
  *
  * <p>每一段都是一个独立的动作（见 {@code SingleStage*}），主控只负责按顺序跑它们、把失败往上带。
- * 一共 8 轮，每轮挖目标子区块里的 2 层（从 14~15 一直挖到 0~1）。
+ * 一共 {@code detail.levels} 轮，每轮挖目标子区块里的 2 层（从 14~15 一直挖到 0~1）。
  */
 public class MineComplexSingleStageN extends Action {
 
-    /** 收集清单：item_collector 里那些物品的 id。 */
-    private final Set<String> collectorItems;
+    /** {@code detail}：收集清单、五个方向怎么填、挖几层。 */
+    private final SingleStageDetail detail;
 
     private SingleStageCtx ctx;
 
@@ -44,8 +44,8 @@ public class MineComplexSingleStageN extends Action {
     /** 整个任务最久（20 tick = 1 秒；这里给 6 小时）。 */
     private static final int MAX_TOTAL_TICKS = 20 * 60 * 60 * 6;
 
-    public MineComplexSingleStageN(Collection<String> collectorItems) {
-        this.collectorItems = new LinkedHashSet<>(collectorItems);
+    public MineComplexSingleStageN(SingleStageDetail detail) {
+        this.detail = detail;
     }
 
     @Override
@@ -71,7 +71,7 @@ public class MineComplexSingleStageN extends Action {
         data.refreshInventory(player.getInventory());
 
         ctx = new SingleStageCtx(DimensionUtils.current(), initialMin,
-            MineFilterConfig.get().filter(), collectorItems, data);
+            MineFilterConfig.get().filter(), detail, data);
 
         List<String> problems = new ArrayList<>(SingleStageCheck.checkSubChunks(mc.level, ctx));
         problems.addAll(SingleStageCheck.checkReach());
@@ -83,8 +83,11 @@ public class MineComplexSingleStageN extends Action {
             return;
         }
 
-        ChatUtils.info("单段挖掘开始：" + ctx.describe() + "；收集 "
-            + (collectorItems.isEmpty() ? "（空）" : String.join("、", collectorItems)));
+        ChatUtils.info("单段挖掘开始：" + ctx.describe() + "；" + detail.describe());
+
+        // debug_chunk_miner 专用工具策略（「空手」= 快捷栏 9）：
+        // 每种方块只判断一次、只缓存在内存里，任务结束就清掉（见 MineManager#setDebugToolPolicy）
+        MineManager.get().setDebugToolPolicy(detail.itemCollectorList());
 
         // 全程悬停：这段任务一直在半空中干活（临时站立点下面是空气），
         // 只要不每 tick 把速度写成 0，玩家就会掉下去。移动的时候由 MoveAction 自己写速度。
@@ -135,6 +138,8 @@ public class MineComplexSingleStageN extends Action {
             FlightVelocity.end();
             flying = false;
         }
+        // debug 工具策略只在这一轮任务里有效
+        MineManager.get().clearDebugToolPolicy();
     }
 
     // ------------------------------------------------------------------
@@ -148,7 +153,7 @@ public class MineComplexSingleStageN extends Action {
     }
 
     private void runIteration() {
-        if (iteration >= SingleStageCtx.ITERATIONS) {
+        if (iteration >= ctx.levels()) {
             runTeardown();
             return;
         }
@@ -160,12 +165,17 @@ public class MineComplexSingleStageN extends Action {
         }
 
         if (regionEmpty(mc, iteration)) {
-            ChatUtils.info("第 " + (iteration + 1) + "/" + SingleStageCtx.ITERATIONS
+            ChatUtils.info("第 " + (iteration + 1) + "/" + ctx.levels()
                 + " 层整个区域都是空气，跳过");
             afterIteration();
             return;
         }
 
+        // 先用圆石把配置成 cobblestone 的那几面墙 / 底面填上，再补黏液块
+        run(new SingleStageCobblePass(ctx, iteration), this::runStage1);
+    }
+
+    private void runStage1() {
         run(new SingleStageStage1(ctx, iteration), this::runStage2);
     }
 
@@ -183,6 +193,9 @@ public class MineComplexSingleStageN extends Action {
     }
 
     private void runTeardown() {
+        // 挖目标子区块的阶段结束了：debug 工具策略只服务于「挖区域」，
+        // 拆工作站那一段要正常挖圆石（平台），不能被它判成「不用挖」
+        MineManager.get().clearDebugToolPolicy();
         run(new SingleStageTeardown(ctx), this::throwLeftovers);
     }
 

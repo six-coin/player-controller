@@ -79,7 +79,7 @@ class SingleStageStage3 extends SingleStageStep {
 
     @Override
     protected String phase() {
-        return "第 " + (iteration + 1) + "/" + SingleStageCtx.ITERATIONS + " 层：捡掉落物";
+        return "第 " + (iteration + 1) + "/" + ctx.levels() + " 层：捡掉落物";
     }
 
     @Override
@@ -349,6 +349,7 @@ class SingleStageStage3 extends SingleStageStep {
 
             List<ItemStack> contents = ctx.data.box(broken);
             Map<Integer, String> before = ctx.boxSignatures();
+            int boxesBefore = ctx.shulkerBoxCount();
             int slot = broken.equals(ctx.collectSpotB()) ? ctx.collectSlot + 1 : ctx.collectSlot;
 
             queue.child("挖掉装满的收集盒 " + broken.toShortString(),
@@ -356,7 +357,7 @@ class SingleStageStage3 extends SingleStageStep {
             queue.child("snap 到 " + broken.toShortString(),
                 () -> new SingleStageSnapAction(ctx, broken));
             queue.child("等物品栏吸到盒子",
-                () -> new SingleStageWaitItemAction(ctx, contents, before));
+                () -> new SingleStageWaitItemAction(ctx, contents, before, boxesBefore, false));
             queue.child("snap 回临时站立点",
                 () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
 

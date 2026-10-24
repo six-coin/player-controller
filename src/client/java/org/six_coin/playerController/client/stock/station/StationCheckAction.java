@@ -432,6 +432,16 @@ public class StationCheckAction extends Action {
         }
         report.add("shulker_box_placement", placements);
 
+        // 最终产物暂存盒单独记一份（它也在这张「摆放处」列表里，只是上面那一段不算它）：
+        // 备货开始时要靠这里的内容和 free_slots 判断「这盒满了没有、要不要换盒」。
+        if (staging != null) {
+            JsonObject entry = new JsonObject();
+            entry.addProperty("id", staging.stationId());
+            entry.add("items", itemsJson(staging.items()));
+            entry.addProperty("free_slots", staging.emptySlots());
+            report.add("staging_placement", entry);
+        }
+
         // already_collected：最终产物地所有物品及数量（不分具体箱子、也不分潜影盒），
         // 再加上最终产物暂存盒里已经装好的那些。
         // 材料清单里某种东西这里已经够数了，那个根节点整个不备（见 StockMaterials / StockProcessMaterials）。

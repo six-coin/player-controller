@@ -89,8 +89,8 @@ final class Part1Stage3Pack extends StockStep {
     /** only_one_shulker 把盒子放进快捷栏第三格（背包下标 2）。 */
     private static final int BOX_HOTBAR = ContainerGetAction.HOTBAR_BOX_INDEX;
 
-    /** 等掉落物被捡起来最多等这么多 tick。 */
-    private static final int PICKUP_WAIT_TICKS = 20 * 15;
+    /** 等掉落物被捡起来最多等这么多 tick（5 秒）。 */
+    private static final int PICKUP_WAIT_TICKS = 100;
 
     private static final int MAX_TOTAL_TICKS = 20 * 60 * 60;
 
@@ -167,6 +167,9 @@ final class Part1Stage3Pack extends StockStep {
 
     /** 从 container 里拿潜影盒之前，那个容器里都有哪些盒子（拿来算被拿走的是哪个）。 */
     private List<Map<String, Integer>> boxesBeforeTake = List.of();
+    /** 挖之前物品栏里有几个潜影盒（挖完必须比这个多一个才算「捡到了」）。 */
+    private int boxesBeforePickup;
+
     /** 盒子捡起来以后落在哪一格（正常情况下就是快捷栏第二格）。 */
     private int pickupHotbar = PICKUP_HOTBAR;
 
@@ -393,12 +396,93 @@ final class Part1Stage3Pack extends StockStep {
     // 最终产物暂存处
     // ------------------------------------------------------------------
 
-    /** 开始：从空潜影盒提供处取一个空盒，放到暂存处（摆放处 id 1）。 */
+    /**
+     * 开始：看看最终产物暂存处（摆放处 id 1）上有没有盒子。
+     *
+     * <ul>
+     *   <li><b>没有盒子</b>：从空潜影盒提供处取一个空盒放上去（和以前一样）；</li>
+     *   <li><b>有盒子</b>：里面是上一次没装满的成品 ——
+     *       <ol>
+     *         <li>先把里面的东西从「还要装多少」（{@code final_pack}）和 {@code materials.json}
+     *             里**扣掉**：那些已经做好了，不该再做一遍；</li>
+     *         <li>盒子**满了**：挖掉送去 item_final，再放一个新空盒；</li>
+     *         <li>盒子**没满**：不动它，接着往里装（省一个空盒、也省一次挖盒子）。</li>
+     *       </ol>
+     *       以前这里不看内容，直接把盒子挖了扔回 item_storage —— 成品被当成库存材料，
+     *       清单里还照样要做一遍，两头都错。</li>
+     * </ul>
+     */
     private void pushPrepareStaging() {
-        pushSync("准备最终产物暂存处（摆放处 #" + STAGING_ID + "）", () ->
-            ChatUtils.info("先从空潜影盒提供处取一个空潜影盒放到最终产物暂存处"));
-        pushTakeProviderBox();
-        pushPlaceHeldBox(STAGING_ID, false, Map.of(), "暂存盒");
+        pushSync("看看最终产物暂存处（摆放处 #" + STAGING_ID + "）上有没有盒子", () -> {
+            StationPos spot = placement(STAGING_ID);
+            if (spot == null) {
+                fail("找不到潜影盒摆放处 #" + STAGING_ID);
+                return;
+            }
+
+            Minecraft mc = Minecraft.getInstance();
+            boolean hasBox = mc.level != null
+                && mc.level.getBlockState(spot.pos()).getBlock()
+                    instanceof net.minecraft.world.level.block.ShulkerBoxBlock;
+
+            if (!hasBox) {
+                ChatUtils.info("最终产物暂存处是空的，先从空潜影盒提供处取一个空盒放上去");
+                pushTakeProviderBox();
+                pushPlaceHeldBox(STAGING_ID, false, Map.of(), "暂存盒");
+                return;
+            }
+
+            Map<String, Integer> contents = new TreeMap<>(state.placement(STAGING_ID));
+            boolean full = state.placementFull(STAGING_ID);
+
+            ChatUtils.info("最终产物暂存处已经有一个盒子（"
+                + (contents.isEmpty() ? "空的" : "里面是 " + contents) + "，"
+                + (full ? "已经满了" : "还没满") + "）");
+
+            // 已经装好的成品：从「还要装多少」和 materials.json 里都扣掉
+            subtractStagingContents(contents);
+
+            if (full) {
+                ChatUtils.info("这个盒子满了：挖掉送去 item_final，再放一个新空盒");
+                pushMineAndCollect(spot, STAGING_ID, PutTarget.FINAL);
+                pushTakeProviderBox();
+                pushPlaceHeldBox(STAGING_ID, false, Map.of(), "新暂存盒");
+            } else {
+                ChatUtils.info("这个盒子还没满，留着接着装（不挖、也不换盒）");
+            }
+        });
+    }
+
+    /**
+     * 把暂存盒里已经装好的成品从需求里扣掉。
+     *
+     * <p>两处都要扣：
+     * <ul>
+     *   <li>{@code need}（final_pack，这一次要装进盒子的量）—— 不扣的话会多装一份；</li>
+     *   <li>{@code materials.json}（第二部分照它算要合成什么）—— 不扣的话会再做一份。</li>
+     * </ul>
+     */
+    private void subtractStagingContents(Map<String, Integer> contents) {
+        if (contents.isEmpty()) return;
+
+        for (Map.Entry<String, Integer> entry : contents.entrySet()) {
+            if (entry.getValue() == null || entry.getValue() <= 0) continue;
+            Item item = StockMaterials.parseItem(entry.getKey());
+            if (item == null) continue;
+            int take = Math.min(need.remaining(item), entry.getValue());
+            if (take > 0) need.take(item, take);
+        }
+        ChatUtils.debug("扣掉暂存盒里已有的成品之后，还要装：" + need.describe());
+
+        try {
+            Path material = StockManager.get().currentMaterialFile(task);
+            int touched = StockMaterials.subtractFromMaterials(material, contents);
+            if (touched > 0) {
+                ChatUtils.info("已经把暂存盒里已有的成品从 materials.json 里去掉（" + touched + " 项）");
+            }
+        } catch (Exception e) {
+            ChatUtils.error("扣 materials.json 失败：" + e.getMessage() + "（第二部分可能会多做一份）");
+        }
     }
 
     /** 从空潜影盒提供处取一个**空**潜影盒，放进快捷栏第三格。 */
@@ -498,7 +582,8 @@ final class Part1Stage3Pack extends StockStep {
                 return;
             }
             pickupHotbar = PICKUP_HOTBAR;
-            ChatUtils.debug("挖之前物品栏里有 " + countShulkerBoxes() + " 个潜影盒");
+            boxesBeforePickup = countShulkerBoxes();
+            ChatUtils.debug("挖之前物品栏里有 " + boxesBeforePickup + " 个潜影盒");
         });
 
         // 这一段飞行整段持有（引用计数），中途不关飞行
@@ -510,18 +595,21 @@ final class Part1Stage3Pack extends StockStep {
             action -> state.clearPlacement(placementId));
 
         // 站到盒子上面那一格，然后不写速度，让重力把人带下去，掉到盒子的位置捡东西。
-        // 掉落物一定会顺位填进快捷栏第二格（那一格我们确保是空的），所以等的就是「第二格里有潜影盒了」。
+        // **必须真的看到盒子进了物品栏**（潜影盒个数比挖之前多一个）才能往下走 ——
+        // 不然会提前飞回站立点，盒子留在原地。等 5 秒还没捡到就报错。
         pushMoveTo(spot.pos().above(), "走到潜影盒上面那一格 " + spot.pos().above().toShortString());
         pushChild("等自然下落并捡起潜影盒",
-            () -> new WaitAction("捡起潜影盒", this::hasPickupBox, PICKUP_WAIT_TICKS, false),
+            () -> new WaitAction("捡起潜影盒", this::pickedUpBox, PICKUP_WAIT_TICKS, false),
             action -> {
                 if (!((WaitAction) action).met()) {
-                    fail("等了 " + PICKUP_WAIT_TICKS + " tick，快捷栏第二格还是没有潜影盒"
-                        + "（人没落下去？掉落物掉到别处了？）");
+                    fail("等了 " + (PICKUP_WAIT_TICKS / 20) + " 秒，潜影盒还没进物品栏"
+                        + "（挖之前 " + boxesBeforePickup + " 个，现在 " + countShulkerBoxes()
+                        + " 个；人没落下去？掉落物掉到别处了？）");
                     return;
                 }
                 pickupHotbar = PICKUP_HOTBAR;
-                ChatUtils.info("潜影盒已经捡到快捷栏第二格（" + describe(hotbarStack(PICKUP_HOTBAR)) + "）");
+                ChatUtils.info("潜影盒已经捡到物品栏（快捷栏第二格："
+                    + describe(hotbarStack(PICKUP_HOTBAR)) + "）");
             });
 
         // 飞上来（这一段结束之后飞行不能关，不然又会掉下去，所以后面马上接走回站立点）
@@ -1213,12 +1301,12 @@ final class Part1Stage3Pack extends StockStep {
         return false;
     }
 
-    /** 挖下来的潜影盒有没有已经落在快捷栏第二格里。 */
-    private boolean hasPickupBox() {
-        return ShulkerUtils.isShulkerBox(hotbarStack(PICKUP_HOTBAR));
+    /** 挖下来的盒子进物品栏了没有：潜影盒个数比挖之前多了一个。 */
+    private boolean pickedUpBox() {
+        return countShulkerBoxes() > boxesBeforePickup;
     }
 
-    /** 整个物品栏里有几叠潜影盒（只用来打日志）。 */
+    /** 整个物品栏里有几个潜影盒（只用来打日志 / 判断「捡到了没有」）。 */
     private int countShulkerBoxes() {
         LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) return 0;

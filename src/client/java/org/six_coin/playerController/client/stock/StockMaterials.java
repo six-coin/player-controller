@@ -2,6 +2,7 @@ package org.six_coin.playerController.client.stock;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -161,6 +162,137 @@ public final class StockMaterials {
         return new Result(clean.size(), cleanTotal, optimized.size(), optimizedTotal,
             skippedShort, skippedCovered, shortItems, canAccessAll.size(), packTotal,
             cleanFile, optimizedFile, finalFile, canAccessAllFile, finalPackFile);
+    }
+
+    // ------------------------------------------------------------------
+    // 从 materials.json 里扣掉「已经做好了的」
+    // ------------------------------------------------------------------
+
+    /**
+     * 把 {@code already} 里那些东西从 {@code materials.json} 里**减掉**。
+     *
+     * <p>用途：最终产物暂存盒（摆放处 #1）里还留着上一次没装满的成品。那些东西已经做出来了，
+     * 材料清单里就不该再要一遍 —— 否则第二部分会照着旧清单再做一份。
+     *
+     * <p>减完的树会**按比例把 sub_materials 一起缩**（向上取整），不然「根节点要 10 个、
+     * 子材料还写着 100 个」这种前后不一致会让后面的合成步骤取错数量。
+     * 减到 0 的整棵树直接删掉。
+     *
+     * @return 动过的根节点个数
+     */
+    public static int subtractFromMaterials(Path material, Map<String, Integer> already)
+        throws IOException {
+        if (!Files.exists(material) || already.isEmpty()) return 0;
+
+        JsonArray tree = readTree(material);
+        Map<String, Integer> left = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : already.entrySet()) {
+            String id = canonicalId(entry.getKey());
+            if (id == null || entry.getValue() == null || entry.getValue() <= 0) continue;
+            left.merge(id, entry.getValue(), Integer::sum);
+        }
+        if (left.isEmpty()) return 0;
+
+        JsonArray kept = new JsonArray();
+        int touched = 0;
+        for (JsonElement element : tree) {
+            if (element == null || !element.isJsonObject()) {
+                kept.add(element);
+                continue;
+            }
+            JsonObject object = element.getAsJsonObject();
+            String id = itemOf(element);
+            Integer have = id == null ? null : left.get(id);
+            int need = countOf(object);
+            if (have == null || have <= 0 || need <= 0) {
+                kept.add(element);
+                continue;
+            }
+
+            touched++;
+            if (have >= need) {
+                // 这一种已经够了：整棵树不要了
+                left.put(id, have - need);
+                continue;
+            }
+
+            int remaining = need - have;
+            left.put(id, 0);
+            scaleTree(object, (double) remaining / (double) need, remaining);
+            kept.add(element);
+        }
+
+        if (touched == 0) return 0;
+        writeTree(material, kept);
+        ChatUtils.info("materials.json：扣掉已经做好的成品（动了 " + touched + " 个根节点）");
+        return touched;
+    }
+
+    /** 把一棵树的数量按比例缩到 {@code rootCount}（子材料向上取整，至少留 1）。 */
+    private static void scaleTree(JsonObject object, double ratio, int rootCount) {
+        object.addProperty("count", Math.max(0, rootCount));
+
+        JsonElement subs = object.get("sub_materials");
+        if (subs == null || !subs.isJsonArray()) return;
+
+        for (JsonElement sub : subs.getAsJsonArray()) {
+            if (sub == null || !sub.isJsonObject()) continue;
+            JsonObject child = sub.getAsJsonObject();
+            int count = countOf(child);
+            int scaled = (int) Math.ceil(count * ratio);
+            if (count > 0 && scaled <= 0) scaled = 1;
+            scaleTree(child, ratio, scaled);
+        }
+    }
+
+    /** 读 materials.json（最外层必须是数组）。 */
+    private static JsonArray readTree(Path file) throws IOException {
+        JsonElement root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
+        if (!root.isJsonArray()) {
+            throw new IOException(file.getFileName() + " 最外层应该是一个数组 [ ... ]");
+        }
+        return root.getAsJsonArray();
+    }
+
+    /** 写一棵棵树（结构原样保留）。 */
+    private static void writeTree(Path file, JsonArray tree) throws IOException {
+        Files.createDirectories(file.getParent());
+        try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+            GSON.toJson(tree, writer);
+        }
+    }
+
+    /** 这一棵树的物品 id（规范化过）；连 id 字段都没有就返回 null。 */
+    @Nullable
+    private static String itemOf(JsonElement element) {
+        if (element == null || !element.isJsonObject()) return null;
+        JsonElement item = element.getAsJsonObject().get("item");
+        if (item == null || !item.isJsonPrimitive()) return null;
+        return canonicalId(item.getAsString());
+    }
+
+    private static int countOf(JsonObject object) {
+        JsonElement count = object.get("count");
+        if (count == null || !count.isJsonPrimitive()) return 0;
+        try {
+            return count.getAsInt();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** 物品 id 规范化：没有命名空间补 minecraft:，注册表里查得到就用正式写法。 */
+    private static String canonicalId(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        if (value.isEmpty()) return value;
+        if (!value.contains(":")) value = "minecraft:" + value;
+        try {
+            Item parsed = parseItem(value);
+            if (parsed != null) return id(parsed);
+        } catch (Throwable ignored) {
+            // 注册表没 bootstrap 就只按字符串规范化
+        }
+        return value;
     }
 
     // ------------------------------------------------------------------

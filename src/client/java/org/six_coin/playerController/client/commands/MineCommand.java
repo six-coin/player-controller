@@ -2,8 +2,6 @@ package org.six_coin.playerController.client.commands;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonParser;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -29,6 +27,7 @@ import org.six_coin.playerController.client.mine.complex.MineBeaconPlanner;
 import org.six_coin.playerController.client.mine.complex.MineComplexManager;
 import org.six_coin.playerController.client.mine.complex.MineTaskRegion;
 import org.six_coin.playerController.client.mine.complex.single.MineComplexSingleStageN;
+import org.six_coin.playerController.client.mine.complex.single.SingleStageDetail;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
 import java.io.IOException;
@@ -87,7 +86,7 @@ public final class MineCommand {
             .then(simple())
             .then(lists())
             .then(ClientCommands.literal("debug_chunk_miner")
-                .then(ClientCommands.argument("item_collector_list", StringArgumentType.greedyString())
+                .then(ClientCommands.argument("detail", StringArgumentType.greedyString())
                     .executes(MineCommand::debugChunkMiner)))
             .then(ClientCommands.literal("complex")
                 .executes(MineCommand::complexStatus)
@@ -397,7 +396,11 @@ public final class MineCommand {
             + "complex task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区 + 算信标"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT + "complex station ...§7 - 挖掘站（list / check / show / 各处坐标）"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
-            + "debug_chunk_miner [\"minecraft:dirt\", ...]§7 - §c【临时调试】§7挖掉下面那个子区块"));
+            + "debug_chunk_miner <detail>§7 - §c【临时调试】§7挖掉下面那个子区块（detail 是必填的 JSON）"));
+        source.sendFeedback(Component.literal("§7    §8例：§f{\"item_collector_list\":[\"minecraft:coal\"],"
+            + "\"north\":\"cobblestone\",\"south\":\"cobblestone\",\"west\":\"auto\",\"east\":\"auto\","
+            + "\"bottom\":\"auto\",\"levels\":8}"));
+        source.sendFeedback(Component.literal("§7    §8五个方向只有 cobblestone / auto 两种；levels = 挖几层（1~8，实际挖 2×levels 格）"));
         source.sendFeedback(Component.literal("§7  范围记在 mine.json 里，重新进世界会接着挖（/pc mine cancel 才会清掉）"));
         return 1;
     }
@@ -417,12 +420,18 @@ public final class MineCommand {
     // ------------------------------------------------------------------
 
     /**
-     * {@code /pc mine debug_chunk_miner <item_collector_list>}：挖掉当前子区块正下方那个子区块。
+     * {@code /pc mine debug_chunk_miner <detail>}：挖掉当前子区块正下方那个子区块。
      *
      * <p><b>临时的调试功能</b>（以后会删）：需求里的单段挖掘，实现在
      * {@link MineComplexSingleStageN}（{@code mine/complex/single/} 下）。
      *
-     * @param item_collector_list 要收集的物品，JSON 数组：{@code ["minecraft:dirt", ...]}
+     * @param detail 必填的 JSON，格式见 {@link SingleStageDetail}：
+     *               <pre>
+     * {"item_collector_list": ["minecraft:coal"],
+     *  "north": "cobblestone", "south": "cobblestone",
+     *  "west": "auto", "east": "auto", "bottom": "auto",
+     *  "levels": 8}
+     *               </pre>
      */
     private static int debugChunkMiner(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
@@ -432,21 +441,16 @@ public final class MineCommand {
             return 0;
         }
 
-        String raw = StringArgumentType.getString(context, "item_collector_list");
-        List<String> ids;
+        SingleStageDetail detail;
         try {
-            ids = parseItemIds(raw);
-        } catch (Exception e) {
-            source.sendError(Component.literal("item_collector_list 解析失败：" + e.getMessage()));
-            return 0;
-        }
-        if (ids.isEmpty()) {
-            source.sendError(Component.literal("item_collector_list 是空的"));
+            detail = SingleStageDetail.parse(StringArgumentType.getString(context, "detail"));
+        } catch (IllegalArgumentException e) {
+            source.sendError(Component.literal("detail 解析失败：" + e.getMessage()));
             return 0;
         }
 
         List<String> unknown = new ArrayList<>();
-        for (String id : ids) {
+        for (String id : detail.itemCollectorList()) {
             Identifier identifier = Identifier.tryParse(id);
             if (identifier == null || BuiltInRegistries.ITEM.getOptional(identifier).isEmpty()) {
                 unknown.add(id);
@@ -457,32 +461,10 @@ public final class MineCommand {
             return 0;
         }
 
-        ActionManager.get().submit(new MineComplexSingleStageN(ids));
-        source.sendFeedback(Component.literal("已提交单段挖掘：挖掉下面那个子区块（收集 "
-            + ids.size() + " 种物品）"));
+        ActionManager.get().submit(new MineComplexSingleStageN(detail));
+        source.sendFeedback(Component.literal("已提交单段挖掘：挖掉下面那个子区块（"
+            + detail.describe() + "）"));
         return 1;
-    }
-
-    /** {@code ["a", "b"]} 或者 {@code {"a": 1}} 都认，返回物品 id 列表。 */
-    private static List<String> parseItemIds(String raw) {
-        JsonElement root = JsonParser.parseString(raw);
-        List<String> ids = new ArrayList<>();
-
-        if (root.isJsonArray()) {
-            for (JsonElement element : root.getAsJsonArray()) {
-                if (!element.isJsonPrimitive()) continue;
-                String id = element.getAsString().trim();
-                if (!id.isEmpty()) ids.add(id);
-            }
-        } else if (root.isJsonObject()) {
-            ids.addAll(root.getAsJsonObject().keySet());
-        } else if (root.isJsonPrimitive()) {
-            String id = root.getAsString().trim();
-            if (!id.isEmpty()) ids.add(id);
-        } else {
-            throw new IllegalArgumentException("要写成 [\"minecraft:dirt\", ...] 这样的 JSON 数组");
-        }
-        return ids;
     }
 
     private static int complexStatus(CommandContext<FabricClientCommandSource> context) {

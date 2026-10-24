@@ -8,6 +8,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
@@ -81,6 +82,17 @@ class SingleStageStage1 extends SingleStageStep {
     private static final int[] HOTBAR_SLOTS = {SingleStageCtx.HOTBAR_FREE_1,
         SingleStageCtx.HOTBAR_FREE_2, SingleStageCtx.HOTBAR_FREE_3};
 
+    /**
+     * 挑不到合法落点的时候等多久再找（tick）。
+     *
+     * <p>需求：站到第一个位置以后如果一个合法的落点都找不到，等 10 tick 继续找 ——
+     * 这 10 tick 里刚放下去的粘液块会把脚底下的熔岩盖掉，下一轮就能找到落脚点了。
+     */
+    private static final int RETRY_WAIT_TICKS = 10;
+
+    /** 最多这样重试几次（防止熔岩一直流、永远找不到）。 */
+    private static final int MAX_PICK_RETRIES = 20;
+
     /** 快捷栏用完了从这几格（背包 22~27）补一叠。 */
     private static final int[] MAIN_SLOTS = {SingleStageCtx.FILLER_START,
         SingleStageCtx.FILLER_START + 1, SingleStageCtx.FILLER_START + 2,
@@ -104,6 +116,8 @@ class SingleStageStage1 extends SingleStageStep {
         SETTLE,
         /** 挑下一个位置。 */
         NEXT,
+        /** 暂时找不到合法的落点：等 10 tick 再找一次（见 {@link #RETRY_WAIT_TICKS}）。 */
+        WAIT_RETRY,
         /** 粘液块用完了：先飞回走位层的 1 1（回临时站立点的必经之路）。 */
         REFILL_UP,
         /** 再从 1 1 飞回临时站立点。 */
@@ -163,6 +177,7 @@ class SingleStageStage1 extends SingleStageStep {
     private BlockPos swapSpot;
     private List<ItemStack> swapContents = List.of();
     private Map<Integer, String> swapBefore = Map.of();
+    private int swapBoxesBefore;
     private int swapReserve = -1;
 
     /** 扔垃圾那一小串步骤；每次扔都新建一个。 */
@@ -173,7 +188,13 @@ class SingleStageStage1 extends SingleStageStep {
     /** 放完之后等了几 tick。 */
     private int settleTicks;
 
-
+    /** {@link #pickNext} 上一次是不是「还有活要干，只是找不到落点」。 */
+    private boolean pickHadWork;
+    /** 是不是还只到过第一个落点（到过第二个之后就不再「等 10 tick 再找」了）。 */
+    private boolean atFirstStop = true;
+    /** 「等 10 tick 再找」用了几次 / 这一轮等了几 tick。 */
+    private int pickRetries;
+    private int retryWait;
 
     private int stops;
 
@@ -185,7 +206,7 @@ class SingleStageStage1 extends SingleStageStep {
 
     @Override
     protected String phase() {
-        return "第 " + (iteration + 1) + "/" + SingleStageCtx.ITERATIONS + " 层：挖含水方块 + 补粘液块";
+        return "第 " + (iteration + 1) + "/" + ctx.levels() + " 层：挖含水方块 + 补粘液块";
     }
 
     @Override
@@ -299,6 +320,14 @@ class SingleStageStage1 extends SingleStageStep {
                 case NEXT -> {
                     if (pickNext(mc)) {
                         phase = Phase.TRAVEL;
+                    } else if (pickHadWork && atFirstStop && pickRetries < MAX_PICK_RETRIES) {
+                        // 刚站到第一个位置，剩下一个合法落点都没有（脚底下全是熔岩）：
+                        // 等 10 tick 再找一次（这期间刚放的粘液块会把熔岩盖掉）
+                        pickRetries++;
+                        retryWait = 0;
+                        ChatUtils.debug(phase() + "：暂时没有合法的落点（下面有熔岩），等 "
+                            + RETRY_WAIT_TICKS + " tick 再找（第 " + pickRetries + " 次）");
+                        phase = Phase.WAIT_RETRY;
                     } else {
                         // 收尾前把「还剩什么」报出来（够不着的地方会留下来，挖到那层就冒水）
                         List<BlockPos> leftHoles = scanGaps(mc.level);
@@ -315,6 +344,11 @@ class SingleStageStage1 extends SingleStageStep {
                         boxIndex = 1;
                         phase = Phase.BACK;
                     }
+                }
+                case WAIT_RETRY -> {
+                    if (++retryWait < RETRY_WAIT_TICKS) return;
+                    retryWait = 0;
+                    phase = Phase.NEXT;
                 }
                 case REFILL_UP -> {
                     // 直接飞临时站立点可能没有沿轴走得通的路（人在矿洞深处），
@@ -516,7 +550,8 @@ class SingleStageStage1 extends SingleStageStep {
         // 光按「能放几个洞」挑落脚点的话，离得远的含水方块（海底的 kelp 之类）会一直没人管，
         // 留在那儿就是一条水路，挖到那层就冒水。
         List<BlockPos> water = unminedWaterlogged(mc.level);
-        if (gaps.isEmpty() && water.isEmpty()) return false;
+        pickHadWork = !gaps.isEmpty() || !water.isEmpty();
+        if (!pickHadWork) return false;
         if (++stops > MAX_STOPS) {
             ChatUtils.error("补粘液块挪了 " + MAX_STOPS + " 次还是没弄完，先停下（还剩 "
                 + gaps.size() + " 个洞、" + water.size() + " 个含水方块）");
@@ -528,6 +563,9 @@ class SingleStageStage1 extends SingleStageStep {
             for (int z = 0; z < 16; z++) {
                 BlockPos stand = ctx.routePoint(walkLayer, x, z);
                 if (stand.equals(here)) continue;
+                // 脚底下那一格是熔岩的位置不能站（掉进去就是一次伤害 / 死亡）。
+                // 第一个落点（走位层 1 1）是直接飞过去的，不走这里，所以不用特判。
+                if (lavaBelow(mc.level, stand)) continue;
                 int cover = 0;
                 for (BlockPos gap : gaps) {
                     if (SingleStageCtx.canPlaceFrom(stand, gap)) cover += HOLE_WEIGHT;
@@ -549,6 +587,7 @@ class SingleStageStage1 extends SingleStageStep {
         // 走位层是清过的（不会有阻挡），所以不做 snap 检查，直接取排序后的第一个
         Stand best = candidates.get(0);
         travelTarget = best.pos();
+        atFirstStop = false;
         ChatUtils.debug(phase() + "：挪到 " + travelTarget.toShortString()
             + "（覆盖分 " + best.cover() + "；还剩 " + gaps.size() + " 个洞、"
             + water.size() + " 个含水方块）");
@@ -557,6 +596,16 @@ class SingleStageStage1 extends SingleStageStep {
 
     /** 一个候选落脚点：能放几个洞、离当前位置多远。 */
     private record Stand(BlockPos pos, int cover, double distance) {
+    }
+
+    /**
+     * 这一格的**下面一格**是不是熔岩。
+     *
+     * <p>需求：填粘液块时，只有下面一格不是熔岩的位置才算合法落点（第一个落点除外）。
+     * 站在熔岩正上方，一掉下去就是伤害，而且熔岩还会流过来把刚放好的粘液块冲掉。
+     */
+    private static boolean lavaBelow(Level level, BlockPos stand) {
+        return level.getFluidState(stand.below()).is(FluidTags.LAVA);
     }
 
     // ------------------------------------------------------------------
@@ -750,6 +799,7 @@ class SingleStageStage1 extends SingleStageStep {
         swapSpot = boxesLeastFull().get(0);
         swapContents = new ArrayList<>(ctx.data.box(swapSpot));
         swapBefore = ctx.boxSignatures();
+        swapBoxesBefore = ctx.shulkerBoxCount();
         swapReserve = fullestSlimeBoxSlot();
 
         ChatUtils.info(phase() + "：盒子里的粘液块不够了，把 " + swapSpot.toShortString()
@@ -760,7 +810,7 @@ class SingleStageStage1 extends SingleStageStep {
         swapQueue.child("snap 到 " + swapSpot.toShortString(),
             () -> new SingleStageSnapAction(ctx, swapSpot));
         swapQueue.child("等物品栏吸到盒子",
-            () -> new SingleStageWaitItemAction(ctx, swapContents, swapBefore, true));
+            () -> new SingleStageWaitItemAction(ctx, swapContents, swapBefore, swapBoxesBefore, true));
         swapQueue.child("snap 回临时站立点",
             () -> new SingleStageSnapAction(ctx, ctx.standPoint()));
         swapQueue.sync("换上新盒子", this::queuePlaceReserve);

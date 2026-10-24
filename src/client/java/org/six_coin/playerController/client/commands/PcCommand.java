@@ -50,11 +50,12 @@ public final class PcCommand {
                 source.sendFeedback(Component.literal("§7  /" + name + " material ... §8- §7材料清单配置（terminal_items、blacklist、recipe_preferences、tag_preferences、ingredient_preferences、replace_materials）"));
                 source.sendFeedback(Component.literal("§7  /" + name + " dump all_items|inventory|all_tags §8- §7把物品 / 物品栏 / minecraft 物品标签导成 json（config/player-controller/dump/）"));
                 source.sendFeedback(Component.literal("§7  /" + name + " attack ... §8- §7攻击（一直监听，按 profile 挑该打谁）：toggle、profile、show_all_mobs"));
+                source.sendFeedback(Component.literal("§7  /" + name + " eat [true|false] §8- §7自动进食（饱食度 ≤12 时切快捷栏 9 吃掉，吃完切回去；文件 world_<n>/eat.json）"));
                 source.sendFeedback(Component.literal("§7  /" + name + " mend ... §8- §7经验修补：start；station stand_point|ender_chest set|set_here|set_target|del"));
                 source.sendFeedback(Component.literal("§7  /" + name + " mine ... §8- §7挖掘：cancel；simple <x1> <y1> <z1> <x2> <y2> <z2> <dim>（按 mine/ 下的白/黑名单挖框里的方块）；list mode|whitelist|blacklist list|add|del"));
                 source.sendFeedback(Component.literal("§7  /" + name + " mine complex add_task|del_task <名字>、/" + name + " mine complex task <名字> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim> §8- §7复杂挖掘任务（记在 mine/mine.json，范围 + 信标写在 mine/<名字>/region.json）"));
                 source.sendFeedback(Component.literal("§7  /" + name + " mine complex station ... §8- §7挖掘站：list、check（算落点 + 走过去开箱检查）、show、safe_point / food_provider / totem_provider / item_collector / tool_cache / slime_cache / cobblestone_cache / unloading_shulker_box_placement"));
-                source.sendFeedback(Component.literal("§7  /" + name + " mine debug_chunk_miner [\"minecraft:dirt\", ...] §8- §c【临时调试】§7挖掉下面那个子区块（收集列表里的物品）"));
+                source.sendFeedback(Component.literal("§7  /" + name + " mine debug_chunk_miner <detail> §8- §c【临时调试】§7挖掉下面那个子区块（detail 是必填 JSON：item_collector_list / north / south / west / east / bottom / levels）"));
                 source.sendFeedback(Component.literal("§7  /" + name + " waypoint ... §8- §7路径点 / 边 / 出生点"));
                 source.sendFeedback(Component.literal("§7    §7子命令：show、edit、list、optimize default|radical"));
                 source.sendFeedback(Component.literal("§7    §7  add_waypoint here|target|position <x> <y> <z> <dim> [name]"));
@@ -75,6 +76,7 @@ public final class PcCommand {
             .then(MaterialsCommand.build())
             .then(DumpCommand.build())
             .then(AttackCommand.build())
+            .then(EatCommand.build())
             .then(MendingCommand.build())
             .then(MineCommand.build())
             .then(WaypointsCommand.build())

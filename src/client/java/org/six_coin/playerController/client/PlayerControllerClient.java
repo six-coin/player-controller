@@ -11,6 +11,8 @@ import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerCacheRenderer;
 import org.six_coin.playerController.client.container.ContainerCacheTracker;
+import org.six_coin.playerController.client.eat.EatConfig;
+import org.six_coin.playerController.client.eat.EatManager;
 import org.six_coin.playerController.client.feature.AccountSwitcher;
 import org.six_coin.playerController.client.feature.AntiKick;
 import org.six_coin.playerController.client.feature.DimensionWait;
@@ -46,6 +48,7 @@ public class PlayerControllerClient implements ClientModInitializer {
         StationManager.get().load();
         StockManager.get().load();
         AttackConfig.get().load();
+        EatConfig.get().load();
         MendingConfig.get().load();
         MineFilterConfig.get().load();
         MineStationManager.get().load();
@@ -81,6 +84,10 @@ public class PlayerControllerClient implements ClientModInitializer {
         // 这时候这一 tick 的位置 / 朝向都已经定下来了，攻击包发出去不会和移动包打架。
         ClientTickEvents.END_CLIENT_TICK.register(client -> AttackManager.get().tick());
 
+        // 自动进食（/pc eat）：饱食度降到 12 就切快捷栏 9 吃一口。放在攻击后面、挖掘前面：
+        // 优先级比攻击低（攻击先占快捷栏）、比挖掘高（挖掘不能把食物格抢走）。
+        ClientTickEvents.END_CLIENT_TICK.register(client -> EatManager.get().tick());
+
         // mending：自己一套「走过去 → 开着末影箱 → 定时检测」的流程（见 MendingManager）。
         // 放在攻击后面：它每一轮会按经验球数量开关攻击，下一 tick 的攻击就能按新的开关来。
         ClientTickEvents.END_CLIENT_TICK.register(client -> MendingManager.get().tick());
@@ -107,6 +114,7 @@ public class PlayerControllerClient implements ClientModInitializer {
             HotbarManager.get().reset();
             RotateManager.get().reset();
             AttackManager.get().reset();
+            EatManager.get().reset();
             MendingManager.get().reset();
             MineManager.get().reset();
             HoverJitter.reset();

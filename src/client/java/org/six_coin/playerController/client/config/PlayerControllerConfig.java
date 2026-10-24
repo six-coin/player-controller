@@ -34,7 +34,7 @@ import java.nio.file.Path;
  *     "mend_max_wait_exp_seconds": 30,
  *     "mend_detect_interval_ticks": 20,
  *     "mine_max_blocks_per_tick": 40,
- *     "mine_tool_switch_interval_ticks": 4,
+ *     "mine_tool_switch_interval_ticks": 1,
  *     "mine_max_vertical_speed_blocks_per_tick": 0.08,
  *     "mine_max_horizontal_speed_blocks_per_tick": 0.0
  *   }
@@ -130,8 +130,9 @@ public final class PlayerControllerConfig {
      * {@value #DEFAULT_MINE_TOOL_SWITCH_INTERVAL_TICKS}）。
      *
      * <p>换工具那一 tick 连着后面这些 tick 都不发包，让服务端那边的选中格先稳定下来。
+     * 默认 1 = 换工具那一 tick 不动手，下一 tick 就继续（0 就是换完立刻动手）。
      */
-    public static final int DEFAULT_MINE_TOOL_SWITCH_INTERVAL_TICKS = 4;
+    public static final int DEFAULT_MINE_TOOL_SWITCH_INTERVAL_TICKS = 1;
     public static final int MIN_MINE_TOOL_SWITCH_INTERVAL_TICKS = 0;
     public static final int MAX_MINE_TOOL_SWITCH_INTERVAL_TICKS = 200;
 
