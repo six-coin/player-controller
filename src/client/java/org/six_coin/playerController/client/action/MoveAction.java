@@ -44,8 +44,19 @@ public class MoveAction extends Action {
         this.blocks = blocks;
     }
 
+    /**
+     * 零格移动：只做开头那一步「对齐到方块中心」。
+     *
+     * <p>{@code /pc snap} 的目标就是脚下这一格时用它 —— 需求里 snap 允许不移动，
+     * 这时候的作用就是把玩家摆到方块正中间。
+     */
+    public static MoveAction alignToCenter() {
+        return new MoveAction(Direction.Axis.X, 0);
+    }
+
     @Override
     public String name() {
+        if (blocks == 0) return "对齐到方块中心";
         return "移动 " + axisName(axis) + " 轴 " + blocks + " 格";
     }
 
@@ -76,6 +87,15 @@ public class MoveAction extends Action {
         }
         startBlock = block;
         endBlock = block.relative(axis, blocks);
+
+        // 零格移动只是对齐，不是真的走一段：不记边、也不碰传送门那一套
+        if (blocks == 0) {
+            driver = new MoveDriver(axis, PlayerUtils.axisValue(axis, player), 0);
+            FlightVelocity.begin();
+            engaged = true;
+            ChatUtils.debug("对齐到方块中心 " + block.toShortString());
+            return;
+        }
 
         // 3. 终点如果在末地传送门处，编辑模式下先连一条到末地的单向边。
         //    放在这里而不是收尾时做，是因为走进去会立刻被传送走，

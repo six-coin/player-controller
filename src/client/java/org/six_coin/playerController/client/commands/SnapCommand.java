@@ -85,6 +85,7 @@ public final class SnapCommand {
         source.sendFeedback(Component.literal("  §f/pc snap network§7 - 去最近的路径点 / 边上的坐标（"
             + SnapUtils.SEARCH_RADIUS + " 格内、已加载的，最近的不可达就试次近的）"));
         source.sendFeedback(Component.literal("  §7经过的每一格和它上面一格都必须是空气；目的地不在已加载范围内直接拒绝"));
+        source.sendFeedback(Component.literal("  §7目标就是脚下这一格时不移动，只对齐到方块中心（例如 §f/pc snap relative 0 0 0§7）"));
     }
 
     // ------------------------------------------------------------------
@@ -105,9 +106,11 @@ public final class SnapCommand {
             return 0;
         }
 
-        // 已经站在路径点体系里（路径点或者边上）就没必要再飞了
+        // 已经站在路径点体系里（路径点或者边上）就没必要再飞了：原地对齐到方块中心
         if (WaypointManager.get().playerStartWaypoint() != null) {
-            source.sendFeedback(Component.literal("你已经在路径点体系里了（" + from.toShortString() + "）"));
+            submitAlign();
+            source.sendFeedback(Component.literal("你已经在路径点体系里了（" + from.toShortString()
+                + "）：不移动，只对齐到方块中心"));
             return 1;
         }
 
@@ -119,7 +122,9 @@ public final class SnapCommand {
         }
 
         if (snap.target().equals(from)) {
-            source.sendFeedback(Component.literal("你已经在路径点上 " + from.toShortString() + " 了"));
+            submitAlign();
+            source.sendFeedback(Component.literal("你已经在路径点上 " + from.toShortString()
+                + " 了：不移动，只对齐到方块中心"));
             return 1;
         }
 
@@ -150,7 +155,10 @@ public final class SnapCommand {
             return 0;
         }
         if (from.equals(target)) {
-            source.sendFeedback(Component.literal("你已经站在 " + target.toShortString() + " 了（" + how + "）"));
+            // 目标就是脚下这一格：不移动，只对齐到方块中心（snap 允许不移动）
+            submitAlign();
+            source.sendFeedback(Component.literal("你已经站在 " + target.toShortString() + " 了（" + how
+                + "）：不移动，只对齐到方块中心"));
             return 1;
         }
 
@@ -181,6 +189,11 @@ public final class SnapCommand {
         for (SnapUtils.Segment segment : plan.segments()) {
             ActionManager.get().submit(new MoveAction(segment.axis(), segment.blocks()));
         }
+    }
+
+    /** 零格移动：只把玩家对齐到脚下这一格的中心。 */
+    private static void submitAlign() {
+        ActionManager.get().submit(MoveAction.alignToCenter());
     }
 
     private static String format(double value) {

@@ -27,11 +27,26 @@ import org.six_coin.playerController.client.util.ChatUtils;
  * <p><b>优先级</b>：{@link Owner#EAT} 比挖掘高、比攻击（Killaura）低 ——
  * 攻击要打的时候让给攻击，挖掘不能把食物格抢走。
  *
- * <p><b>为什么自己拼 {@code use_item} 包</b>：原版的 {@code MultiPlayerGameMode#useItem} 会在
- * 客户端也进入「正在使用物品」的状态，而 {@code Minecraft#handleKeybinds} 一旦发现
- * 「正在使用物品但右键没按住」就会立刻 {@code releaseUsingItem} 把进食打断。
- * 我们不发按键、也不改客户端视角，所以直接发一个裸包：服务端自己按 useItemRemaining
- * 计时，到点就把东西吃掉（客户端什么都不用做）。
+ * <p><b>为什么要一直按住右键</b>：吃一口是「开始使用 → 服务端按 32 tick 计时 → 到点才咽下去」，
+ * 中途一旦收到 {@code RELEASE_USE_ITEM} 就白吃了。而原版 {@code Minecraft#handleKeybinds} 里有一句
+ * <pre>
+ * if (this.player.isUsingItem()) {
+ *     if (!this.options.keyUse.isDown()) this.gameMode.releaseUsingItem(this.player);
+ * }
+ * </pre>
+ * 客户端的 {@code isUsingItem()} 是服务端同步过来的标志：我们只发一个 {@code use_item} 包的话，
+ * 下一 tick 标志同步回来、右键又没按住，客户端立刻发 {@code RELEASE_USE_ITEM} 把它取消掉
+ * —— 表现就是「只右键了一下，从来没吃到」。所以这里和 meteor 的 AutoEat 一样：
+ * <b>吃的时候把右键按住</b>（{@code options.keyUse.setDown(true)}），吃完再恢复成原来那样。
+ *
+ * <p>第一次动手仍然自己发一个裸的 {@code use_item}（见下）：低延迟时服务端一 tick 内就把
+ * 「正在使用」同步回来，原版不会再走 {@code startUseItem}，也就不会顺手点到准星上的方块。
+ * （延迟很高的时候，按住右键的那几 tick 里原版可能自己补一次 {@code startUseItem} —— 和
+ * meteor 一样接受这个副作用，它最多多发一个 use_item，服务端那边「已经在使用」会直接忽略。）
+ *
+ * <p><b>为什么自己拼 {@code use_item} 包</b>：原版的 {@code MultiPlayerGameMode#useItem} 会走
+ * {@code startUseItem} 那一套（先试方块交互），我们只想吃手上的东西，所以直接发一个裸包：
+ * 服务端自己按 useItemRemaining 计时，到点就把东西吃掉（客户端什么都不用做）。
  */
 public final class EatManager {
 
@@ -89,6 +104,11 @@ public final class EatManager {
     /** 这一口是不是我们占着快捷栏。 */
     private boolean hotbarHeld;
 
+    /** 我们是不是把右键按住了（吃完 / 中断要恢复）。 */
+    private boolean useKeyHeld;
+    /** 按住之前右键本来就是按着的吗（是的话恢复时别松开玩家自己的右键）。 */
+    private boolean useKeyWasDown;
+
     private EatManager() {
     }
 
@@ -106,6 +126,7 @@ public final class EatManager {
 
     /** 进世界 / 断线的时候清一下（不发任何包）。 */
     public void reset() {
+        holdUseKey(false);
         eating = false;
         previousSlot = -1;
         ticks = 0;
@@ -122,19 +143,19 @@ public final class EatManager {
         LocalPlayer player = mc.player;
 
         if (!EatConfig.get().enabled()) {
-            if (eating) abort(player, "自动进食被关掉了");
+            abort(player, "自动进食被关掉了");
             setState(State.OFF);
             return;
         }
 
         if (player == null || mc.level == null) {
-            if (eating) abort(player, "玩家或世界不存在");
+            abort(player, "玩家或世界不存在");
             setState(State.NO_PLAYER);
             return;
         }
 
         if (!player.isAlive() || player.isSpectator()) {
-            if (eating) abort(player, "玩家死亡 / 旁观");
+            abort(player, "玩家死亡 / 旁观");
             setState(State.NO_PLAYER);
             return;
         }
@@ -146,6 +167,9 @@ public final class EatManager {
             setState(State.IDLE);
             return;
         }
+
+        // 没在吃却还按着右键（正常不会发生）：松开，别把玩家的右键一直占着
+        if (!eating && useKeyHeld) holdUseKey(false);
 
         FoodData food = player.getFoodData();
 
@@ -199,6 +223,9 @@ public final class EatManager {
         eating = true;
 
         ChatUtils.debug("自动进食：饱食度 " + startFood + "，切到快捷栏 9 吃一口");
+
+        // 先按住右键（不然服务端一把 isUsingItem 同步过来，原版就会立刻 release），再发一次使用包
+        holdUseKey(true);
         use(player);
     }
 
@@ -208,6 +235,9 @@ public final class EatManager {
             finish(player);
             return;
         }
+
+        // 每 tick 都重新按住：中途被别的功能 / 界面改动过也能补回来
+        holdUseKey(true);
 
         // 每 tick 重新占一下快捷栏：中途被优先级更高的功能抢走时，这一 tick 就不发包
         if (!hotbarHeld || !HotbarManager.get().isHeldBy(Owner.EAT)) {
@@ -239,9 +269,10 @@ public final class EatManager {
         use(player);
     }
 
-    /** 吃完了：把快捷栏切回原来那一格。 */
+    /** 吃完了：松开右键，把快捷栏切回原来那一格。 */
     private void finish(LocalPlayer player) {
         ChatUtils.debug("自动进食：吃完了，饱食度 " + player.getFoodData().getFoodLevel());
+        holdUseKey(false);
         restore(player);
         eating = false;
         ticks = 0;
@@ -252,18 +283,46 @@ public final class EatManager {
     /** 半路停掉：让服务端别再吃了，然后把快捷栏还回去。 */
     private void abort(@Nullable LocalPlayer player, String why) {
         if (!eating) {
+            holdUseKey(false);
             restore(player);
             return;
         }
         ChatUtils.debug("自动进食中断：" + why);
         release(player);
+        holdUseKey(false);
         restore(player);
         eating = false;
         ticks = 0;
         attempts = 0;
     }
 
-    /** 发一个裸的 use_item 包（不让客户端进入「正在使用物品」状态，见类注释）。 */
+    /**
+     * 按住 / 松开右键。
+     *
+     * <p>按住是为了不让 {@code Minecraft#handleKeybinds} 把「正在使用物品」当成「玩家松手了」
+     * 去发 {@code RELEASE_USE_ITEM}（见类注释）。松开的时候如果玩家自己本来就按着右键，
+     * 就还给他按着。
+     */
+    private void holdUseKey(boolean down) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc == null || mc.options == null) return;
+
+        if (down) {
+            if (!useKeyHeld) {
+                useKeyWasDown = mc.options.keyUse.isDown();
+                useKeyHeld = true;
+            }
+            mc.options.keyUse.setDown(true);
+            return;
+        }
+
+        if (!useKeyHeld) return;
+        mc.options.keyUse.setDown(useKeyWasDown);
+        useKeyHeld = false;
+        useKeyWasDown = false;
+    }
+
+    /** 发一个裸的 use_item 包：直接让服务端开始吃，不走 {@code startUseItem}（免得先试方块交互）。 */
     private void use(LocalPlayer player) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.gameMode == null) return;
