@@ -253,6 +253,10 @@ public class MineTaskMiningAction extends Action {
             return false;
         }
 
+        // 3.5 挖掘区起始点 (x1, y2+1, z1) 必须是一个**路径点**（不只是压在边上）：
+        //     区块之间 / 子区块之间的 snap 都从这里出发，是边中间的话服务端那边不稳
+        if (!checkStartWaypoint()) return false;
+
         // 4. 清空 mine simple 的区域（不记录，之后也不用设回去）
         if (MineManager.get().cancel()) {
             ChatUtils.info("已清空 mine simple 的区域");
@@ -353,6 +357,23 @@ public class MineTaskMiningAction extends Action {
     private static String describe(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "空";
         return BuiltInRegistries.ITEM.getKey(stack.getItem()) + " x" + stack.getCount();
+    }
+
+    /**
+     * 挖掘区起始点 {@code (x1, y2+1, z1)} 必须是路径点。
+     *
+     * <p>它在区域正上方那一层（{@code b_inspect_region} 保证那里全是空气），
+     * 也是整个挖掘过程的中转站：区块起始点、子区块站立点都是从它出发的。
+     */
+    private boolean checkStartWaypoint() {
+        BlockPos start = region.headPos();
+        if (WaypointManager.get().graph().at(region.dimension(), start) == null) {
+            fail("挖掘区起始点 " + start.toShortString() + " 不是路径点 —— 先在那一格加一个路径点"
+                + "（/pc waypoint add_waypoint position " + start.getX() + " " + start.getY() + " "
+                + start.getZ() + " " + region.dimension() + "）");
+            return false;
+        }
+        return true;
     }
 
     /** mend 站立点必须设了、而且和安全点双向可达。 */

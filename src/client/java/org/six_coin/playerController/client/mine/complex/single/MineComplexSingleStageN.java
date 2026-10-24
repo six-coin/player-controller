@@ -91,26 +91,78 @@ public class MineComplexSingleStageN extends Action {
         ctx = new SingleStageCtx(DimensionUtils.current(), initialMin,
             MineFilterConfig.get().filter(), detail, data);
 
-        List<String> problems = new ArrayList<>(SingleStageCheck.checkSubChunks(mc.level, ctx));
-        problems.addAll(SingleStageCheck.checkReach());
-        problems.addAll(SingleStageCheck.checkInventory(ctx));
-        if (!problems.isEmpty()) {
-            ChatUtils.error("单段挖掘不能开始（" + problems.size() + " 条）：");
-            for (String problem : problems) ChatUtils.error("  · " + problem);
-            fail("检查没通过（" + problems.size() + " 条，见聊天栏）");
+        // 全程悬停：这段任务一直在半空中干活（临时站立点下面是空气），
+        // 只要不每 tick 把速度写成 0，玩家就会掉下去。移动的时候由 MoveAction 自己写速度。
+        // 检查 / 扔垃圾那几步也在这里面（玩家本来就站在半空）。
+        FlightVelocity.begin();
+        flying = true;
+
+        checkThenStart();
+    }
+
+    /**
+     * 先检查一遍；只有「快捷栏 6~8 里有东西」这一类问题的话，**就地扔掉**再查一遍。
+     *
+     * <p>为什么会有东西：上一段拆平台的时候会吸上来几块圆石（快捷栏 6~8 是临时空位），
+     * 拆完扔掉之后，往下飞的时候又会顺手捡回来 —— 这一趟开始前再扔一次最省事。
+     * 扔在脚下没关系：它会掉进这一层要挖的区域里，第三步捡掉落物的时候就收走了。
+     */
+    private void checkThenStart() {
+        List<String> problems = problems();
+        if (problems.isEmpty()) {
+            startMining();
             return;
         }
 
+        List<Integer> junk = junkSlots();
+        if (!junk.isEmpty()) {
+            ChatUtils.info("物品栏 " + junk + " 格里有不该有的东西，先低头扔掉再查一遍");
+            run(new SingleStageThrowAction(ctx, junk, "快捷栏 6~8"), this::afterThrow);
+            return;
+        }
+
+        report(problems);
+    }
+
+    private void afterThrow() {
+        List<String> problems = problems();
+        if (!problems.isEmpty()) {
+            report(problems);
+            return;
+        }
+        startMining();
+    }
+
+    /** 该空着的格子（快捷栏 6~8）里有东西的那几格。 */
+    private List<Integer> junkSlots() {
+        List<Integer> slots = new ArrayList<>();
+        for (int slot = SingleStageCtx.HOTBAR_FREE_1; slot <= SingleStageCtx.HOTBAR_FREE_3; slot++) {
+            if (!ctx.data.isEmpty(slot)) slots.add(slot);
+        }
+        return slots;
+    }
+
+    private List<String> problems() {
+        Minecraft mc = Minecraft.getInstance();
+        ctx.refresh();
+        List<String> problems = new ArrayList<>(SingleStageCheck.checkSubChunks(mc.level, ctx));
+        problems.addAll(SingleStageCheck.checkReach());
+        problems.addAll(SingleStageCheck.checkInventory(ctx));
+        return problems;
+    }
+
+    private void report(List<String> problems) {
+        ChatUtils.error("单段挖掘不能开始（" + problems.size() + " 条）：");
+        for (String problem : problems) ChatUtils.error("  · " + problem);
+        fail("检查没通过（" + problems.size() + " 条，见聊天栏）");
+    }
+
+    private void startMining() {
         ChatUtils.info("单段挖掘开始：" + ctx.describe() + "；" + detail.describe());
 
         // debug_chunk_miner 专用工具策略（「空手」= 快捷栏 9）：
         // 每种方块只判断一次、只缓存在内存里，任务结束就清掉（见 MineManager#setDebugToolPolicy）
         MineManager.get().setDebugToolPolicy(detail.itemCollectorList());
-
-        // 全程悬停：这段任务一直在半空中干活（临时站立点下面是空气），
-        // 只要不每 tick 把速度写成 0，玩家就会掉下去。移动的时候由 MoveAction 自己写速度。
-        FlightVelocity.begin();
-        flying = true;
         run(new SingleStageSetup(ctx), this::runIteration);
     }
 
@@ -217,9 +269,11 @@ public class MineComplexSingleStageN extends Action {
         run(new SingleStageTeardown(ctx), this::throwLeftovers);
     }
 
-    /** 拆完平台，快捷栏第 6 格基本一定会吸上来几块圆石：低头扔掉，再去做补货检查。 */
+    /** 拆完平台，快捷栏 6~8（临时空位）基本一定会吸上来几块圆石：低头扔掉，再去做补货检查。 */
     private void throwLeftovers() {
-        run(new SingleStageThrowAction(ctx, List.of(SingleStageCtx.HOTBAR_FREE_1), "快捷栏 6"),
+        run(new SingleStageThrowAction(ctx,
+            List.of(SingleStageCtx.HOTBAR_FREE_1, SingleStageCtx.HOTBAR_FREE_2,
+                SingleStageCtx.HOTBAR_FREE_3), "快捷栏 6~8"),
             this::restockCheck);
     }
 
