@@ -53,6 +53,18 @@ class SingleStageStage2 extends SingleStageStep {
     /** 落地之后至少待这么多 tick 再判断「挖完了」（给 mine simple 一点启动时间）。 */
     private static final int SETTLE_TICKS = 5;
 
+    /** 每这么多 tick 采样一次「区域里还剩几个方块」（判断有没有真的在挖）。 */
+    private static final int PROGRESS_SAMPLE_TICKS = 20;
+
+    /**
+     * 一直在「挖」但方块数一直没减少，这么多 tick 就认为这一站挖不动了，换下一个点。
+     *
+     * <p>兜底用：debug 工具策略会把「掉落物不要、原工具又秒破不了」的方块也算成空手可挖，
+     * 万一手上的东西真挖不动它们，mine simple 会一直报「正在挖」而一个方块都掉不下来，
+     * 没有这一条就会一直卡在这一站（整个任务的上限是 6 小时）。
+     */
+    private static final int STUCK_TICKS = 20 * 10;
+
     private enum Phase {
         /** 挖，挖不动了就去下一个点。 */
         MINE,
@@ -74,6 +86,11 @@ class SingleStageStage2 extends SingleStageStep {
     private int index;
     private boolean mineStarted;
     private boolean warnedNoBlocks;
+
+    /** 进度看门狗：上次采样剩几个、连续多久没减少。 */
+    private int progressTimer;
+    private int lastRemaining = -1;
+    private int stuckTicks;
 
     SingleStageStage2(SingleStageCtx ctx, int iteration) {
         super(ctx);
@@ -169,6 +186,14 @@ class SingleStageStage2 extends SingleStageStep {
             return;
         }
 
+        // 看门狗：mine simple 说在挖，但方块数一直没减少 → 这一站挖不动了，换下一个点
+        if (MineManager.get().state() == MineManager.State.MINING && stuck(mc)) {
+            ChatUtils.error(phase() + "：一直在发包但区域里的方块没减少（手上的东西挖不动它们？），"
+                + "换下一个点");
+            nextWaypoint(mc);
+            return;
+        }
+
         settledTicks++;
         if (settledTicks < SETTLE_TICKS) return;
 
@@ -185,7 +210,17 @@ class SingleStageStage2 extends SingleStageStep {
         quietTicks = 0;
         settledTicks = 0;
 
-        // 这个点挖完了：去下一个
+        nextWaypoint(mc);
+    }
+
+    /** 这一站结束了：去下一个走位点（走完了就收尾）。 */
+    private void nextWaypoint(Minecraft mc) {
+        quietTicks = 0;
+        settledTicks = 0;
+        progressTimer = 0;
+        lastRemaining = -1;
+        stuckTicks = 0;
+
         index++;
         if (index >= WAYPOINTS.length) {
             int left = remainingBlocks(mc).size();
@@ -199,6 +234,27 @@ class SingleStageStage2 extends SingleStageStep {
         BlockPos next = waypoint(index);
         ChatUtils.debug(phase() + "：去第 " + (index + 1) + " 个点 " + next.toShortString());
         startChild(new SingleStageSnapAction(ctx, next), Phase.MINE);
+    }
+
+    /** 每 {@value #PROGRESS_SAMPLE_TICKS} tick 采一次样，连续 {@value #STUCK_TICKS} tick 没减少返回 true。 */
+    private boolean stuck(Minecraft mc) {
+        if (++progressTimer < PROGRESS_SAMPLE_TICKS) return false;
+        progressTimer = 0;
+
+        int remaining = remainingBlocks(mc).size();
+        if (lastRemaining < 0) {
+            lastRemaining = remaining;
+            return false;
+        }
+        if (remaining < lastRemaining) {
+            lastRemaining = remaining;
+            stuckTicks = 0;
+            return false;
+        }
+
+        lastRemaining = remaining;
+        stuckTicks += PROGRESS_SAMPLE_TICKS;
+        return stuckTicks >= STUCK_TICKS;
     }
 
     /** 第 {@code i} 个走位点（走位层上）。 */

@@ -70,7 +70,8 @@ import java.util.Set;
  *   <li><b>重力方块保护</b>（{@link #startTransient(MineRegion, boolean)}）：
  *       上面还压着别的重力方块的，先不挖 —— 挖掉下面那个，上面那一摞会落进刚挖空的洞里；</li>
  *   <li><b>debug 工具策略</b>（{@link #setDebugToolPolicy(java.util.Collection)}）：
- *       掉落物不要、又秒破不了的方块直接跳过；空手就能秒破的切到快捷栏 9 去挖。</li>
+ *       掉落物不要、又（原工具秒破不了 或 空手能秒破）的方块，适合的工具算「空手」，
+ *       切到快捷栏 9 去挖。</li>
  * </ul>
  *
  * <p>**玩家沾水的时候也一概不挖**（见 {@link #touchingWater}）：水里游泳 / 漂浮会让客户端和
@@ -267,15 +268,13 @@ public final class MineManager {
     /**
      * 换成 {@code debug_chunk_miner} 的那套工具策略（只影响这一次任务，不落盘）。
      *
-     * <p>规则（需求原文）：对一个方块，下面两种情况都认为它的「适合的工具」是**空手**
-     * （快捷栏 9 那一格）：
-     * <ol>
-     *   <li>它<b>任何情况下的掉落物</b>都不在 {@code item_collector_list} 里，
-     *       而且用原本适合的工具<b>也秒破不了</b> —— 反正挖不下来，别为它换工具；</li>
-     *   <li><b>空手就能秒破</b>（黏液块这种硬度 0 的）。</li>
-     * </ol>
-     * 第一种在实现上等同于「不当挖掘目标」（空手也挖不动它，硬发只会白占每 tick 的额度），
-     * 第二种才是真的切到空手去挖。
+     * <p>规则（需求原文）：
+     * <pre>
+     * (掉落物没有一种在 item_collector_list 里) 且 ((原本适合的工具不能秒破) 或 (空手能秒破))
+     *     → 这个方块「适合的工具」就是**空手**（快捷栏 9 那一格）
+     * </pre>
+     * 也就是：掉落物不要的方块，只要「原工具秒不掉」或者「空手就能秒」，就切到空手去挖；
+     * 掉落物要的方块一律按原来的工具规则来（哪怕空手也能秒破）。
      *
      * @param collectorItems item_collector_list 里的物品 id
      */
@@ -301,22 +300,20 @@ public final class MineManager {
         /** 按原来的规则（原版那四张 mineable 表）。 */
         NORMAL,
         /** 适合的工具是空手（快捷栏 9）。 */
-        HAND,
-        /** 不用挖它（掉落物不要、本来也挖不动）。 */
-        SKIP
+        HAND
     }
 
     /** 一个方块对「手上要拿什么」的要求。 */
-    private record ToolNeed(@Nullable MineTools.Kind kind, boolean hand, boolean skip) {
+    private record ToolNeed(@Nullable MineTools.Kind kind, boolean hand) {
 
-        static final ToolNeed ANY = new ToolNeed(null, false, false);
+        static final ToolNeed ANY = new ToolNeed(null, false);
     }
 
     /** 这个方块对工具的要求（debug 策略开着的时候会走缓存）。 */
     private ToolNeed toolNeed(BlockState state) {
         if (!debugToolPolicy) {
             MineTools.Kind kind = MineTools.required(state);
-            return kind == null ? ToolNeed.ANY : new ToolNeed(kind, false, false);
+            return kind == null ? ToolNeed.ANY : new ToolNeed(kind, false);
         }
 
         DebugNeed need = debugNeeds.get(state.getBlock());
@@ -326,11 +323,10 @@ public final class MineManager {
         }
 
         return switch (need) {
-            case HAND -> new ToolNeed(null, true, false);
-            case SKIP -> new ToolNeed(null, false, true);
+            case HAND -> new ToolNeed(null, true);
             case NORMAL -> {
                 MineTools.Kind kind = MineTools.required(state);
-                yield kind == null ? ToolNeed.ANY : new ToolNeed(kind, false, false);
+                yield kind == null ? ToolNeed.ANY : new ToolNeed(kind, false);
             }
         };
     }
@@ -339,28 +335,22 @@ public final class MineManager {
     private DebugNeed computeDebugNeed(BlockState state) {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
-        if (mc.level == null) return DebugNeed.NORMAL;
+        if (mc.level == null || player == null) return DebugNeed.NORMAL;
 
-        // 硬度要拿一个真实坐标算；拿不到就用默认状态的（同一个方块基本一样）
-        float hardness = state.getDestroySpeed(mc.level, BlockPos.containing(player == null
-            ? Vec3.ZERO : player.position()));
-        if (hardness < 0.0F) return DebugNeed.SKIP;   // 挖不动的（基岩之类）
+        float hardness = state.getDestroySpeed(mc.level, BlockPos.containing(player.position()));
 
-        // 2) 空手就能秒破 → 适合的工具就是空手
-        if (MineTools.canInstaMine(state, null, player, hardness)) {
-            debugNeed("空手秒破", state);
-            return DebugNeed.HAND;
-        }
-
-        // 1) 掉落物都不要，而且原本适合的工具也秒破不了 → 别挖它
+        // (掉落物没有一种在 item_collector_list 里)
         boolean wanted = dropWanted(state);
-        MineTools.Kind kind = MineTools.required(state);
-        ItemStack tool = toolStack(player, kind);
-        boolean instaWithTool = MineTools.canInstaMine(state, tool, player, hardness);
+        if (wanted) return DebugNeed.NORMAL;
 
-        if (!wanted && !instaWithTool) {
-            debugNeed("掉落物不要且工具也秒破不了", state);
-            return DebugNeed.SKIP;
+        // 且 ((原本适合的工具不能秒破) 或 (空手能秒破))
+        boolean instaByHand = MineTools.canInstaMine(state, null, player, hardness);
+        MineTools.Kind kind = MineTools.required(state);
+        boolean instaWithTool = MineTools.canInstaMine(state, toolStack(player, kind), player, hardness);
+
+        if (instaByHand || !instaWithTool) {
+            debugNeed("掉落物不要，且" + (instaByHand ? "空手就能秒破" : "原工具也秒破不了"), state);
+            return DebugNeed.HAND;
         }
         return DebugNeed.NORMAL;
     }
@@ -692,7 +682,6 @@ public final class MineManager {
     /** 手上这件工具（{@code null} = 空手）挖不挖得动这个方块。 */
     private boolean suitable(BlockState state, @Nullable MineTools.Kind held) {
         ToolNeed need = toolNeed(state);
-        if (need.skip()) return false;
         if (need.hand()) return held == null;
         return need.kind() == null || need.kind() == held;
     }
@@ -787,7 +776,6 @@ public final class MineManager {
                     BlockState state = mc.level.getBlockState(mutable);
                     if (!breakable(mc.level, mutable, state)) continue;
                     if (blockedByGravity(mc.level, mutable, state)) continue;
-                    if (toolNeed(state).skip()) continue;
                     if (!region.filter().allows(state.getBlock())) continue;
                     if (!inRange(eye, mutable, reach)) continue;
 
