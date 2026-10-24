@@ -1,8 +1,7 @@
 package org.six_coin.playerController.client.feature;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 
 /**
@@ -19,9 +18,10 @@ import org.six_coin.playerController.client.config.PlayerControllerConfig;
  * 的位置包】，让服务端那一 tick 认为玩家在往下掉，于是把 {@code floatingTicks} 清零，永远攒不到 80。
  * 两个参数都在 {@code /pc config actions} 里改。
  *
- * <p>和 Meteor 的差别只有一处：Meteor 是把客户端本来就要发的移动包改低（还会把
- * {@code ticksSinceLastPositionPacketSent} 设成 20 强制客户端发包），我们这里直接自己发一个位置包，
- * 服务端看到的东西完全一样，而且不需要额外的 mixin 去改 {@code ClientPlayerEntity} 的私有字段。
+ * <p><b>26.3 的注意点</b>：不能自己再发一个位置包了 —— 服务端一个 tick 只接受一个带位置的移动包，
+ * 第二个直接断开（{@code Invalid move player packet received}）。
+ * 所以这里和 Meteor 完全一致：把原版<b>本来就要发</b>的那一包的高度改低（见 {@link MovePackets}），
+ * 而不是额外补一包。
  *
  * <p>另外两点跟 Meteor 保持一致：
  * <ul>
@@ -55,10 +55,10 @@ public final class AntiKick {
 
     /** 每个客户端 tick 调一次（END_CLIENT_TICK，也就是 Meteor 的 post-tick）。 */
     public static void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
 
-        if (player == null || player.networkHandler == null || mc.world == null) {
+        if (player == null || player.connection == null || mc.level == null) {
             reset();
             return;
         }
@@ -89,7 +89,7 @@ public final class AntiKick {
         delayLeft = delay;
     }
 
-    private static void dip(ClientPlayerEntity player) {
+    private static void dip(LocalPlayer player) {
         double currentY = player.getY();
 
         // 第一次补的时候还不知道上一包是多少，先记下来，下一次再说
@@ -99,7 +99,7 @@ public final class AntiKick {
         }
 
         // 站在地上：服务端本来就会清零，不用管
-        if (player.isOnGround()) {
+        if (player.onGround()) {
             lastPacketY = currentY;
             return;
         }
@@ -111,8 +111,10 @@ public final class AntiKick {
         }
 
         double y = lastPacketY - DIP;
-        player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-            player.getX(), y, player.getZ(), player.isOnGround(), player.horizontalCollision));
+        // 不自己发包（26.3 一个 tick 只准发一个带位置的移动包，多发一个直接断开），
+        // 改成把原版即将发出去的那一包的高度改低，服务端看到的东西是一样的。
+        MovePackets.overrideNext(y, player.onGround());
+        MovePackets.forceNext();
     }
 
     /**

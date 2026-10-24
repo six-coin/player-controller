@@ -5,18 +5,18 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.command.CommandSource;
-import net.minecraft.command.argument.IdentifierArgumentType;
-import net.minecraft.text.ClickEvent;
-import net.minecraft.text.HoverEvent;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Style;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.IdentifierArgument;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
@@ -82,7 +82,7 @@ public final class WaypointsCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("waypoint")
+        return ClientCommands.literal("waypoint")
             .executes(WaypointsCommand::status)
             .then(literal("show")
                 .executes(WaypointsCommand::toggleShow))
@@ -117,9 +117,9 @@ public final class WaypointsCommand {
 
     /** 少写参数时打一行用法（比 brigadier 那句英文报错友好）。 */
     private static int usage(FabricClientCommandSource source, String... lines) {
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7用法：" + ROOT + lines[0]));
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7用法：" + ROOT + lines[0]));
         for (int i = 1; i < lines.length; i++) {
-            source.sendFeedback(Text.literal("§7  " + ROOT + lines[i]));
+            source.sendFeedback(Component.literal("§7  " + ROOT + lines[i]));
         }
         return 1;
     }
@@ -137,7 +137,7 @@ public final class WaypointsCommand {
     /** 把若干个选择器挂到同一层下面。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> picks(String name, Pick runner,
                                                                           String... kinds) {
-        LiteralArgumentBuilder<FabricClientCommandSource> node = ClientCommandManager.literal(name);
+        LiteralArgumentBuilder<FabricClientCommandSource> node = ClientCommands.literal(name);
         for (String kind : kinds) node.then(pick(kind, runner));
         return node;
     }
@@ -150,13 +150,13 @@ public final class WaypointsCommand {
             case "target" -> literal("target")
                 .executes(context -> runner.run(context.getSource(), context, "target"));
             case "id" -> literal("id")
-                .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
+                .then(ClientCommands.argument("id", IntegerArgumentType.integer())
                     .executes(context -> runner.run(context.getSource(), context, "id")));
             case "position" -> positionNode(
                 context -> runner.run(context.getSource(), context, "position"));
             case "name" -> literal("name")
-                .then(ClientCommandManager.argument("name", StringArgumentType.word())
-                    .suggests((context, builder) -> CommandSource.suggestMatching(names(), builder))
+                .then(ClientCommands.argument("name", StringArgumentType.word())
+                    .suggests((context, builder) -> SharedSuggestionProvider.suggest(names(), builder))
                     .executes(context -> runner.run(context.getSource(), context, "name")));
             default -> throw new IllegalArgumentException("未知选择器: " + kind);
         };
@@ -168,19 +168,19 @@ public final class WaypointsCommand {
 
         // 注意顺序：brigadier 的 then(builder) 会立刻 build 出节点，所以要从里往外挂
         RequiredArgumentBuilder<FabricClientCommandSource, Identifier> dim =
-            ClientCommandManager.argument("dim", IdentifierArgumentType.identifier())
+            ClientCommands.argument("dim", IdentifierArgument.id())
                 .suggests(DimensionSuggestions::suggest)
                 .executes(runner);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> z =
-            ClientCommandManager.argument("z", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
+            ClientCommands.argument("z", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
         z.then(dim);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> y =
-            ClientCommandManager.argument("y", IntegerArgumentType.integer()).suggests(LookSuggestions::y).then(z);
+            ClientCommands.argument("y", IntegerArgumentType.integer()).suggests(LookSuggestions::y).then(z);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> x =
-            ClientCommandManager.argument("x", IntegerArgumentType.integer()).suggests(LookSuggestions::x).then(y);
+            ClientCommands.argument("x", IntegerArgumentType.integer()).suggests(LookSuggestions::x).then(y);
 
         return literal("position").then(x);
     }
@@ -201,19 +201,19 @@ public final class WaypointsCommand {
                 int id = IntegerArgumentType.getInteger(context, "id");
                 Waypoint waypoint = graph.get(id);
                 if (waypoint == null) {
-                    source.sendError(Text.literal("没有 #" + id + " 这个路径点"));
+                    source.sendError(Component.literal("没有 #" + id + " 这个路径点"));
                 }
                 return waypoint;
             }
             case "here" -> {
                 BlockPos pos = PlayerUtils.currentBlockPos();
                 if (pos == null) {
-                    source.sendError(Text.literal("拿不到玩家位置"));
+                    source.sendError(Component.literal("拿不到玩家位置"));
                     return null;
                 }
                 Waypoint waypoint = graph.at(dimension, pos);
                 if (waypoint == null) {
-                    source.sendError(Text.literal("你现在站的 " + DimensionUtils.display(dimension) + " "
+                    source.sendError(Component.literal("你现在站的 " + DimensionUtils.display(dimension) + " "
                         + pos.toShortString() + " 不是路径点"));
                 }
                 return waypoint;
@@ -221,12 +221,12 @@ public final class WaypointsCommand {
             case "target" -> {
                 BlockPos pos = PlayerUtils.lookedAtBlock();
                 if (pos == null) {
-                    source.sendError(Text.literal("你没有看向任何方块"));
+                    source.sendError(Component.literal("你没有看向任何方块"));
                     return null;
                 }
                 Waypoint waypoint = graph.at(dimension, pos);
                 if (waypoint == null) {
-                    source.sendError(Text.literal("你看向的 " + DimensionUtils.display(dimension) + " "
+                    source.sendError(Component.literal("你看向的 " + DimensionUtils.display(dimension) + " "
                         + pos.toShortString() + " 不是路径点"));
                 }
                 return waypoint;
@@ -236,7 +236,7 @@ public final class WaypointsCommand {
                 String at = readDimension(context);
                 Waypoint waypoint = graph.at(at, pos);
                 if (waypoint == null) {
-                    source.sendError(Text.literal(DimensionUtils.display(at) + " 的 "
+                    source.sendError(Component.literal(DimensionUtils.display(at) + " 的 "
                         + pos.toShortString() + " 不是路径点"));
                 }
                 return waypoint;
@@ -245,12 +245,12 @@ public final class WaypointsCommand {
                 String name = StringArgumentType.getString(context, "name");
                 Waypoint waypoint = graph.byName(name);
                 if (waypoint == null) {
-                    source.sendError(Text.literal("没有叫 " + name + " 的路径点"));
+                    source.sendError(Component.literal("没有叫 " + name + " 的路径点"));
                 }
                 return waypoint;
             }
             default -> {
-                source.sendError(Text.literal("未知的选择器: " + kind));
+                source.sendError(Component.literal("未知的选择器: " + kind));
                 return null;
             }
         }
@@ -271,16 +271,16 @@ public final class WaypointsCommand {
             .then(literal("target")
                 .executes(WaypointsCommand::addWaypointTarget))
             .then(literal("position").then(
-                ClientCommandManager.argument("x", IntegerArgumentType.integer())
+                ClientCommands.argument("x", IntegerArgumentType.integer())
                     .suggests(LookSuggestions::x)
-                    .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+                    .then(ClientCommands.argument("y", IntegerArgumentType.integer())
                         .suggests(LookSuggestions::y)
-                        .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                        .then(ClientCommands.argument("z", IntegerArgumentType.integer())
                             .suggests(LookSuggestions::z)
-                            .then(ClientCommandManager.argument("dim", IdentifierArgumentType.identifier())
+                            .then(ClientCommands.argument("dim", IdentifierArgument.id())
                                 .suggests(DimensionSuggestions::suggest)
                                 .executes(context -> addWaypointPosition(context, null))
-                                .then(ClientCommandManager.argument("name", StringArgumentType.word())
+                                .then(ClientCommands.argument("name", StringArgumentType.word())
                                     .executes(context -> addWaypointPosition(context,
                                         StringArgumentType.getString(context, "name")))))))));
     }
@@ -290,7 +290,7 @@ public final class WaypointsCommand {
         FabricClientCommandSource source = context.getSource();
         BlockPos pos = PlayerUtils.currentBlockPos();
         if (pos == null) {
-            source.sendError(Text.literal("拿不到玩家位置"));
+            source.sendError(Component.literal("拿不到玩家位置"));
             return 0;
         }
         return addWaypointAt(source, DimensionUtils.current(), pos, null);
@@ -301,7 +301,7 @@ public final class WaypointsCommand {
         FabricClientCommandSource source = context.getSource();
         BlockPos pos = PlayerUtils.lookedAtBlock();
         if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
+            source.sendError(Component.literal("你没有看向任何方块"));
             return 0;
         }
         return addWaypointAt(source, DimensionUtils.current(), pos, null);
@@ -317,7 +317,7 @@ public final class WaypointsCommand {
     private static int addWaypointAt(FabricClientCommandSource source, String dimension,
                                      BlockPos pos, @Nullable String name) {
         if (name != null && !WaypointGraph.isValidName(name)) {
-            source.sendError(Text.literal("名字只能用大小写字母、数字和下划线"));
+            source.sendError(Component.literal("名字只能用大小写字母、数字和下划线"));
             return 0;
         }
 
@@ -327,19 +327,19 @@ public final class WaypointsCommand {
         if (existing != null) {
             if (name != null) {
                 if (existing.isSpawn()) {
-                    source.sendError(Text.literal("那是出生点节点，不能改名"));
+                    source.sendError(Component.literal("那是出生点节点，不能改名"));
                     return 0;
                 }
                 if (!graph.setName(existing.id(), name)) {
-                    source.sendError(Text.literal("名字 " + name + " 已经被别的路径点占用了"));
+                    source.sendError(Component.literal("名字 " + name + " 已经被别的路径点占用了"));
                     return 0;
                 }
                 WaypointManager.get().save();
-                source.sendFeedback(Text.literal("已把 #" + existing.id() + " " + pos.toShortString()
+                source.sendFeedback(Component.literal("已把 #" + existing.id() + " " + pos.toShortString()
                     + " 命名为 " + name));
                 return 1;
             }
-            source.sendFeedback(Text.literal("该位置已经有路径点了：#" + existing.id()));
+            source.sendFeedback(Component.literal("该位置已经有路径点了：#" + existing.id()));
             return 1;
         }
 
@@ -347,11 +347,11 @@ public final class WaypointsCommand {
         int splits = graph.splitEdgeAt(dimension, pos);
         Waypoint created = graph.ensureWaypoint(dimension, pos);
         if (name != null && !graph.setName(created.id(), name)) {
-            source.sendError(Text.literal("名字 " + name + " 已经被别的路径点占用了"));
+            source.sendError(Component.literal("名字 " + name + " 已经被别的路径点占用了"));
             return 0;
         }
         WaypointManager.get().save();
-        source.sendFeedback(Text.literal("已添加路径点 #" + created.id() + " "
+        source.sendFeedback(Component.literal("已添加路径点 #" + created.id() + " "
             + DimensionUtils.display(dimension) + " " + pos.toShortString()
             + (name == null ? "" : "（" + name + "）")
             + (splits > 0 ? "，并把它所在的 " + splits + " 条边从中间拆开了" : "")));
@@ -361,8 +361,8 @@ public final class WaypointsCommand {
     private static LiteralArgumentBuilder<FabricClientCommandSource> addEdge() {
         return literal("add_edge")
             .executes(context -> usage(context.getSource(), "add_edge <id1> <id2>"))
-            .then(ClientCommandManager.argument("id1", IntegerArgumentType.integer())
-                .then(ClientCommandManager.argument("id2", IntegerArgumentType.integer())
+            .then(ClientCommands.argument("id1", IntegerArgumentType.integer())
+                .then(ClientCommands.argument("id2", IntegerArgumentType.integer())
                     .executes(WaypointsCommand::edgeAdd)));
     }
 
@@ -375,35 +375,35 @@ public final class WaypointsCommand {
         Waypoint a = graph.get(id1);
         Waypoint b = graph.get(id2);
         if (a == null || b == null) {
-            source.sendError(Text.literal("路径点不存在：" + (a == null ? "#" + id1 : "#" + id2)));
+            source.sendError(Component.literal("路径点不存在：" + (a == null ? "#" + id1 : "#" + id2)));
             return 0;
         }
         if (id1 == id2) {
-            source.sendError(Text.literal("两端不能是同一个路径点"));
+            source.sendError(Component.literal("两端不能是同一个路径点"));
             return 0;
         }
 
         if (a.dimension().equals(b.dimension())) {
             // 同一个维度里只能沿一个轴走，而且要走重叠切分那一套
             if (WaypointGraph.sharedAxis(a.pos(), b.pos()) == null) {
-                source.sendError(Text.literal("同一维度里的两个路径点必须有两个坐标相等（只能沿一个轴移动）"));
+                source.sendError(Component.literal("同一维度里的两个路径点必须有两个坐标相等（只能沿一个轴移动）"));
                 return 0;
             }
             try {
                 graph.addSegment(a.dimension(), a.pos(), b.pos());
             } catch (IllegalArgumentException e) {
-                source.sendError(Text.literal(e.getMessage()));
+                source.sendError(Component.literal(e.getMessage()));
                 return 0;
             }
         } else {
             if (graph.addEdge(id1, id2, true) == null) {
-                source.sendError(Text.literal("这两个路径点之间已经有边了"));
+                source.sendError(Component.literal("这两个路径点之间已经有边了"));
                 return 0;
             }
         }
 
         WaypointManager.get().save();
-        source.sendFeedback(Text.literal("已添加双向边 #" + id1 + " <-> #" + id2));
+        source.sendFeedback(Component.literal("已添加双向边 #" + id1 + " <-> #" + id2));
         return 1;
     }
 
@@ -430,7 +430,7 @@ public final class WaypointsCommand {
                 StringArgumentType.getString(context, "name")))));
 
         node.then(literal("id")
-            .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
+            .then(ClientCommands.argument("id", IntegerArgumentType.integer())
                 .executes(context -> nameWaypointAt(context, "id", null))
                 .then(optionalName(context -> nameWaypointAt(context, "id",
                     StringArgumentType.getString(context, "name"))))));
@@ -441,7 +441,7 @@ public final class WaypointsCommand {
     /** 可选的 {@code [name]} 参数。 */
     private static RequiredArgumentBuilder<FabricClientCommandSource, String> optionalName(
         com.mojang.brigadier.Command<FabricClientCommandSource> runner) {
-        return ClientCommandManager.argument("name", StringArgumentType.word()).executes(runner);
+        return ClientCommands.argument("name", StringArgumentType.word()).executes(runner);
     }
 
     /**
@@ -456,21 +456,21 @@ public final class WaypointsCommand {
         if (name == null) return deleteName(source, waypoint);
 
         if (!WaypointGraph.isValidName(name)) {
-            source.sendError(Text.literal("名字只能用大小写字母、数字和下划线"));
+            source.sendError(Component.literal("名字只能用大小写字母、数字和下划线"));
             return 0;
         }
         if (waypoint.isSpawn()) {
-            source.sendError(Text.literal("0 号是出生点节点，名字跟着出生点走，不能单独改"));
+            source.sendError(Component.literal("0 号是出生点节点，名字跟着出生点走，不能单独改"));
             return 0;
         }
 
         WaypointGraph graph = WaypointManager.get().graph();
         if (!graph.setName(waypoint.id(), name)) {
-            source.sendError(Text.literal("名字 " + name + " 已经被别的路径点占用了"));
+            source.sendError(Component.literal("名字 " + name + " 已经被别的路径点占用了"));
             return 0;
         }
         WaypointManager.get().save();
-        source.sendFeedback(Text.literal("已把 #" + waypoint.id() + " 命名为 " + name));
+        source.sendFeedback(Component.literal("已把 #" + waypoint.id() + " 命名为 " + name));
         return 1;
     }
 
@@ -479,20 +479,20 @@ public final class WaypointsCommand {
         int id = waypoint.id();
 
         if (waypoint.isSpawn()) {
-            source.sendError(Text.literal("0 号是出生点节点，名字跟着出生点走，不能单独改"));
+            source.sendError(Component.literal("0 号是出生点节点，名字跟着出生点走，不能单独改"));
             return 0;
         }
         if (!waypoint.hasName()) {
-            source.sendFeedback(Text.literal("#" + id + " 本来就没有名字"));
+            source.sendFeedback(Component.literal("#" + id + " 本来就没有名字"));
             return 1;
         }
         String oldName = waypoint.name();
         if (!WaypointManager.get().graph().setName(id, null)) {
-            source.sendError(Text.literal("删除 #" + id + " 的名字失败"));
+            source.sendError(Component.literal("删除 #" + id + " 的名字失败"));
             return 0;
         }
         WaypointManager.get().save();
-        source.sendFeedback(Text.literal("已删除 #" + id + " 的名字（" + oldName + "）"));
+        source.sendFeedback(Component.literal("已删除 #" + id + " 的名字（" + oldName + "）"));
         return 1;
     }
 
@@ -504,7 +504,7 @@ public final class WaypointsCommand {
     private static LiteralArgumentBuilder<FabricClientCommandSource> delEdge() {
         return literal("del_edge")
             .executes(context -> usage(context.getSource(), "del_edge <id>（id 是负数）"))
-            .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
+            .then(ClientCommands.argument("id", IntegerArgumentType.integer())
                 .executes(WaypointsCommand::delEdgeAt));
     }
 
@@ -513,7 +513,7 @@ public final class WaypointsCommand {
         int id = IntegerArgumentType.getInteger(context, "id");
 
         if (id >= 0) {
-            source.sendError(Text.literal("边的编号都是负数（-1、-2、…）；"
+            source.sendError(Component.literal("边的编号都是负数（-1、-2、…）；"
                 + "要删路径点用 " + ROOT + "del_waypoint id <id>"));
             return 0;
         }
@@ -521,11 +521,11 @@ public final class WaypointsCommand {
         WaypointGraph graph = WaypointManager.get().graph();
         Edge edge = graph.edge(id);
         if (edge == null) {
-            source.sendError(Text.literal("没有 #" + id + " 这条边"));
+            source.sendError(Component.literal("没有 #" + id + " 这条边"));
             return 0;
         }
         if (edge.from() == WaypointGraph.SPAWN_ID) {
-            source.sendError(Text.literal("#" + id + " 是出生点自动生成的边，删了也会重建；"
+            source.sendError(Component.literal("#" + id + " 是出生点自动生成的边，删了也会重建；"
                 + "要取消出生点用 " + ROOT + "del_spawn"));
             return 0;
         }
@@ -533,7 +533,7 @@ public final class WaypointsCommand {
         String describe = describeEdge(graph, edge);
         graph.removeEdge(id);
         WaypointManager.get().save();
-        source.sendFeedback(Text.literal("已删除边 #" + id + " " + describe));
+        source.sendFeedback(Component.literal("已删除边 #" + id + " " + describe));
         return 1;
     }
 
@@ -551,27 +551,27 @@ public final class WaypointsCommand {
         int id = waypoint.id();
 
         if (waypoint.isSpawn()) {
-            source.sendError(Text.literal("这里是出生点节点，不能删；要取消出生点用 " + ROOT + "del_spawn"));
+            source.sendError(Component.literal("这里是出生点节点，不能删；要取消出生点用 " + ROOT + "del_spawn"));
             return 0;
         }
 
         Waypoint spawn = graph.spawnWaypointTarget();
         if (spawn != null && spawn.id() == id) {
-            source.sendError(Text.literal("#" + id + " 是当前出生点，不能删；"
+            source.sendError(Component.literal("#" + id + " 是当前出生点，不能删；"
                 + "先用 " + ROOT + "set_spawn <选择器> 换一个"));
             return 0;
         }
 
         BlockPos endPlatform = DimensionUtils.endSpawnPos();
         if (waypoint.dimension().equals(DimensionUtils.END) && waypoint.pos().equals(endPlatform)) {
-            source.sendError(Text.literal("#" + id + " 是末地初始平台，不能删"));
+            source.sendError(Component.literal("#" + id + " 是末地初始平台，不能删"));
             return 0;
         }
 
         BlockPos pos = waypoint.pos();
         graph.removeWaypoint(id);
         WaypointManager.get().save();
-        source.sendFeedback(Text.literal("已删除路径点 #" + id + " "
+        source.sendFeedback(Component.literal("已删除路径点 #" + id + " "
             + DimensionUtils.display(waypoint.dimension()) + " " + pos.toShortString()
             + " 以及和它相连的所有边"));
         return 1;
@@ -591,14 +591,14 @@ public final class WaypointsCommand {
 
     private static int applySpawn(FabricClientCommandSource source, Waypoint waypoint) {
         if (waypoint.isSpawn()) {
-            source.sendError(Text.literal("那已经是出生点节点了"));
+            source.sendError(Component.literal("那已经是出生点节点了"));
             return 0;
         }
         if (!WaypointManager.get().setSpawn(waypoint.id())) {
-            source.sendError(Text.literal("设置出生点失败"));
+            source.sendError(Component.literal("设置出生点失败"));
             return 0;
         }
-        source.sendFeedback(Text.literal("当前出生点已设为 #" + waypoint.id() + " "
+        source.sendFeedback(Component.literal("当前出生点已设为 #" + waypoint.id() + " "
             + DimensionUtils.display(waypoint.dimension()) + " " + waypoint.coordString()));
         return 1;
     }
@@ -607,11 +607,11 @@ public final class WaypointsCommand {
     private static int delSpawn(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
         if (!WaypointManager.get().graph().hasSpawn()) {
-            source.sendFeedback(Text.literal("当前没有设置出生点"));
+            source.sendFeedback(Component.literal("当前没有设置出生点"));
             return 1;
         }
         WaypointManager.get().clearSpawn();
-        source.sendFeedback(Text.literal("已取消出生点设置"));
+        source.sendFeedback(Component.literal("已取消出生点设置"));
         return 1;
     }
 
@@ -631,14 +631,14 @@ public final class WaypointsCommand {
 
     private static int optimizeUsage(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7" + ROOT + "optimize 有两种："));
-        source.sendFeedback(Text.literal("§7  " + ROOT + "optimize §fdefault§7"
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7" + ROOT + "optimize 有两种："));
+        source.sendFeedback(Component.literal("§7  " + ROOT + "optimize §fdefault§7"
             + " §8- §7合并中间点（没有名字、只有两条边、且在一条直线上的点），"
             + "再把路径点按坐标、边按两端重新编号"));
-        source.sendFeedback(Text.literal("§7  " + ROOT + "optimize §fradical§7"
+        source.sendFeedback(Component.literal("§7  " + ROOT + "optimize §fradical§7"
             + " §8- §7先备份 waypoints.json，再删掉从你现在的位置出发走不到的路径点和边，"
             + "删完接着做一次 optimize default（合并中间点 + 重新编号）"));
-        source.sendFeedback(Text.literal("§7    §7走不到 = 沿着已知边（含传送门边）走不过去；"
+        source.sendFeedback(Component.literal("§7    §7走不到 = 沿着已知边（含传送门边）走不过去；"
             + "出生点节点、当前出生点、末地初始平台不会被删"));
         return 1;
     }
@@ -651,7 +651,7 @@ public final class WaypointsCommand {
         int merged = graph.optimize();
         WaypointManager.get().save();
 
-        source.sendFeedback(Text.literal("已合并 " + merged + " 个中间路径点，路径点数量 "
+        source.sendFeedback(Component.literal("已合并 " + merged + " 个中间路径点，路径点数量 "
             + before + " → " + graph.normalCount() + "；"
             + "所有路径点已按 x y z 递增重新编号，边已重新编号"));
         return 1;
@@ -669,17 +669,17 @@ public final class WaypointsCommand {
         WaypointManager.Unreachable result = manager.findUnreachable(idsOf(starts));
 
         if (result.waypoints().isEmpty() && result.edges().isEmpty()) {
-            source.sendFeedback(Text.literal("从 " + describeStarts(starts)
+            source.sendFeedback(Component.literal("从 " + describeStarts(starts)
                 + " 出发没有不可达的路径点和边，什么都没删（也没备份）"));
             reportSkipped(source, result.skipped());
         } else {
             // 1. 先备份
             Path backup = manager.backupFile();
             if (backup == null) {
-                source.sendError(Text.literal("备份路径点文件失败（文件不存在或者写不进去），已中止，什么都没删"));
+                source.sendError(Component.literal("备份路径点文件失败（文件不存在或者写不进去），已中止，什么都没删"));
                 return 0;
             }
-            source.sendFeedback(Text.literal("已备份到 " + backup));
+            source.sendFeedback(Component.literal("已备份到 " + backup));
 
             // 2. 删点（挂在上面的边会一起删掉），再删剩下的不可达边
             int beforeNodes = graph.normalCount();
@@ -699,14 +699,14 @@ public final class WaypointsCommand {
             }
             manager.save();
 
-            source.sendFeedback(Text.literal("已删除 " + removedNodes + " 个不可达路径点；路径点 "
+            source.sendFeedback(Component.literal("已删除 " + removedNodes + " 个不可达路径点；路径点 "
                 + beforeNodes + " → " + graph.normalCount() + "，边 " + beforeEdges + " → " + graph.edgeCount()
                 + "（删点会连带删掉挂在上面的边，另外单独删了 " + removedEdges + " 条不可达边）"));
             reportSkipped(source, result.skipped());
         }
 
         // 原先的实现后面接一次 optimize default：删完顺手把中间点合掉、重新编号
-        source.sendFeedback(Text.literal("radical：接着做一次 optimize default（合并中间点 + 重新编号）"));
+        source.sendFeedback(Component.literal("radical：接着做一次 optimize default（合并中间点 + 重新编号）"));
         return optimizeDefault(context);
     }
 
@@ -716,7 +716,7 @@ public final class WaypointsCommand {
 
         List<String> ids = new ArrayList<>();
         for (Waypoint waypoint : skipped) ids.add("#" + waypoint.id());
-        source.sendFeedback(Text.literal("有 " + skipped.size() + " 个不可达但受保护的路径点没删（"
+        source.sendFeedback(Component.literal("有 " + skipped.size() + " 个不可达但受保护的路径点没删（"
             + String.join("、", ids) + "）：出生点节点、当前出生点、末地初始平台；"
             + "要删当前出生点的话先用 " + ROOT + "set_spawn <选择器> 换一个"));
     }
@@ -729,7 +729,7 @@ public final class WaypointsCommand {
     private static List<Waypoint> startWaypoints(FabricClientCommandSource source) {
         BlockPos pos = PlayerUtils.currentBlockPos();
         if (pos == null) {
-            source.sendError(Text.literal("拿不到玩家位置"));
+            source.sendError(Component.literal("拿不到玩家位置"));
             return null;
         }
 
@@ -741,7 +741,7 @@ public final class WaypointsCommand {
 
         WaypointGraph.EdgeEntry edge = graph.edgeAt(dimension, pos);
         if (edge == null) {
-            source.sendError(Text.literal("你现在所在的 " + pos.toShortString()
+            source.sendError(Component.literal("你现在所在的 " + pos.toShortString()
                 + " 既不是路径点，也不在任何边上，算不出可达范围"));
             return null;
         }
@@ -779,37 +779,37 @@ public final class WaypointsCommand {
         WaypointManager manager = WaypointManager.get();
         WaypointGraph graph = manager.graph();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7路径点（world_" + manager.loadedWorld()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7路径点（world_" + manager.loadedWorld()
             + "，当前维度 " + DimensionUtils.display(DimensionUtils.current()) + "）："
             + graph.normalCount() + " 个点，" + graph.edgeCount() + " 条边"));
-        source.sendFeedback(Text.literal("  显示: " + (manager.isShowing() ? "§a开" : "§c关")
+        source.sendFeedback(Component.literal("  显示: " + (manager.isShowing() ? "§a开" : "§c关")
             + "§r  编辑模式: " + (manager.isEditMode() ? "§a开" : "§c关")));
         Waypoint spawn = graph.spawnWaypointTarget();
-        source.sendFeedback(Text.literal("  当前出生点: " + (spawn == null
+        source.sendFeedback(Component.literal("  当前出生点: " + (spawn == null
             ? "§c未设置"
             : "§a#" + spawn.id() + "§r " + DimensionUtils.display(spawn.dimension())
                 + " " + spawn.coordString())));
-        source.sendFeedback(Text.literal("  文件: " + manager.currentFile()));
+        source.sendFeedback(Component.literal("  文件: " + manager.currentFile()));
         return 1;
     }
 
     private static int toggleShow(CommandContext<FabricClientCommandSource> context) {
         boolean showing = WaypointManager.get().toggleShow();
-        context.getSource().sendFeedback(Text.literal("路径点显示已"
+        context.getSource().sendFeedback(Component.literal("路径点显示已"
             + (showing ? "§a开启" : "§c关闭")));
         return 1;
     }
 
     private static int toggleEdit(CommandContext<FabricClientCommandSource> context) {
         boolean editing = WaypointManager.get().toggleEditMode();
-        context.getSource().sendFeedback(Text.literal("路径点编辑模式已"
+        context.getSource().sendFeedback(Component.literal("路径点编辑模式已"
             + (editing ? "§a开启" : "§c关闭")));
         if (editing) {
-            context.getSource().sendFeedback(Text.literal(
+            context.getSource().sendFeedback(Component.literal(
                 "§7此时 /pc move <轴> 和 /pc move face 会把起点、终点记成路径点，中间记成一条边（自动保存）"));
-            context.getSource().sendFeedback(Text.literal(
+            context.getSource().sendFeedback(Component.literal(
                 "§7终点是下界传送门方块（下面垫着黑曜石）时，走过去被传送后还会记一条传送门边"));
-            context.getSource().sendFeedback(Text.literal(
+            context.getSource().sendFeedback(Component.literal(
                 "§7/pc move to 走的都是已知边，不会记录任何东西"));
         }
         return 1;
@@ -823,43 +823,43 @@ public final class WaypointsCommand {
         FabricClientCommandSource source = context.getSource();
         WaypointGraph graph = WaypointManager.get().graph();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7所有路径点："));
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7所有路径点："));
 
         List<Waypoint> normal = graph.allWaypoints().stream()
             .filter(w -> !w.isSpawn())
             .toList();
         if (normal.isEmpty()) {
-            source.sendFeedback(Text.literal("  §8（空）"));
+            source.sendFeedback(Component.literal("  §8（空）"));
         } else {
             int shown = 0;
             for (Waypoint waypoint : normal) {
                 if (shown++ >= LIST_LIMIT) {
-                    source.sendFeedback(Text.literal("  §8… 还有 " + (normal.size() - LIST_LIMIT) + " 个没有显示"));
+                    source.sendFeedback(Component.literal("  §8… 还有 " + (normal.size() - LIST_LIMIT) + " 个没有显示"));
                     break;
                 }
                 source.sendFeedback(waypointLine(waypoint));
             }
         }
 
-        source.sendFeedback(Text.literal("§7所有边："));
+        source.sendFeedback(Component.literal("§7所有边："));
         List<WaypointGraph.EdgeEntry> edges = graph.allEdges();
         if (edges.isEmpty()) {
-            source.sendFeedback(Text.literal("  §8（空）"));
+            source.sendFeedback(Component.literal("  §8（空）"));
         } else {
             int shown = 0;
             for (WaypointGraph.EdgeEntry entry : edges) {
                 if (shown++ >= LIST_LIMIT) {
-                    source.sendFeedback(Text.literal("  §8… 还有 " + (edges.size() - LIST_LIMIT) + " 条没有显示"));
+                    source.sendFeedback(Component.literal("  §8… 还有 " + (edges.size() - LIST_LIMIT) + " 条没有显示"));
                     break;
                 }
                 source.sendFeedback(edgeLine(graph, entry));
             }
         }
 
-        source.sendFeedback(Text.literal("§7当前出生点："));
+        source.sendFeedback(Component.literal("§7当前出生点："));
         Waypoint spawn = graph.spawnWaypointTarget();
         if (spawn == null) {
-            source.sendFeedback(Text.literal("  §8（未设置）"));
+            source.sendFeedback(Component.literal("  §8（未设置）"));
         } else {
             source.sendFeedback(spawnLine(spawn));
         }
@@ -867,36 +867,36 @@ public final class WaypointsCommand {
     }
 
     /** {@code {id} [删除] [设置名称|修改名称] [主] [1 1 1] (name)} */
-    private static Text waypointLine(Waypoint waypoint) {
-        MutableText line = Text.literal(" " + waypoint.id() + " ").formatted(Formatting.GRAY);
+    private static Component waypointLine(Waypoint waypoint) {
+        MutableComponent line = Component.literal(" " + waypoint.id() + " ").withStyle(ChatFormatting.GRAY);
 
         line.append(actionButton("删除", ROOT + "del_waypoint id " + waypoint.id(),
             "点击把命令填到聊天栏（" + ROOT + "del_waypoint id <id>）"));
-        line.append(Text.literal(" "));
+        line.append(Component.literal(" "));
         line.append(actionButton(waypoint.hasName() ? "修改名称" : "设置名称",
             ROOT + "name_waypoint id " + waypoint.id() + " ",
             "点击把命令填到聊天栏（" + ROOT + "name_waypoint id <id> <name>）；"
                 + "名字留空直接回车就是删除名字"));
 
-        line.append(Text.literal(" "));
+        line.append(Component.literal(" "));
         line.append(dimensionTag(waypoint.dimension()));
-        line.append(Text.literal(" "));
+        line.append(Component.literal(" "));
         line.append(clickableCoord(waypoint.pos()));
         if (waypoint.hasName()) {
-            line.append(Text.literal(" "));
+            line.append(Component.literal(" "));
             line.append(nameText(waypoint.name()));
         }
         return line;
     }
 
     /** {@code {id} [主] [1 1 1] (name)} —— 只有一个出生点，所以不用标「当前」 */
-    private static Text spawnLine(Waypoint spawn) {
-        MutableText line = Text.literal(" " + spawn.id() + " ").formatted(Formatting.GRAY);
+    private static Component spawnLine(Waypoint spawn) {
+        MutableComponent line = Component.literal(" " + spawn.id() + " ").withStyle(ChatFormatting.GRAY);
         line.append(dimensionTag(spawn.dimension()));
-        line.append(Text.literal(" "));
+        line.append(Component.literal(" "));
         line.append(clickableCoord(spawn.pos()));
         if (spawn.hasName()) {
-            line.append(Text.literal(" "));
+            line.append(Component.literal(" "));
             line.append(nameText(spawn.name()));
         }
         return line;
@@ -907,53 +907,53 @@ public final class WaypointsCommand {
      *
      * <p>双向符号用绿色，单向符号用黄色。
      */
-    private static Text edgeLine(WaypointGraph graph, WaypointGraph.EdgeEntry entry) {
+    private static Component edgeLine(WaypointGraph graph, WaypointGraph.EdgeEntry entry) {
         Edge edge = entry.edge();
         Waypoint from = graph.get(edge.from());
         Waypoint to = graph.get(edge.to());
 
-        MutableText line = Text.literal(" " + entry.id() + " ").formatted(Formatting.GRAY);
+        MutableComponent line = Component.literal(" " + entry.id() + " ").withStyle(ChatFormatting.GRAY);
         if (from == null || to == null) {
-            line.append(Text.literal("§8（无效的边）"));
+            line.append(Component.literal("§8（无效的边）"));
             return line;
         }
 
         line.append(actionButton("删除", ROOT + "del_edge " + entry.id(),
             "点击把命令填到聊天栏（" + ROOT + "del_edge <id>）"));
-        line.append(Text.literal(" "));
+        line.append(Component.literal(" "));
 
         // 前半段：两个路径点的编号
-        line.append(Text.literal(String.valueOf(from.id())).formatted(Formatting.AQUA));
-        line.append(Text.literal(" "));
+        line.append(Component.literal(String.valueOf(from.id())).withStyle(ChatFormatting.AQUA));
+        line.append(Component.literal(" "));
         line.append(edgeSymbol(edge));
-        line.append(Text.literal(" "));
-        line.append(Text.literal(String.valueOf(to.id())).formatted(Formatting.AQUA));
+        line.append(Component.literal(" "));
+        line.append(Component.literal(String.valueOf(to.id())).withStyle(ChatFormatting.AQUA));
 
-        line.append(Text.literal(" / ").formatted(Formatting.DARK_GRAY));
+        line.append(Component.literal(" / ").withStyle(ChatFormatting.DARK_GRAY));
 
         // 后半段：维度 + 坐标 + 名字
         line.append(endpointText(from));
-        line.append(Text.literal(" "));
+        line.append(Component.literal(" "));
         line.append(edgeSymbol(edge));
-        line.append(Text.literal(" "));
+        line.append(Component.literal(" "));
         line.append(endpointText(to));
         return line;
     }
 
     /** 双向 {@code <->} 绿色，单向 {@code -->} 黄色。 */
-    private static MutableText edgeSymbol(Edge edge) {
-        return Text.literal(edge.bi() ? "<->" : "-->")
-            .setStyle(Style.EMPTY.withColor(edge.bi() ? Formatting.GREEN : Formatting.YELLOW));
+    private static MutableComponent edgeSymbol(Edge edge) {
+        return Component.literal(edge.bi() ? "<->" : "-->")
+            .setStyle(Style.EMPTY.withColor(edge.bi() ? ChatFormatting.GREEN : ChatFormatting.YELLOW));
     }
 
     /** {@code [主] [1 1 1] (name)} */
-    private static Text endpointText(Waypoint waypoint) {
-        MutableText text = Text.literal("");
+    private static Component endpointText(Waypoint waypoint) {
+        MutableComponent text = Component.literal("");
         text.append(dimensionTag(waypoint.dimension()));
-        text.append(Text.literal(" "));
+        text.append(Component.literal(" "));
         text.append(clickableCoord(waypoint.pos()));
         if (waypoint.hasName()) {
-            text.append(Text.literal(" "));
+            text.append(Component.literal(" "));
             text.append(nameText(waypoint.name()));
         }
         return text;
@@ -971,50 +971,50 @@ public final class WaypointsCommand {
     // ------------------------------------------------------------------
 
     /** 维度短标签。 */
-    private static Text dimensionTag(String dimension) {
+    private static Component dimensionTag(String dimension) {
         String shortName = switch (dimension) {
             case DimensionUtils.NETHER -> "下";
             case DimensionUtils.END -> "末";
             default -> "主";
         };
-        Formatting color = switch (dimension) {
-            case DimensionUtils.NETHER -> Formatting.RED;
-            case DimensionUtils.END -> Formatting.LIGHT_PURPLE;
-            default -> Formatting.GREEN;
+        ChatFormatting color = switch (dimension) {
+            case DimensionUtils.NETHER -> ChatFormatting.RED;
+            case DimensionUtils.END -> ChatFormatting.LIGHT_PURPLE;
+            default -> ChatFormatting.GREEN;
         };
-        return Text.literal("[" + shortName + "]").formatted(color);
+        return Component.literal("[" + shortName + "]").withStyle(color);
     }
 
     /** 坐标：[1 1 1]，点一下复制。 */
-    private static Text clickableCoord(BlockPos pos) {
+    private static Component clickableCoord(BlockPos pos) {
         String text = pos.getX() + " " + pos.getY() + " " + pos.getZ();
-        return Text.literal("[" + text + "]")
+        return Component.literal("[" + text + "]")
             .setStyle(Style.EMPTY
-                .withColor(Formatting.AQUA)
+                .withColor(ChatFormatting.AQUA)
                 .withClickEvent(new ClickEvent.CopyToClipboard(text))
-                .withHoverEvent(new HoverEvent.ShowText(Text.literal("点击复制坐标"))));
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal("点击复制坐标"))));
     }
 
     /** 名字：(name)，点一下复制。 */
-    private static Text nameText(String name) {
-        return Text.literal("(" + name + ")")
+    private static Component nameText(String name) {
+        return Component.literal("(" + name + ")")
             .setStyle(Style.EMPTY
-                .withColor(Formatting.GREEN)
+                .withColor(ChatFormatting.GREEN)
                 .withClickEvent(new ClickEvent.CopyToClipboard(name))
-                .withHoverEvent(new HoverEvent.ShowText(Text.literal("点击复制名称"))));
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal("点击复制名称"))));
     }
 
     /** 会往聊天栏里补全命令的按钮。 */
-    private static Text actionButton(String label, String command, String hint) {
-        return Text.literal("[" + label + "]")
+    private static Component actionButton(String label, String command, String hint) {
+        return Component.literal("[" + label + "]")
             .setStyle(Style.EMPTY
-                .withColor(Formatting.YELLOW)
+                .withColor(ChatFormatting.YELLOW)
                 .withClickEvent(new ClickEvent.SuggestCommand(command))
-                .withHoverEvent(new HoverEvent.ShowText(Text.literal(hint))));
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal(hint))));
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> literal(String name) {
-        return ClientCommandManager.literal(name);
+        return ClientCommands.literal(name);
     }
 
     private static BlockPos readPos(CommandContext<FabricClientCommandSource> context,
@@ -1028,10 +1028,10 @@ public final class WaypointsCommand {
     /**
      * {@code position} 的 {@code <dim>} 参数（必填）。
      *
-     * <p>用原版的 {@code IdentifierArgumentType} 而不是 {@code StringArgumentType.word()}：
+     * <p>用原版的 {@code IdentifierArgument} 而不是 {@code StringArgumentType.word()}：
      * word 只吃 {@code [a-zA-Z0-9_]}，会在 {@code minecraft:overworld} 的冒号那儿断掉。
      *
-     * <p>注意 {@code IdentifierArgumentType.getIdentifier(...)} 只收服务端命令源，
+     * <p>注意 {@code IdentifierArgument.getIdentifier(...)} 只收服务端命令源，
      * 这里直接 {@code getArgument} 拿（补全用的是客户端命令源）。
      */
     private static String readDimension(CommandContext<FabricClientCommandSource> context) {
@@ -1039,7 +1039,7 @@ public final class WaypointsCommand {
         return dim == null ? DimensionUtils.current() : dim.toString();
     }
 
-    /** 当前 world 下所有路径点的名字，给命令补全用。 */
+    /** 当前 level 下所有路径点的名字，给命令补全用。 */
     public static List<String> names() {
         return WaypointManager.get().graph().allWaypoints().stream()
             .filter(Waypoint::hasName)

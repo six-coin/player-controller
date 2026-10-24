@@ -1,6 +1,6 @@
 package org.six_coin.playerController.client.mending;
 
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
 /**

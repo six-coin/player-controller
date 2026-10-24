@@ -1,9 +1,9 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 
@@ -50,8 +50,8 @@ class SingleStageSetup extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -249,7 +249,7 @@ class SingleStageSetup extends SingleStageStep {
     }
 
     private static final java.util.function.Predicate<ItemStack> COBBLE =
-        stack -> stack.isOf(Items.COBBLESTONE);
+        stack -> stack.is(Items.COBBLESTONE);
 
     private void queuePlaceCollectBoxes() {
         queue.sync("挑收集盒", () -> {

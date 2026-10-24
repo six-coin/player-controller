@@ -3,16 +3,16 @@ package org.six_coin.playerController.client.commands;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.CraftingTableBlock;
-import net.minecraft.block.StonecutterBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.Item;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.CraftingTableBlock;
+import net.minecraft.world.level.block.StonecutterBlock;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.Item;
+import net.minecraft.network.chat.Component;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.recipe.CraftAction;
@@ -47,25 +47,25 @@ public final class RecipeCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("recipe")
-            .then(ClientCommandManager.literal("crafting_table")
-                .then(ClientCommandManager.argument("item", ItemIdArgumentType.itemId())
-                    .then(ClientCommandManager.argument("count",
+        return ClientCommands.literal("recipe")
+            .then(ClientCommands.literal("crafting_table")
+                .then(ClientCommands.argument("item", ItemIdArgumentType.itemId())
+                    .then(ClientCommands.argument("count",
                             IntegerArgumentType.integer(1, MAX_COUNT_ARGUMENT))
                         .executes(context -> run(context, false)))))
-            .then(ClientCommandManager.literal("stonecutter")
-                .then(ClientCommandManager.argument("item", ItemIdArgumentType.itemId())
-                    .then(ClientCommandManager.argument("count",
+            .then(ClientCommands.literal("stonecutter")
+                .then(ClientCommands.argument("item", ItemIdArgumentType.itemId())
+                    .then(ClientCommands.argument("count",
                             IntegerArgumentType.integer(1, MAX_COUNT_ARGUMENT))
                         .executes(context -> run(context, true)))));
     }
 
     private static int run(CommandContext<FabricClientCommandSource> context, boolean stonecutter) {
         FabricClientCommandSource source = context.getSource();
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
-            source.sendError(Text.literal("没有玩家或世界"));
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
             return 0;
         }
 
@@ -77,53 +77,53 @@ public final class RecipeCommand {
         // 1. 必须站在站立点上，工作站要设了对应的方块、而且那里真的是那个方块
         StationPos stand = StationManager.get().single(StationPart.STAND_POINT);
         if (stand == null) {
-            source.sendError(Text.literal("还没有设置工作站站立点：先站到工作站中间，/pc stock station stand_point set_here"));
+            source.sendError(Component.literal("还没有设置工作站站立点：先站到工作站中间，/pc stock station stand_point set_here"));
             return 0;
         }
         if (!stand.dimension().equals(DimensionUtils.current())) {
-            source.sendError(Text.literal("站立点在 " + stand.describe() + "，你现在在 "
+            source.sendError(Component.literal("站立点在 " + stand.describe() + "，你现在在 "
                 + DimensionUtils.display(DimensionUtils.current()) + "，先过去"));
             return 0;
         }
         BlockPos here = PlayerUtils.currentBlockPos();
         if (here == null || !here.equals(stand.pos())) {
-            source.sendError(Text.literal("必须站在站立点 " + stand.coordString() + " 才能合成（你现在在 "
+            source.sendError(Component.literal("必须站在站立点 " + stand.coordString() + " 才能合成（你现在在 "
                 + (here == null ? "?" : here.toShortString()) + "）"));
             return 0;
         }
 
         StationPos stationPos = StationManager.get().single(part);
         if (stationPos == null) {
-            source.sendError(Text.literal("工作站还没有设置" + part.display() + "（/pc stock station "
+            source.sendError(Component.literal("工作站还没有设置" + part.display() + "（/pc stock station "
                 + part.id() + " set_target）"));
             return 0;
         }
         if (!stationPos.dimension().equals(stand.dimension())
             || !PlayerUtils.isWithinReachFrom(stand.pos(), stationPos.pos())) {
-            source.sendError(Text.literal(part.display() + " " + stationPos.coordString()
+            source.sendError(Component.literal(part.display() + " " + stationPos.coordString()
                 + " 不在站立点的触及范围内"));
             return 0;
         }
-        BlockState state = mc.world.getBlockState(stationPos.pos());
+        BlockState state = mc.level.getBlockState(stationPos.pos());
         boolean rightBlock = stonecutter
             ? state.getBlock() instanceof StonecutterBlock
             : state.getBlock() instanceof CraftingTableBlock;
         if (!rightBlock) {
-            source.sendError(Text.literal(part.display() + " " + stationPos.coordString() + " 那里是 "
+            source.sendError(Component.literal(part.display() + " " + stationPos.coordString() + " 那里是 "
                 + ContainerTypes.idOf(state) + "，不是" + shape));
             return 0;
         }
 
         // 2. 快捷栏第 4~9 格要有足够空位（成品 QuickMove 到快捷栏靠后的格子）
-        int neededSlots = (count + item.getMaxCount() - 1) / item.getMaxCount();
+        int neededSlots = (count + item.getDefaultMaxStackSize() - 1) / item.getDefaultMaxStackSize();
         int freeSlots = RecipePlanner.hotbarFreeSlots(player);
         if (freeSlots < neededSlots) {
-            source.sendError(Text.literal("快捷栏第 4~9 格只剩 " + freeSlots + " 个空位，装 "
+            source.sendError(Component.literal("快捷栏第 4~9 格只剩 " + freeSlots + " 个空位，装 "
                 + count + " 个 " + id(item) + " 需要 " + neededSlots + " 格"));
             return 0;
         }
         if (count > RecipePlanner.maxResultCount(player)) {
-            source.sendError(Text.literal("数量最多 " + RecipePlanner.maxResultCount(player)
+            source.sendError(Component.literal("数量最多 " + RecipePlanner.maxResultCount(player)
                 + "（快捷栏第 4~9 格空着 " + freeSlots + " 格，每格最多 64 个）"));
             return 0;
         }
@@ -133,22 +133,22 @@ public final class RecipeCommand {
             ? RecipePlanner.planStonecutting(item, count)
             : RecipePlanner.planCrafting(item, count);
         if (!result.ok()) {
-            source.sendError(Text.literal("不能这么做：" + result.error()));
+            source.sendError(Component.literal("不能这么做：" + result.error()));
             return 0;
         }
 
         CraftPlan plan = result.plan();
-        source.sendFeedback(Text.literal("已提交任务：" + plan.describe()));
+        source.sendFeedback(Component.literal("已提交任务：" + plan.describe()));
         ActionManager.get().submit(new CraftAction(plan, stationPos.pos()));
         return 1;
     }
 
     /** 快捷栏第 4~9 格（背包下标 3~8）空着几格 —— 这里只是给提示用，真正的判断在 {@link RecipePlanner}。 */
-    private static int freeHotbarSlots(ClientPlayerEntity player) {
+    private static int freeHotbarSlots(LocalPlayer player) {
         return RecipePlanner.hotbarFreeSlots(player);
     }
 
     private static String id(Item item) {
-        return net.minecraft.registry.Registries.ITEM.getId(item).toString();
+        return net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).toString();
     }
 }

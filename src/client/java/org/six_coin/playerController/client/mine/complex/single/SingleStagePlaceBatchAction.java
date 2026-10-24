@@ -1,13 +1,14 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.component.SwingAnimation;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.rotate.RotateManager;
@@ -77,8 +78,8 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null || mc.interactionManager == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null || mc.gameMode == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -87,9 +88,9 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null || mc.interactionManager == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null || mc.gameMode == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -99,7 +100,7 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
         while (iterator.hasNext() && budget > 0) {
             BlockPos pos = iterator.next();
 
-            if (!SingleStagePlaceAction.replaceable(mc.world.getBlockState(pos))) {
+            if (!SingleStagePlaceAction.replaceable(mc.level.getBlockState(pos))) {
                 iterator.remove();
                 skipped++;
                 continue;
@@ -152,16 +153,16 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
      *
      * @return false = 身上没得放了
      */
-    private boolean ensureHand(ClientPlayerEntity player) {
+    private boolean ensureHand(LocalPlayer player) {
         int selected = player.getInventory().getSelectedSlot();
         if (contains(hotbarSlots, selected)
-            && blockFilter.test(player.getInventory().getStack(selected))) {
+            && blockFilter.test(player.getInventory().getItem(selected))) {
             return true;
         }
 
         // 别的快捷栏格里有
         for (int slot : hotbarSlots) {
-            if (!blockFilter.test(player.getInventory().getStack(slot))) continue;
+            if (!blockFilter.test(player.getInventory().getItem(slot))) continue;
             if (!HotbarManager.get().request(Owner.MINE, slot)) return false;
             hotbarHeld = true;
             return true;
@@ -169,7 +170,7 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
 
         // 从背包补一叠（目标快捷栏格必须是空的，别把东西挤到背包里）
         for (int main : mainSlots) {
-            ItemStack stack = player.getInventory().getStack(main);
+            ItemStack stack = player.getInventory().getItem(main);
             if (stack.isEmpty() || !blockFilter.test(stack)) continue;
 
             int free = freeHotbar(player);
@@ -194,17 +195,17 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
         return false;
     }
 
-    private int freeHotbar(ClientPlayerEntity player) {
+    private int freeHotbar(LocalPlayer player) {
         for (int slot : hotbarSlots) {
-            if (player.getInventory().getStack(slot).isEmpty()) return slot;
+            if (player.getInventory().getItem(slot).isEmpty()) return slot;
         }
         return -1;
     }
 
     /** 快捷栏那几格里第一个「被别的东西占着」的格子（不是空的、也不是要放的方块）。 */
-    private int occupiedHotbar(ClientPlayerEntity player) {
+    private int occupiedHotbar(LocalPlayer player) {
         for (int slot : hotbarSlots) {
-            ItemStack stack = player.getInventory().getStack(slot);
+            ItemStack stack = player.getInventory().getItem(slot);
             if (stack.isEmpty()) continue;
             if (blockFilter.test(stack)) continue;
             return slot;
@@ -220,15 +221,15 @@ class SingleStagePlaceBatchAction extends SingleStageStep {
     }
 
     /** 凭空放一个：点目标格自己（面随便），放上了返回 true。 */
-    private boolean place(MinecraftClient mc, ClientPlayerEntity player, BlockPos pos) {
+    private boolean place(Minecraft mc, LocalPlayer player, BlockPos pos) {
         Direction side = Direction.UP;
-        Vec3d hitPos = Vec3d.ofCenter(pos).add(0.0, 0.5, 0.0);
+        Vec3 hitPos = Vec3.atCenterOf(pos).add(0.0, 0.5, 0.0);
         BlockHitResult hit = new BlockHitResult(hitPos, side, pos, false);
 
         RotateManager.get().rotateTo(Owner.MINE, hitPos);
-        mc.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
-        player.swingHand(Hand.MAIN_HAND);
+        mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit);
+        player.swing(InteractionHand.MAIN_HAND, SwingAnimation.DEFAULT, false);
 
-        return !SingleStagePlaceAction.replaceable(mc.world.getBlockState(pos));
+        return !SingleStagePlaceAction.replaceable(mc.level.getBlockState(pos));
     }
 }

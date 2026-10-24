@@ -1,6 +1,6 @@
 package org.six_coin.playerController.client.stock.station;
 
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
 /** station.json 里的一个坐标：{@code {"id": .., "dimension": "..", "x": .., "y": .., "z": ..}}。 */

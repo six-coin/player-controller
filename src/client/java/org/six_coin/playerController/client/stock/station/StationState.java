@@ -84,7 +84,7 @@ public final class StationState {
     // ------------------------------------------------------------------
 
     /** 从 station.json（有哪些容器）+ check.json 的 item_storage_detailed（里面有什么）建一份。 */
-    public static StationState load(int world) {
+    public static StationState load(int level) {
         StationState state = new StationState();
 
         for (StationPos pos : StationManager.get().list(StationPart.ITEM_STORAGE)) {
@@ -96,7 +96,7 @@ public final class StationState {
             state.itemFinalFull.put(pos.id(), false);
         }
 
-        Path checkFile = StationManager.checkFile(world);
+        Path checkFile = StationManager.checkFile(level);
         if (!Files.exists(checkFile)) {
             ChatUtils.debug("没有 " + checkFile + "，station_data 里 item_storage 先按空的算");
             return state;

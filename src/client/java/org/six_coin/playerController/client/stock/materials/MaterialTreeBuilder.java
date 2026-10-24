@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.stock.materials;
 
-import net.minecraft.item.Item;
-import net.minecraft.registry.tag.TagKey;
+import net.minecraft.world.item.Item;
+import net.minecraft.tags.TagKey;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -203,7 +203,7 @@ public final class MaterialTreeBuilder {
      */
     private void report(Issue issue) {
         String key = switch (issue.kind()) {
-            case UNDECIDED_TAG -> issue.kind() + "|" + (issue.tag() == null ? "?" : issue.tag().id());
+            case UNDECIDED_TAG -> issue.kind() + "|" + (issue.tag() == null ? "?" : issue.tag().location());
             case UNDECIDED_INGREDIENT -> issue.kind() + "|" + issue.detail();
             default -> issue.kind() + "|" + MaterialsConfig.itemId(issue.item())
                 + "|" + (issue.detail() == null ? "" : issue.detail());

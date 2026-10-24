@@ -1,6 +1,6 @@
 package org.six_coin.playerController.client.mine.station;
 
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.waypoint.Edge;
 import org.six_coin.playerController.client.waypoint.Waypoint;
@@ -88,7 +88,7 @@ public final class MineStationAccess {
         if (positions == null || positions.isEmpty()) return null;
 
         for (BlockPos offset : offsets) {
-            BlockPos candidate = container.add(offset);
+            BlockPos candidate = container.offset(offset);
             if (positions.contains(candidate.asLong())) return candidate;
         }
         return null;

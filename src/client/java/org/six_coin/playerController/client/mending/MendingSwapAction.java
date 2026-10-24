@@ -1,9 +1,9 @@
 package org.six_coin.playerController.client.mending;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
@@ -38,7 +38,7 @@ public class MendingSwapAction extends Action {
     private final BlockPos chestPos;
 
     @Nullable
-    private ScreenHandler handler;
+    private AbstractContainerMenu handler;
     private int openWaitTicks;
     private int settleLeft;
     private boolean opened;
@@ -49,7 +49,7 @@ public class MendingSwapAction extends Action {
      * @param chestPos 要打开的末影箱；传 null 就是「这一趟不用开界面，只点物品栏」
      */
     public MendingSwapAction(@Nullable BlockPos chestPos) {
-        this.chestPos = chestPos == null ? null : chestPos.toImmutable();
+        this.chestPos = chestPos == null ? null : chestPos.immutable();
     }
 
     @Override
@@ -62,15 +62,15 @@ public class MendingSwapAction extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
 
         if (chestPos == null) {
-            handler = player.currentScreenHandler;
+            handler = player.containerMenu;
             if (handler == null) {
                 fail("拿不到物品栏界面");
                 return;
@@ -88,9 +88,9 @@ public class MendingSwapAction extends Action {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不见了");
             return;
         }
@@ -100,7 +100,7 @@ public class MendingSwapAction extends Action {
             opened = true;
         }
 
-        if (handler == null || player.currentScreenHandler != handler) {
+        if (handler == null || player.containerMenu != handler) {
             fail("界面被关掉了");
             return;
         }
@@ -112,10 +112,10 @@ public class MendingSwapAction extends Action {
 
     @Override
     protected void onEnd() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         if (chestPos != null) {
-            if (handler != null && mc.player != null && mc.player.currentScreenHandler == handler) {
-                mc.player.closeHandledScreen();
+            if (handler != null && mc.player != null && mc.player.containerMenu == handler) {
+                mc.player.closeContainer();
             }
         }
         if (suppressorHeld) {
@@ -132,12 +132,12 @@ public class MendingSwapAction extends Action {
      *
      * @return true = 可以点格子了
      */
-    private boolean awaitOpen(MinecraftClient mc, ClientPlayerEntity player) {
+    private boolean awaitOpen(Minecraft mc, LocalPlayer player) {
         if (chestPos == null) return true;
 
         if (handler == null) {
-            ScreenHandler current = player.currentScreenHandler;
-            if (current != null && current != player.playerScreenHandler) {
+            AbstractContainerMenu current = player.containerMenu;
+            if (current != null && current != player.inventoryMenu) {
                 handler = current;
                 settleLeft = PlayerControllerConfig.getNetworkDelayTicks();
                 ChatUtils.debug("mending：末影箱界面已打开（%d 格），等格子内容同步", current.slots.size());
@@ -150,7 +150,7 @@ public class MendingSwapAction extends Action {
         }
 
         // 状态号跟着内容包一起变过来，变了就说明内容到了；一直不动就按 network_delay_ticks 兜底
-        if (handler.getRevision() != 0) settleLeft = 0;
+        if (handler.getStateId() != 0) settleLeft = 0;
         if (settleLeft > 0) {
             settleLeft--;
             return false;

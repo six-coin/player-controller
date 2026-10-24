@@ -1,19 +1,20 @@
 package org.six_coin.playerController.client.stock.materials;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.recipe.display.RecipeDisplay;
-import net.minecraft.recipe.display.ShapedCraftingRecipeDisplay;
-import net.minecraft.recipe.display.ShapelessCraftingRecipeDisplay;
-import net.minecraft.recipe.display.SlotDisplay;
-import net.minecraft.recipe.display.SlotDisplayContexts;
-import net.minecraft.recipe.display.StonecutterRecipeDisplay;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.context.ContextParameterMap;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.HolderSet;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.display.RecipeDisplay;
+import net.minecraft.world.item.crafting.display.ShapedCraftingRecipeDisplay;
+import net.minecraft.world.item.crafting.display.ShapelessCraftingRecipeDisplay;
+import net.minecraft.world.item.crafting.display.SlotDisplay;
+import net.minecraft.world.item.crafting.display.SlotDisplayContext;
+import net.minecraft.world.item.crafting.display.StonecutterRecipeDisplay;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.Holder;
+import net.minecraft.tags.TagKey;
+import net.minecraft.resources.Identifier;
+import net.minecraft.util.context.ContextMap;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.recipe.LocalRecipes;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -195,11 +196,11 @@ public final class MaterialsRecipes {
     // ------------------------------------------------------------------
 
     /** 拿当前的本地配方表整理一份「产物 -> 配方」。 */
-    public static MaterialsRecipes build(MinecraftClient mc) {
+    public static MaterialsRecipes build(Minecraft mc) {
         MaterialsRecipes index = new MaterialsRecipes();
-        if (mc.world == null) return index;
+        if (mc.level == null) return index;
 
-        ContextParameterMap context = SlotDisplayContexts.createParameters(mc.world);
+        ContextMap context = SlotDisplayContext.fromLevel(mc.level);
         Set<String> seen = new LinkedHashSet<>();
 
         for (LocalRecipes.LocalRecipe local : LocalRecipes.recipes(mc)) {
@@ -220,7 +221,7 @@ public final class MaterialsRecipes {
     }
 
     @Nullable
-    private static Recipe recipeOf(LocalRecipes.LocalRecipe local, ContextParameterMap context) {
+    private static Recipe recipeOf(LocalRecipes.LocalRecipe local, ContextMap context) {
         RecipeDisplay display = local.display();
 
         if (display instanceof ShapedCraftingRecipeDisplay shaped) {
@@ -243,17 +244,17 @@ public final class MaterialsRecipes {
     }
 
     /** 一次出几个。 */
-    private static int perCraft(RecipeDisplay display, ContextParameterMap context) {
-        for (ItemStack stack : display.result().getStacks(context)) {
+    private static int perCraft(RecipeDisplay display, ContextMap context) {
+        for (ItemStack stack : display.result().resolveForStacks(context)) {
             if (!stack.isEmpty()) return Math.max(1, stack.getCount());
         }
         return 1;
     }
 
     /** 这个配方能做出哪些东西（正常就一种）。 */
-    private static List<Item> resultsOf(RecipeDisplay display, ContextParameterMap context) {
+    private static List<Item> resultsOf(RecipeDisplay display, ContextMap context) {
         List<Item> results = new ArrayList<>();
-        for (ItemStack stack : display.result().getStacks(context)) {
+        for (ItemStack stack : display.result().resolveForStacks(context)) {
             if (!stack.isEmpty() && !results.contains(stack.getItem())) results.add(stack.getItem());
         }
         return results;
@@ -264,14 +265,17 @@ public final class MaterialsRecipes {
         if (display instanceof SlotDisplay.ItemSlotDisplay item) {
             return new Slot(null, List.of(item.item().value()));
         }
-        if (display instanceof SlotDisplay.StackSlotDisplay stack) {
-            ItemStack value = stack.stack();
+        if (display instanceof SlotDisplay.ItemStackSlotDisplay stack) {
+            ItemStack value = new ItemStack(stack.stack().item(), stack.stack().count());
             return value.isEmpty() ? Slot.EMPTY : new Slot(null, List.of(value.getItem()));
         }
-        if (display instanceof SlotDisplay.TagSlotDisplay tag) {
-            return new Slot(tag.tag(), List.of());
+        if (display instanceof SlotDisplay.TagSlotDisplay holderSet) {
+            // 26.3 起**所有**原料格子都是 TagSlotDisplay（内部装的是 HolderSet，不再是 TagKey）：
+            // 真标签是 HolderSet.Named，写死的物品（包括只有一个物品的）是 HolderSet.Direct。
+            // 1.21.11 里单个物品是 ItemSlotDisplay、多个物品是 Composite，26.3 统一成了这个。
+            return slotOfHolderSet(holderSet.tag());
         }
-        if (display instanceof SlotDisplay.CompositeSlotDisplay composite) {
+        if (display instanceof SlotDisplay.Composite composite) {
             List<Item> items = new ArrayList<>();
             TagKey<Item> tag = null;
             for (SlotDisplay inner : composite.contents()) {
@@ -284,6 +288,27 @@ public final class MaterialsRecipes {
             return new Slot(tag, List.copyOf(items));
         }
         return Slot.EMPTY;   // 空格子，或者我们不管的显示类型（燃料、锻造模板之类）
+    }
+
+    /**
+     * 一个 {@code HolderSet} 型原料格 → 标签格 或 「一串可选物品」格。
+     *
+     * <ul>
+     *   <li>{@code HolderSet.Named}（{@code #minecraft:planks} 这种）= 真标签，留给 tag_preferences 定；</li>
+     *   <li>{@code HolderSet.Direct}（配方里直接写死的物品）= 具体物品列表：
+     *       1 个就是普通格子，多个就是「一串可选物品」，由 ingredient_preferences 定。</li>
+     * </ul>
+     */
+    private static Slot slotOfHolderSet(HolderSet<Item> set) {
+        if (set instanceof HolderSet.Named<Item> named) {
+            return new Slot(named.key(), List.of());
+        }
+        List<Item> items = new ArrayList<>();
+        for (Holder<Item> holder : set) {
+            Item item = holder.value();
+            if (!items.contains(item)) items.add(item);
+        }
+        return items.isEmpty() ? Slot.EMPTY : new Slot(null, List.copyOf(items));
     }
 
     // ------------------------------------------------------------------
@@ -312,12 +337,12 @@ public final class MaterialsRecipes {
     }
 
     /** 建表 + 挑配方（给一次性调用用）。 */
-    public static Decision decide(MinecraftClient mc, MaterialsConfig config, Item result) {
+    public static Decision decide(Minecraft mc, MaterialsConfig config, Item result) {
         return build(mc).decide(result, config);
     }
 
     /** 建表 + 挑配方，只在这个工作站里挑（{@code /pc recipe crafting_table|stonecutter} 用）。 */
-    public static Decision decide(MinecraftClient mc, MaterialsConfig config, Item result,
+    public static Decision decide(Minecraft mc, MaterialsConfig config, Item result,
                                   Kind only) {
         return build(mc).decide(result, config, only);
     }
@@ -432,11 +457,15 @@ public final class MaterialsRecipes {
     public static List<Item> tagItems(TagKey<Item> tag) {
         List<Item> items = new ArrayList<>();
         try {
-            for (RegistryEntry<Item> entry : Registries.ITEM.iterateEntries(tag)) {
-                items.add(entry.value());
+            java.util.Optional<HolderSet.Named<Item>> found = BuiltInRegistries.ITEM.getTags().filter(t -> t.key().equals(tag)).findFirst();
+            HolderSet.Named<Item> named = found.orElse(null);
+            if (named != null) {
+                for (Holder<Item> entry : named) {
+                    items.add(entry.value());
+                }
             }
         } catch (Throwable t) {
-            ChatUtils.debug("读标签 " + tag.id() + " 失败：" + t);
+            ChatUtils.debug("读标签 " + tag.location() + " 失败：" + t);
         }
         return items;
     }

@@ -1,16 +1,17 @@
 package org.six_coin.playerController.client.stock;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.item.component.SwingAnimation;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.owner.Owner;
@@ -42,7 +43,7 @@ public class PlaceShulkerBoxAction extends Action {
     private boolean placed;
 
     public PlaceShulkerBoxAction(BlockPos spot, int hotbarIndex) {
-        this.spot = spot.toImmutable();
+        this.spot = spot.immutable();
         this.hotbarIndex = hotbarIndex;
     }
 
@@ -60,34 +61,34 @@ public class PlaceShulkerBoxAction extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
 
-        BlockState state = mc.world.getBlockState(spot);
+        BlockState state = mc.level.getBlockState(spot);
         if (!state.isAir()) {
             fail("摆放处 " + spot.toShortString() + " 已经有方块了（"
-                + Registries.BLOCK.getId(state.getBlock()) + "）");
+                + BuiltInRegistries.BLOCK.getKey(state.getBlock()) + "）");
             return;
         }
-        if (mc.world.getBlockState(spot.down()).isAir()) {
+        if (mc.level.getBlockState(spot.below()).isAir()) {
             fail("摆放处 " + spot.toShortString() + " 下面那格是空气，没地方放潜影盒");
             return;
         }
 
-        ItemStack held = player.getInventory().getStack(hotbarIndex);
+        ItemStack held = player.getInventory().getItem(hotbarIndex);
         if (!ShulkerUtils.isShulkerBox(held)) {
             fail("快捷栏第 " + (hotbarIndex + 1) + " 格里不是潜影盒（是 "
                 + describe(held) + "）");
             return;
         }
 
-        if (!PlayerUtils.isWithinReach(spot.down())) {
+        if (!PlayerUtils.isWithinReach(spot.below())) {
             fail("摆放处 " + spot.toShortString() + " 超出触及范围（距离 "
-                + String.format("%.2f", PlayerUtils.eyeDistanceTo(spot.down()))
+                + String.format("%.2f", PlayerUtils.eyeDistanceTo(spot.below()))
                 + "，触及范围 " + String.format("%.2f", PlayerUtils.reach()) + "）");
             return;
         }
@@ -96,37 +97,37 @@ public class PlaceShulkerBoxAction extends Action {
             fail("快捷栏第 " + (hotbarIndex + 1) + " 格现在不让切过去（别的功能在用）");
             return;
         }
-        RotateManager.get().rotateTo(Owner.STOCK, spot.down());
+        RotateManager.get().rotateTo(Owner.STOCK, spot.below());
 
-        Vec3d hitPos = Vec3d.ofCenter(spot).add(0.0, -0.5, 0.0);
-        BlockHitResult hit = new BlockHitResult(hitPos, Direction.UP, spot.down(), false);
+        Vec3 hitPos = Vec3.atCenterOf(spot).add(0.0, -0.5, 0.0);
+        BlockHitResult hit = new BlockHitResult(hitPos, Direction.UP, spot.below(), false);
 
         ChatUtils.debug("放置潜影盒：手上 %s（快捷栏第 %d 格），对着 %s 的上面右键",
-            describe(held), hotbarIndex + 1, spot.down().toShortString());
-        mc.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
-        player.swingHand(Hand.MAIN_HAND);
+            describe(held), hotbarIndex + 1, spot.below().toShortString());
+        mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit);
+        player.swing(InteractionHand.MAIN_HAND, SwingAnimation.DEFAULT, false);
     }
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
 
-        BlockState state = mc.world.getBlockState(spot);
+        BlockState state = mc.level.getBlockState(spot);
         if (state.getBlock() instanceof ShulkerBoxBlock) {
             placed = true;
             ChatUtils.debug("潜影盒已经放到 " + spot.toShortString() + " 了（"
-                + Registries.BLOCK.getId(state.getBlock()) + "）");
+                + BuiltInRegistries.BLOCK.getKey(state.getBlock()) + "）");
             finish();
             return;
         }
 
         if (++waitTicks > MAX_WAIT_TICKS) {
             fail("放了潜影盒但 " + spot.toShortString() + " 那里还是 "
-                + Registries.BLOCK.getId(state.getBlock()) + "（没放上去？）");
+                + BuiltInRegistries.BLOCK.getKey(state.getBlock()) + "（没放上去？）");
         }
     }
 
@@ -138,6 +139,6 @@ public class PlaceShulkerBoxAction extends Action {
 
     private static String describe(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "空";
-        return Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount();
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()) + " x" + stack.getCount();
     }
 }

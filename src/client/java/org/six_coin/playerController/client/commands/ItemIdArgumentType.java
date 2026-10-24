@@ -7,11 +7,11 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 
 import java.util.Locale;
 import java.util.Optional;
@@ -26,7 +26,7 @@ import java.util.concurrent.CompletableFuture;
 public final class ItemIdArgumentType implements ArgumentType<Item> {
 
     private static final SimpleCommandExceptionType UNKNOWN =
-        new SimpleCommandExceptionType(Text.literal("没有这个物品"));
+        new SimpleCommandExceptionType(Component.literal("没有这个物品"));
 
     private static final ItemIdArgumentType INSTANCE = new ItemIdArgumentType();
 
@@ -44,7 +44,7 @@ public final class ItemIdArgumentType implements ArgumentType<Item> {
         Identifier identifier = Identifier.tryParse(raw.contains(":") ? raw : "minecraft:" + raw);
         if (identifier == null) throw UNKNOWN.createWithContext(reader);
 
-        Optional<Item> item = Registries.ITEM.getOptionalValue(identifier);
+        Optional<Item> item = BuiltInRegistries.ITEM.getOptional(identifier);
         if (item.isEmpty() || item.get() == Items.AIR) throw UNKNOWN.createWithContext(reader);
         return item.get();
     }
@@ -52,7 +52,7 @@ public final class ItemIdArgumentType implements ArgumentType<Item> {
     @Override
     public <S> CompletableFuture<Suggestions> listSuggestions(CommandContext<S> context, SuggestionsBuilder builder) {
         String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
-        for (Identifier id : Registries.ITEM.getIds()) {
+        for (Identifier id : BuiltInRegistries.ITEM.keySet()) {
             String full = id.toString();
             // 只从开头匹配；没打冒号的话，也可以从冒号后面（路径部分）开始匹配
             boolean match = full.startsWith(remaining)

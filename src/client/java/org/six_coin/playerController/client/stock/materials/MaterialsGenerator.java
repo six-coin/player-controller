@@ -3,8 +3,8 @@ package org.six_coin.playerController.client.stock.materials;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.Item;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.Item;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.stock.StockManager;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -80,8 +80,8 @@ public final class MaterialsGenerator {
 
         MaterialsConfig config = MaterialsConfig.load();
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) {
             throw new IOException("还没有进世界，读不到本地配方表");
         }
         MaterialsRecipes index = MaterialsRecipes.build(mc);

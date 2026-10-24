@@ -3,7 +3,7 @@ package org.six_coin.playerController.client.stock.materials;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.minecraft.item.Item;
+import net.minecraft.world.item.Item;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.util.ChatUtils;
 

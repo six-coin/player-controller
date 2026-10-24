@@ -1,12 +1,12 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.InventoryUtils;
@@ -43,7 +43,7 @@ class SingleStageBoxPutAction extends SingleStageStep {
     SingleStageBoxPutAction(SingleStageCtx ctx, BlockPos box, Predicate<ItemStack> filter,
                             String what) {
         super(ctx);
-        this.box = box.toImmutable();
+        this.box = box.immutable();
         this.filter = filter;
         this.what = what;
         this.session = new ContainerSession(this.box);
@@ -66,9 +66,9 @@ class SingleStageBoxPutAction extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -77,9 +77,9 @@ class SingleStageBoxPutAction extends SingleStageStep {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -110,7 +110,7 @@ class SingleStageBoxPutAction extends SingleStageStep {
 
     @Override
     protected void onEnd() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         if (session.isOpen()) {
             ctx.data.setBox(box, SingleStageData.contentsOf(session.handler()));
         }
@@ -123,14 +123,14 @@ class SingleStageBoxPutAction extends SingleStageStep {
 
     // ------------------------------------------------------------------
 
-    private void work(ClientPlayerEntity player) {
+    private void work(LocalPlayer player) {
         Slot source = findSource(player);
         if (source == null) {
             finish();
             return;
         }
 
-        ItemStack stack = source.getStack().copy();
+        ItemStack stack = source.getItem().copy();
         Slot target = findTarget(stack);
         if (target == null) {
             boxFull = true;
@@ -138,26 +138,26 @@ class SingleStageBoxPutAction extends SingleStageStep {
             return;
         }
 
-        session.click(source, 0, SlotActionType.PICKUP, "拿起 " + SingleStageData.idOf(stack));
-        if (session.handler().getCursorStack().isEmpty()) return;
+        session.click(source, 0, ContainerInput.PICKUP, "拿起 " + SingleStageData.idOf(stack));
+        if (session.handler().getCarried().isEmpty()) return;
 
-        session.click(target, 0, SlotActionType.PICKUP, "放进盒子");
-        if (!session.handler().getCursorStack().isEmpty()) {
+        session.click(target, 0, ContainerInput.PICKUP, "放进盒子");
+        if (!session.handler().getCarried().isEmpty()) {
             // 盒子这一格塞不下整叠：剩下的放回原格，下一轮会挑别的格子
-            session.click(source, 0, SlotActionType.PICKUP, "剩下的放回去");
+            session.click(source, 0, ContainerInput.PICKUP, "剩下的放回去");
         }
         moved++;
     }
 
     /** 物品栏（快捷栏 + 主背包）里第一个符合条件的格子。 */
     @Nullable
-    private Slot findSource(ClientPlayerEntity player) {
-        PlayerInventory inventory = player.getInventory();
+    private Slot findSource(LocalPlayer player) {
+        Inventory inventory = player.getInventory();
         for (Slot slot : session.handler().slots) {
-            if (slot.inventory != inventory) continue;
-            int index = slot.getIndex();
+            if (slot.container != inventory) continue;
+            int index = slot.getContainerSlot();
             if (index < 0 || index >= InventoryUtils.INVENTORY_END) continue;
-            ItemStack stack = slot.getStack();
+            ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
             if (filter.test(stack)) return slot;
         }
@@ -169,8 +169,8 @@ class SingleStageBoxPutAction extends SingleStageStep {
     private Slot findTarget(ItemStack stack) {
         Slot empty = null;
         for (Slot slot : InventoryUtils.containerSlots(session.handler())) {
-            if (!slot.isEnabled() || !slot.canInsert(stack)) continue;
-            if (slot.getStack().isEmpty()) {
+            if (!slot.isActive() || !slot.mayPlace(stack)) continue;
+            if (slot.getItem().isEmpty()) {
                 if (empty == null) empty = slot;
                 continue;
             }

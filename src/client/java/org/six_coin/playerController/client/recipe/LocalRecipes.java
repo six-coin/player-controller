@@ -3,31 +3,28 @@ package org.six_coin.playerController.client.recipe;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import com.mojang.serialization.JsonOps;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.recipe.Recipe;
-import net.minecraft.recipe.RecipeEntry;
-import net.minecraft.recipe.ServerRecipeManager;
-import net.minecraft.recipe.display.RecipeDisplay;
-import net.minecraft.recipe.display.ShapedCraftingRecipeDisplay;
-import net.minecraft.recipe.display.ShapelessCraftingRecipeDisplay;
-import net.minecraft.recipe.display.StonecutterRecipeDisplay;
-import net.minecraft.registry.RegistryOps;
-import net.minecraft.registry.RegistryWrapper;
-import net.minecraft.resource.DefaultResourcePack;
-import net.minecraft.resource.ResourceType;
-import net.minecraft.resource.VanillaDataPackProvider;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.display.RecipeDisplay;
+import net.minecraft.world.item.crafting.display.ShapedCraftingRecipeDisplay;
+import net.minecraft.world.item.crafting.display.ShapelessCraftingRecipeDisplay;
+import net.minecraft.world.item.crafting.display.StonecutterRecipeDisplay;
+import net.minecraft.resources.RegistryOps;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.server.packs.resources.Resource;
+import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.six_coin.playerController.client.util.ChatUtils;
 
 import java.io.Reader;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 本地那份**完整**的配方表（没解锁的也在里面），只要能摆进工作台 / 切石机的那些。
@@ -42,7 +39,7 @@ import java.util.List;
  * 解锁只影响配方书界面。既然我们的模组只在原版工作，服务端跑的和我们本地带的是同一份原版数据包
  * （同样的版本 → 同样的配方），那就直接读本地的：
  * <ul>
- *   <li><b>单人</b>：直接问集成的服务端要（{@link ServerRecipeManager#values()}）——
+ *   <li><b>单人</b>：直接问集成的服务端要（{@link RecipeManager#values()}）——
  *       连存档自己的数据包都算进去了，最准；</li>
  *   <li><b>联机</b>：读客户端自带原版数据包里的 {@code data/minecraft/recipe/*.json}，
  *       用原版的 {@link Recipe#CODEC} 反序列化（和原版服务端读配方是同一套代码）。</li>
@@ -102,7 +99,7 @@ public final class LocalRecipes {
      *
      * <p>读不出来（单人还没起服务端、联机没连上、解析全失败）就是空表，调用方照旧只用配方书。
      */
-    public static List<LocalRecipe> recipes(MinecraftClient mc) {
+    public static List<LocalRecipe> recipes(Minecraft mc) {
         Object key = connectionKey(mc);
         if (key == null) return List.of();
 
@@ -117,9 +114,9 @@ public final class LocalRecipes {
      *
      * <p>读的时候如果主线程正好也要配方，{@link #recipes} 会等这次读完（不会读两遍）。
      */
-    public static void warmUp(MinecraftClient mc) {
+    public static void warmUp(Minecraft mc) {
         Object key = connectionKey(mc);
-        RegistryWrapper.WrapperLookup lookup = registries(mc);
+        RegistryAccess lookup = registries(mc);
         if (key == null || lookup == null) return;
 
         synchronized (LOCK) {
@@ -136,8 +133,8 @@ public final class LocalRecipes {
     // ------------------------------------------------------------------
 
     /** 真正读一遍并记下来；同一个连接只会读一次（后到的线程看到已经读好了就直接拿缓存）。 */
-    private static List<LocalRecipe> load(MinecraftClient mc, Object key,
-                                          @Nullable RegistryWrapper.WrapperLookup lookup) {
+    private static List<LocalRecipe> load(Minecraft mc, Object key,
+                                          @Nullable RegistryAccess lookup) {
         synchronized (LOCK) {
             if (key.equals(loadedKey)) return recipes;
 
@@ -148,12 +145,12 @@ public final class LocalRecipes {
             @Nullable String problem = null;
 
             try {
-                if (mc.getServer() != null) {
+                if (mc.getSingleplayerServer() != null) {
                     source = "集成的服务端";
                     read = readFromServer(mc, found);
                 } else if (lookup != null) {
                     source = "客户端自带原版数据包";
-                    read = readFromDataPack(lookup, found);
+                    read = readFromDataPack(mc, lookup, found);
                 } else {
                     problem = "没有可读的来源";
                 }
@@ -192,7 +189,7 @@ public final class LocalRecipes {
                 read.failed() == 0 ? "" : ", " + read.failed() + " 条读不出来");
 
             // 聊天栏只在主线程上发（后台线程读的时候不能碰聊天栏）
-            if (mc.isOnThread()) {
+            if (mc.isSameThread()) {
                 ChatUtils.debug("本地配方表：" + recipes.size() + " 条工作台 / 切石机配方（" + source
                     + "，没解锁的也能用），耗时 " + (System.currentTimeMillis() - start) + " ms");
             }
@@ -201,50 +198,55 @@ public final class LocalRecipes {
     }
 
     /** 单人：集成的服务端的配方表（一定是最准的）。 */
-    private static Read readFromServer(MinecraftClient mc, List<LocalRecipe> out) {
-        ServerRecipeManager manager = mc.getServer().getRecipeManager();
-        for (RecipeEntry<?> entry : manager.values()) {
-            addDisplays(entry.id().getValue(), entry.value(), out);
+    private static Read readFromServer(Minecraft mc, List<LocalRecipe> out) {
+        RecipeManager manager = mc.getSingleplayerServer().getRecipeManager();
+        for (RecipeHolder<?> entry : manager.getRecipes()) {
+            addDisplays(entry.id().identifier(), entry.value(), out);
         }
-        return new Read(manager.values().size(), 0);
+        return new Read(manager.getRecipes().size(), 0);
     }
 
     /**
-     * 联机：原版数据包里的 {@code data/<命名空间>/recipe/*.json}。
+     * 联机：客户端资源管理器里的 {@code data/<命名空间>/recipe/*.json}。
+     *
+     * <p>26.3 没有 {@code VanillaPackResourcesBuilder#createDefaultPack/findResources} 这套 API 了，
+     * 直接问客户端的 {@link net.minecraft.server.packs.resources.ResourceManager} 要
+     * （原版数据包 + 资源包都在里面，比只读原版更全）。
      */
-    private static Read readFromDataPack(RegistryWrapper.WrapperLookup lookup, List<LocalRecipe> out) {
-        DefaultResourcePack pack = VanillaDataPackProvider.createDefaultPack();
-        RegistryOps<JsonElement> ops = lookup.getOps(JsonOps.INSTANCE);
+    private static Read readFromDataPack(Minecraft mc, RegistryAccess lookup, List<LocalRecipe> out) {
+        RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, lookup);
 
         int[] counters = {0, 0};   // [读到的配方数, 读不出来的]
-        for (String namespace : pack.getNamespaces(ResourceType.SERVER_DATA)) {
-            pack.findResources(ResourceType.SERVER_DATA, namespace, RECIPE_DIR, (id, supplier) -> {
-                JsonElement json;
-                try (Reader reader = new InputStreamReader(supplier.get(), StandardCharsets.UTF_8)) {
-                    json = JsonParser.parseReader(reader);
-                } catch (Exception e) {
-                    counters[1]++;
-                    return;
-                }
+        Map<Identifier, Resource> files = mc.getResourceManager()
+            .listResources(RECIPE_DIR, id -> id.getPath().endsWith(JSON_SUFFIX));
 
-                Recipe<?> recipe;
-                try {
-                    recipe = Recipe.CODEC.parse(ops, json).getOrThrow();
-                } catch (RuntimeException e) {
-                    // 大多是引用了客户端没有的东西（自定义标签之类）；少一条不影响别的
-                    counters[1]++;
-                    return;
-                }
-                counters[0]++;
-                addDisplays(recipeId(id), recipe, out);
-            });
+        for (Map.Entry<Identifier, Resource> file : files.entrySet()) {
+            JsonElement json;
+            try (Reader reader = file.getValue().openAsReader()) {
+                json = JsonParser.parseReader(reader);
+            } catch (Exception e) {
+                counters[1]++;
+                continue;
+            }
+
+            Recipe<?> recipe;
+            try {
+                // 26.3 的 Recipe.CODEC 解析出来的是 Holder<Recipe<?>>（配方是数据驱动注册的）
+                recipe = Recipe.CODEC.parse(ops, json).getOrThrow().value();
+            } catch (RuntimeException e) {
+                // 大多是引用了客户端没有的东西（自定义标签之类）；少一条不影响别的
+                counters[1]++;
+                continue;
+            }
+            counters[0]++;
+            addDisplays(recipeId(file.getKey()), recipe, out);
         }
         return new Read(counters[0], counters[1]);
     }
 
     /** 只要能摆进工作台 / 切石机的配方，就把「id + 显示数据」留下来。 */
     private static void addDisplays(Identifier id, Recipe<?> recipe, List<LocalRecipe> out) {
-        for (RecipeDisplay display : recipe.getDisplays()) {
+        for (RecipeDisplay display : recipe.display()) {
             if (display instanceof ShapedCraftingRecipeDisplay
                 || display instanceof ShapelessCraftingRecipeDisplay
                 || display instanceof StonecutterRecipeDisplay) {
@@ -262,19 +264,20 @@ public final class LocalRecipes {
         String path = resourceId.getPath();
         if (path.startsWith(RECIPE_DIR + "/")) path = path.substring(RECIPE_DIR.length() + 1);
         if (path.endsWith(JSON_SUFFIX)) path = path.substring(0, path.length() - JSON_SUFFIX.length());
-        return Identifier.of(resourceId.getNamespace(), path);
+        return Identifier.fromNamespaceAndPath(resourceId.getNamespace(), path);
     }
 
     /** 这一次连接的标识：单人用集成的服务端，联机用连接本身（换了就重读）。 */
     @Nullable
-    private static Object connectionKey(MinecraftClient mc) {
-        if (mc == null || mc.world == null) return null;
-        return mc.getServer() != null ? mc.getServer() : mc.getNetworkHandler();
+    private static Object connectionKey(Minecraft mc) {
+        if (mc == null || mc.level == null) return null;
+        return mc.getSingleplayerServer() != null ? mc.getSingleplayerServer() : mc.getConnection();
     }
 
     @Nullable
-    private static RegistryWrapper.WrapperLookup registries(MinecraftClient mc) {
-        return mc == null || mc.world == null ? null : mc.world.getRegistryManager();
+    private static RegistryAccess registries(Minecraft mc) {
+        if (mc == null || mc.level == null) return null;
+        return mc.level.registryAccess();
     }
 
     /** 一次读的结果：读到几条配方、几条读不出来。 */

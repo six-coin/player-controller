@@ -1,10 +1,10 @@
 package org.six_coin.playerController.client.container;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -20,7 +20,7 @@ import java.util.List;
  *
  * <p>怎么认出打开的是哪个容器：看准星指着的那一格（打开容器时准星就在容器上，界面开着的时候
  * 准星也不会动）；如果是大箱子，再按方块状态算出另一半在哪一格
- * （见 {@link ContainerTypes#otherHalf(net.minecraft.world.World, BlockPos)}），一起看。
+ * （见 {@link ContainerTypes#otherHalf(net.minecraft.world.level.Level, BlockPos)}），一起看。
  * 不做「附近有几个候选」这种猜测。
  *
  * <p>内容是从「界面里的容器格子」读的，因为客户端拿不到箱子方块自己同步过来的内容
@@ -34,7 +34,7 @@ import java.util.List;
 public final class ContainerCacheTracker {
 
     @Nullable
-    private static ScreenHandler openHandler;
+    private static AbstractContainerMenu openHandler;
     private static int openTicks;
 
     /** 这次打开的容器在哪一格（准星指着的那格）；不在缓存里就是 null。 */
@@ -60,27 +60,27 @@ public final class ContainerCacheTracker {
         return suspended;
     }
 
-    public static void tick(MinecraftClient client) {
+    public static void tick(Minecraft client) {
         if (suspended) {
             // 挂起期间连「这次开的是哪个容器」都不记：恢复的时候不会拿旧界面去刷新
             if (openHandler != null) reset();
             return;
         }
 
-        ClientPlayerEntity player = client.player;
-        if (player == null || client.world == null) {
+        LocalPlayer player = client.player;
+        if (player == null || client.level == null) {
             reset();
             return;
         }
 
-        ScreenHandler current = player.currentScreenHandler;
+        AbstractContainerMenu current = player.containerMenu;
         if (current == openHandler) {
             openTicks++;
             return;
         }
 
         // 界面变了：先把上一个界面收尾（可能是关闭，也可能直接换了另一个界面）
-        ScreenHandler previous = openHandler;
+        AbstractContainerMenu previous = openHandler;
         int previousTicks = openTicks;
         BlockPos previousPos = viewingPos;
 
@@ -91,7 +91,7 @@ public final class ContainerCacheTracker {
         if (previous != null && previousPos != null) {
             // 内容跟在开界面的包后面才同步过来：状态号还是 0（一个内容包都没收到）又开得太短，就不刷新，
             // 免得把一箱子空气写进缓存
-            if (previous.getRevision() == 0
+            if (previous.getStateId() == 0
                 && previousTicks < PlayerControllerConfig.getNetworkDelayTicks()) {
                 ChatUtils.debug("容器界面只开了 " + previousTicks + " tick，数据可能还没同步，这次不刷新缓存");
             } else {
@@ -99,7 +99,7 @@ public final class ContainerCacheTracker {
             }
         }
 
-        if (current == null || current == player.playerScreenHandler) return;
+        if (current == null || current == player.inventoryMenu) return;
 
         // 创造模式物品栏虽然也有自己的界面处理器，但它不是容器：直接不理
         if (isCreativeInventory(client)) {
@@ -113,7 +113,7 @@ public final class ContainerCacheTracker {
             return;
         }
 
-        List<CachedContainer> found = ContainerCacheUpdater.findEntries(client.world, looked);
+        List<CachedContainer> found = ContainerCacheUpdater.findEntries(client.level, looked);
         if (found.isEmpty()) {
             ChatUtils.debug("打开的容器 " + looked.toShortString()
                 + "（含大箱子按方块状态算出的另一半）不在缓存里，不跟踪");
@@ -125,8 +125,8 @@ public final class ContainerCacheTracker {
     }
 
     /** 现在打开的是不是创造模式物品栏（它不是真容器，别去认它）。 */
-    public static boolean isCreativeInventory(MinecraftClient client) {
-        return client.currentScreen instanceof CreativeInventoryScreen;
+    public static boolean isCreativeInventory(Minecraft client) {
+        return client.gui.screen() instanceof CreativeModeInventoryScreen;
     }
 
     private static String describe(List<CachedContainer> containers) {

@@ -1,6 +1,6 @@
 package org.six_coin.playerController.client.action;
 
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.Minecraft;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -78,8 +78,8 @@ public final class ActionManager {
         return count;
     }
 
-    public void tick(MinecraftClient client) {
-        if (client.player == null || client.world == null) {
+    public void tick(Minecraft client) {
+        if (client.player == null || client.level == null) {
             if (current != null) {
                 current.fail("玩家或世界已卸载");
                 finishCurrent();

@@ -7,11 +7,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.util.Identifier;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.TagKey;
+import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -387,12 +387,12 @@ public final class MaterialsConfig {
     // ------------------------------------------------------------------
 
     public static String itemId(Item item) {
-        return Registries.ITEM.getId(item).toString();
+        return BuiltInRegistries.ITEM.getKey(item).toString();
     }
 
     /** {@code #minecraft:planks} 这种写法。 */
     public static String tagId(TagKey<Item> tag) {
-        return "#" + tag.id();
+        return "#" + tag.location();
     }
 
     /** 把 {@code oak_planks} / {@code minecraft:oak_planks} 都认出来（认不出返回 null）。 */
@@ -401,7 +401,7 @@ public final class MaterialsConfig {
         if (raw == null) return null;
         Identifier identifier = Identifier.tryParse(withNamespace(raw));
         if (identifier == null) return null;
-        Optional<Item> item = Registries.ITEM.getOptionalValue(identifier);
+        Optional<Item> item = BuiltInRegistries.ITEM.getOptional(identifier);
         return item.isEmpty() || item.get() == Items.AIR ? null : item.get();
     }
 
@@ -478,7 +478,7 @@ public final class MaterialsConfig {
         String canonical = canonicalTag(raw);
         if (canonical == null) return null;
         Identifier identifier = Identifier.tryParse(canonical.substring(1));
-        return identifier == null ? null : TagKey.of(net.minecraft.registry.RegistryKeys.ITEM, identifier);
+        return identifier == null ? null : TagKey.create(net.minecraft.core.registries.Registries.ITEM, identifier);
     }
 
     /** 没有命名空间就补 {@code minecraft:}。 */

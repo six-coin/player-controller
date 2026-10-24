@@ -3,8 +3,8 @@ package org.six_coin.playerController.client.attack;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
-import net.minecraft.entity.EntityType;
-import net.minecraft.registry.Registries;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -325,7 +325,7 @@ public final class AttackProfile {
     /** 这个实体类型的那一条；没写在里面就返回 null（= 不打）。 */
     @Nullable
     public Rule rule(EntityType<?> type) {
-        return rule(Registries.ENTITY_TYPE.getId(type).toString());
+        return rule(BuiltInRegistries.ENTITY_TYPE.getKey(type).toString());
     }
 
     /** 按 id 找那一条；没写在里面就返回 null。 */
@@ -349,7 +349,7 @@ public final class AttackProfile {
     // ------------------------------------------------------------------
 
     public boolean addEntity(EntityType<?> type) {
-        String id = Registries.ENTITY_TYPE.getId(type).toString();
+        String id = BuiltInRegistries.ENTITY_TYPE.getKey(type).toString();
         if (rule(id) != null) return false;
         entities.add(new Rule(id));
         return true;

@@ -1,12 +1,12 @@
 package org.six_coin.playerController.client.stock;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.ContainerGetAction;
@@ -184,8 +184,8 @@ final class Part1Stage3Pack extends StockStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("没有玩家或世界");
             return;
         }
@@ -379,7 +379,7 @@ final class Part1Stage3Pack extends StockStep {
     private void pushCheckTools() {
         pushSync("检查快捷栏（第一格钻石镐、第二格空的）", () -> {
             ItemStack tool = hotbarStack(PICKAXE_HOTBAR);
-            if (!tool.isOf(net.minecraft.item.Items.DIAMOND_PICKAXE)) {
+            if (!tool.is(net.minecraft.world.item.Items.DIAMOND_PICKAXE)) {
                 ChatUtils.error("快捷栏第一格里不是钻石镐（是 " + describe(tool) + "），挖盒子会挖很久");
             }
             if (!hotbarStack(PICKUP_HOTBAR).isEmpty()) {
@@ -439,13 +439,13 @@ final class Part1Stage3Pack extends StockStep {
                 return;
             }
 
-            MinecraftClient mc = MinecraftClient.getInstance();
-            if (mc.world != null) {
-                net.minecraft.block.BlockState blockState = mc.world.getBlockState(spot.pos());
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.level != null) {
+                net.minecraft.world.level.block.state.BlockState blockState = mc.level.getBlockState(spot.pos());
                 if (!blockState.isAir()
-                    && !(blockState.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock)) {
+                    && !(blockState.getBlock() instanceof net.minecraft.world.level.block.ShulkerBoxBlock)) {
                     fail("摆放处 #" + placementId + " " + spot.coordString() + " 上有别的方块（"
-                        + net.minecraft.registry.Registries.BLOCK.getId(blockState.getBlock())
+                        + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(blockState.getBlock())
                         + "），先自己清掉");
                     return;
                 }
@@ -511,7 +511,7 @@ final class Part1Stage3Pack extends StockStep {
 
         // 站到盒子上面那一格，然后不写速度，让重力把人带下去，掉到盒子的位置捡东西。
         // 掉落物一定会顺位填进快捷栏第二格（那一格我们确保是空的），所以等的就是「第二格里有潜影盒了」。
-        pushMoveTo(spot.pos().up(), "走到潜影盒上面那一格 " + spot.pos().up().toShortString());
+        pushMoveTo(spot.pos().above(), "走到潜影盒上面那一格 " + spot.pos().above().toShortString());
         pushChild("等自然下落并捡起潜影盒",
             () -> new WaitAction("捡起潜影盒", this::hasPickupBox, PICKUP_WAIT_TICKS, false),
             action -> {
@@ -749,7 +749,7 @@ final class Part1Stage3Pack extends StockStep {
 
     /** 一整盒能装多少个：潜影盒 27 格 × 这种物品的堆叠上限。 */
     private static int fullBoxSize(Item item) {
-        return 27 * Math.max(1, item.getMaxCount());
+        return 27 * Math.max(1, item.getDefaultMaxStackSize());
     }
 
     // ------------------------------------------------------------------
@@ -971,7 +971,7 @@ final class Part1Stage3Pack extends StockStep {
     @Nullable
     private static ItemList wantOne(Item item, int count) {
         if (count <= 0) return null;
-        String id = Registries.ITEM.getId(item).toString();
+        String id = BuiltInRegistries.ITEM.getKey(item).toString();
         try {
             return ItemList.parse("{\"" + id + "\": " + count + "}");
         } catch (ItemList.ParseException e) {
@@ -1204,10 +1204,10 @@ final class Part1Stage3Pack extends StockStep {
 
     /** 物品栏 27 格里有没有成品（也就是 final_pack 里写过的东西）。 */
     private boolean inventoryHasWanted() {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) return false;
         for (int i = 9; i < 36; i++) {
-            ItemStack stack = player.getInventory().getStack(i);
+            ItemStack stack = player.getInventory().getItem(i);
             if (!stack.isEmpty() && finalWanted.wants(stack.getItem())) return true;
         }
         return false;
@@ -1220,28 +1220,28 @@ final class Part1Stage3Pack extends StockStep {
 
     /** 整个物品栏里有几叠潜影盒（只用来打日志）。 */
     private int countShulkerBoxes() {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) return 0;
         int count = 0;
         for (int i = 0; i < 36; i++) {
-            if (ShulkerUtils.isShulkerBox(player.getInventory().getStack(i))) count++;
+            if (ShulkerUtils.isShulkerBox(player.getInventory().getItem(i))) count++;
         }
         return count;
     }
 
     private ItemStack hotbarStack(int index) {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        return player == null ? ItemStack.EMPTY : player.getInventory().getStack(index);
+        LocalPlayer player = Minecraft.getInstance().player;
+        return player == null ? ItemStack.EMPTY : player.getInventory().getItem(index);
     }
 
     @Nullable
     private BlockPos currentBlock() {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        return player == null ? null : BlockPos.ofFloored(player.getEntityPos());
+        LocalPlayer player = Minecraft.getInstance().player;
+        return player == null ? null : BlockPos.containing(player.position());
     }
 
     private static String describe(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "空";
-        return net.minecraft.registry.Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount();
+        return net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()) + " x" + stack.getCount();
     }
 }

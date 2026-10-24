@@ -3,10 +3,10 @@ package org.six_coin.playerController.client.commands;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.text.Text;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import org.six_coin.playerController.client.feature.AccountSwitcher;
 
 /**
@@ -25,32 +25,32 @@ public final class AccountCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("account")
+        return ClientCommands.literal("account")
             .executes(AccountCommand::show)
-            .then(ClientCommandManager.literal("switch_to")
-                .then(ClientCommandManager.argument("player_id", StringArgumentType.word())
+            .then(ClientCommands.literal("switch_to")
+                .then(ClientCommands.argument("player_id", StringArgumentType.word())
                     .executes(context -> switchTo(context,
                         StringArgumentType.getString(context, "player_id")))))
-            .then(ClientCommandManager.literal("re_login")
+            .then(ClientCommands.literal("re_login")
                 .executes(AccountCommand::reLogin));
     }
 
     private static int show(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7当前账户："
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7当前账户："
             + (client == null ? "拿不到客户端" : AccountSwitcher.describeCurrent(client))));
-        source.sendFeedback(Text.literal("§7用法：§f/pc account switch_to <player_id>"));
-        source.sendFeedback(Text.literal("§7  把当前玩家下线，换成名为 player_id 的离线账户，"
+        source.sendFeedback(Component.literal("§7用法：§f/pc account switch_to <player_id>"));
+        source.sendFeedback(Component.literal("§7  把当前玩家下线，换成名为 player_id 的离线账户，"
             + "然后重新加入刚才的世界（单人游戏重开同一个存档，服务器重连同一个地址）"));
-        source.sendFeedback(Text.literal("§7  离线名字只能是 3~16 个字母、数字、下划线"));
-        source.sendFeedback(Text.literal("§7  单人存档是按 UUID 存的，换账户 = 换 UUID：世界里通常会是另一个玩家"
+        source.sendFeedback(Component.literal("§7  离线名字只能是 3~16 个字母、数字、下划线"));
+        source.sendFeedback(Component.literal("§7  单人存档是按 UUID 存的，换账户 = 换 UUID：世界里通常会是另一个玩家"
             + "（出生点、空背包），除非以前就用这个名字玩过这个存档"));
-        source.sendFeedback(Text.literal("§7用法：§f/pc account re_login"));
-        source.sendFeedback(Text.literal("§7  不换账户，只是退出到主界面再重新登录一遍，"
+        source.sendFeedback(Component.literal("§7用法：§f/pc account re_login"));
+        source.sendFeedback(Component.literal("§7  不换账户，只是退出到主界面再重新登录一遍，"
             + "然后回到刚才的世界（单人游戏重开同一个存档，服务器重连同一个地址）"));
-        source.sendFeedback(Text.literal("§7  换过去之后想换回正版账户要重启游戏（原来的登录令牌不会自动恢复）"));
+        source.sendFeedback(Component.literal("§7  换过去之后想换回正版账户要重启游戏（原来的登录令牌不会自动恢复）"));
         return 1;
     }
 
@@ -58,10 +58,10 @@ public final class AccountCommand {
         FabricClientCommandSource source = context.getSource();
         String error = AccountSwitcher.request(playerName);
         if (error != null) {
-            source.sendError(Text.literal(error));
+            source.sendError(Component.literal(error));
             return 0;
         }
-        source.sendFeedback(Text.literal("准备切换到离线账户 " + playerName + " ……"));
+        source.sendFeedback(Component.literal("准备切换到离线账户 " + playerName + " ……"));
         return 1;
     }
 
@@ -69,10 +69,10 @@ public final class AccountCommand {
         FabricClientCommandSource source = context.getSource();
         String error = AccountSwitcher.requestRelogin();
         if (error != null) {
-            source.sendError(Text.literal(error));
+            source.sendError(Component.literal(error));
             return 0;
         }
-        source.sendFeedback(Text.literal("准备重新登录（账户不变）……"));
+        source.sendFeedback(Component.literal("准备重新登录（账户不变）……"));
         return 1;
     }
 }

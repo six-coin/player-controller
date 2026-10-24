@@ -6,14 +6,14 @@ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.EntityType;
-import net.minecraft.registry.Registries;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.attack.AttackConfig;
 import org.six_coin.playerController.client.attack.AttackManager;
@@ -78,11 +78,11 @@ public final class AttackCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("attack")
+        return ClientCommands.literal("attack")
             .executes(AttackCommand::status)
             .then(toggle())
             .then(profile())
-            .then(ClientCommandManager.literal("show_all_mobs")
+            .then(ClientCommands.literal("show_all_mobs")
                 .executes(AttackCommand::showAllMobs));
     }
 
@@ -96,24 +96,24 @@ public final class AttackCommand {
         AttackProfile profile = config.currentProfile();
         AttackManager manager = AttackManager.get();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7攻击（文件："
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7攻击（文件："
             + AttackConfig.file(Math.max(1, config.loadedWorld())) + "）："));
-        source.sendFeedback(Text.literal("  开关：" + (config.enable() ? "§a开" : "§c关")));
-        source.sendFeedback(Text.literal("  当前 profile：" + config.profileName()
+        source.sendFeedback(Component.literal("  开关：" + (config.enable() ? "§a开" : "§c关")));
+        source.sendFeedback(Component.literal("  当前 profile：" + config.profileName()
             + (profile == null ? " §c（读不出来）" : "（" + profile.rules().size() + " 种生物）")));
         if (config.enable()) {
             String state = manager.state().text();
             if (manager.state() == AttackManager.State.ATTACKING && manager.targetName() != null) {
                 state = state + " " + manager.targetName();
             }
-            source.sendFeedback(Text.literal("  状态：" + state));
+            source.sendFeedback(Component.literal("  状态：" + state));
         }
-        source.sendFeedback(Text.literal("  范围：" + PlayerControllerConfig.getReach()
+        source.sendFeedback(Component.literal("  范围：" + PlayerControllerConfig.getReach()
             + " 格（/pc config actions reach，和挖方块、开容器共用）"));
-        source.sendFeedback(Text.literal("§7  §f/pc attack toggle [true|false]§7 - 开 / 关（不带值 = 切换）"));
-        source.sendFeedback(Text.literal("§7  §f/pc attack profile§7 - 有哪些 profile、切 / 增 / 删"));
-        source.sendFeedback(Text.literal("§7  §f/pc attack profile current list§7 - 改当前这一份"));
-        source.sendFeedback(Text.literal("§7  §f/pc attack show_all_mobs§7 - 列所有生物，批量加 / 删 / 改"));
+        source.sendFeedback(Component.literal("§7  §f/pc attack toggle [true|false]§7 - 开 / 关（不带值 = 切换）"));
+        source.sendFeedback(Component.literal("§7  §f/pc attack profile§7 - 有哪些 profile、切 / 增 / 删"));
+        source.sendFeedback(Component.literal("§7  §f/pc attack profile current list§7 - 改当前这一份"));
+        source.sendFeedback(Component.literal("§7  §f/pc attack show_all_mobs§7 - 列所有生物，批量加 / 删 / 改"));
         return 1;
     }
 
@@ -123,12 +123,12 @@ public final class AttackCommand {
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> toggle() {
         LiteralArgumentBuilder<FabricClientCommandSource> builder =
-            ClientCommandManager.literal("toggle")
+            ClientCommands.literal("toggle")
                 .executes(context -> setEnable(context, !AttackConfig.get().enable()));
 
-        builder.then(ClientCommandManager.literal("true")
+        builder.then(ClientCommands.literal("true")
             .executes(context -> setEnable(context, true)));
-        builder.then(ClientCommandManager.literal("false")
+        builder.then(ClientCommands.literal("false")
             .executes(context -> setEnable(context, false)));
         return builder;
     }
@@ -139,21 +139,21 @@ public final class AttackCommand {
         config.setEnable(value);
 
         if (!value) {
-            source.sendFeedback(Text.literal("攻击已关闭"));
+            source.sendFeedback(Component.literal("攻击已关闭"));
             return 1;
         }
 
         AttackProfile profile = config.currentProfile();
         if (profile == null) {
-            source.sendError(Text.literal("攻击已开启，但 profile「" + config.profileName()
+            source.sendError(Component.literal("攻击已开启，但 profile「" + config.profileName()
                 + "」读不出来：" + AttackProfiles.file(config.profileName())));
             return 0;
         }
 
-        source.sendFeedback(Text.literal("攻击已开启：profile=" + profile.name()
+        source.sendFeedback(Component.literal("攻击已开启：profile=" + profile.name()
             + "，" + profile.rules().size() + " 种生物"));
         if (profile.isEmpty()) {
-            source.sendError(Text.literal("这个 profile 里一个生物都没有，现在不会打任何东西"
+            source.sendError(Component.literal("这个 profile 里一个生物都没有，现在不会打任何东西"
                 + "（/pc attack show_all_mobs 里点 [添加]）"));
         }
         return 1;
@@ -164,17 +164,17 @@ public final class AttackCommand {
     // ------------------------------------------------------------------
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> profile() {
-        return ClientCommandManager.literal("profile")
+        return ClientCommands.literal("profile")
             .executes(AttackCommand::listProfiles)
-            .then(ClientCommandManager.literal("switch_to")
-                .then(ClientCommandManager.argument("name", StringArgumentType.word())
+            .then(ClientCommands.literal("switch_to")
+                .then(ClientCommands.argument("name", StringArgumentType.word())
                     .suggests(AttackCommand::suggestProfiles)
                     .executes(AttackCommand::switchProfile)))
-            .then(ClientCommandManager.literal("add")
-                .then(ClientCommandManager.argument("name", StringArgumentType.word())
+            .then(ClientCommands.literal("add")
+                .then(ClientCommands.argument("name", StringArgumentType.word())
                     .executes(AttackCommand::addProfile)))
-            .then(ClientCommandManager.literal("del")
-                .then(ClientCommandManager.argument("name", StringArgumentType.word())
+            .then(ClientCommands.literal("del")
+                .then(ClientCommands.argument("name", StringArgumentType.word())
                     .suggests(AttackCommand::suggestProfiles)
                     .executes(AttackCommand::delProfile)))
             .then(current());
@@ -194,25 +194,25 @@ public final class AttackCommand {
         String current = AttackConfig.get().profileName();
         List<String> names = AttackProfiles.list();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7攻击 profile（" + AttackProfiles.dir()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7攻击 profile（" + AttackProfiles.dir()
             + "）：" + names.size() + " 份"));
         for (String name : names) {
-            MutableText line = Text.literal(" ");
+            MutableComponent line = Component.literal(" ");
             line.append(fillButton("[切换]", ROOT + "profile switch_to " + name,
                 "把「切到 " + name + "」的命令填进聊天栏，回车生效"));
             if (!name.equals(current)) {
-                line.append(Text.literal(" "));
+                line.append(Component.literal(" "));
                 line.append(fillButton("[删除]", ROOT + "profile del " + name,
                     "把「删掉 " + name + "」的命令填进聊天栏，回车生效"));
             }
-            line.append(Text.literal(" " + name));
-            if (name.equals(current)) line.append(Text.literal(" §a（当前）"));
+            line.append(Component.literal(" " + name));
+            if (name.equals(current)) line.append(Component.literal(" §a（当前）"));
             source.sendFeedback(line);
         }
         if (names.isEmpty()) {
-            source.sendFeedback(Text.literal("§7  还没有，用 /pc attack profile add <名字> 建一份"));
+            source.sendFeedback(Component.literal("§7  还没有，用 /pc attack profile add <名字> 建一份"));
         }
-        source.sendFeedback(Text.literal("§7  §f/pc attack profile add <名字>§7 - 新建一份（顺便切过去）"));
+        source.sendFeedback(Component.literal("§7  §f/pc attack profile add <名字>§7 - 新建一份（顺便切过去）"));
         return 1;
     }
 
@@ -222,11 +222,11 @@ public final class AttackCommand {
         AttackConfig config = AttackConfig.get();
 
         if (!config.switchProfile(name)) {
-            source.sendError(Text.literal("没有这个 profile：" + name + "（"
+            source.sendError(Component.literal("没有这个 profile：" + name + "（"
                 + AttackProfiles.file(name) + "）"));
             return 0;
         }
-        source.sendFeedback(Text.literal("已切换到 profile：" + name));
+        source.sendFeedback(Component.literal("已切换到 profile：" + name));
         return 1;
     }
 
@@ -235,12 +235,12 @@ public final class AttackCommand {
         String name = StringArgumentType.getString(context, "name");
 
         if (!AttackProfiles.isValidName(name)) {
-            source.sendError(Text.literal("名字只能用字母、数字、下划线、减号（1~64 个字符），"
+            source.sendError(Component.literal("名字只能用字母、数字、下划线、减号（1~64 个字符），"
                 + "因为它同时是文件名"));
             return 0;
         }
         if (AttackProfiles.exists(name)) {
-            source.sendError(Text.literal("已经有 " + name + " 了（" + AttackProfiles.file(name) + "）"));
+            source.sendError(Component.literal("已经有 " + name + " 了（" + AttackProfiles.file(name) + "）"));
             return 0;
         }
 
@@ -248,8 +248,8 @@ public final class AttackCommand {
         if (created == null) return 0;
 
         AttackConfig.get().switchProfile(name);
-        source.sendFeedback(Text.literal("已按默认值新建 profile：" + name + "（已切过去）"));
-        source.sendFeedback(Text.literal("§7  默认值：自动切换开、忽略命名 / 被动 / 驯服开、"
+        source.sendFeedback(Component.literal("已按默认值新建 profile：" + name + "（已切过去）"));
+        source.sendFeedback(Component.literal("§7  默认值：自动切换开、忽略命名 / 被动 / 驯服开、"
             + "忽略幼体 / 暴击关，实体一个都没有"));
         return 1;
     }
@@ -260,14 +260,14 @@ public final class AttackCommand {
         AttackConfig config = AttackConfig.get();
 
         if (name.equals(config.profileName())) {
-            source.sendError(Text.literal("「" + name + "」正在用，先 switch_to 到别的再删"));
+            source.sendError(Component.literal("「" + name + "」正在用，先 switch_to 到别的再删"));
             return 0;
         }
         if (!AttackProfiles.delete(name)) {
-            source.sendError(Text.literal("没有这个 profile：" + name));
+            source.sendError(Component.literal("没有这个 profile：" + name));
             return 0;
         }
-        source.sendFeedback(Text.literal("已删除 profile：" + name));
+        source.sendFeedback(Component.literal("已删除 profile：" + name));
         return 1;
     }
 
@@ -277,9 +277,9 @@ public final class AttackCommand {
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> current() {
         LiteralArgumentBuilder<FabricClientCommandSource> builder =
-            ClientCommandManager.literal("current")
+            ClientCommands.literal("current")
                 .executes(AttackCommand::currentList)
-                .then(ClientCommandManager.literal("list")
+                .then(ClientCommands.literal("list")
                     .executes(AttackCommand::currentList))
                 .then(autoSwitch());
 
@@ -296,7 +296,7 @@ public final class AttackCommand {
         AttackProfile profile = profileOrError(source);
         if (profile == null) return 0;
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7当前 profile：" + profile.name()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7当前 profile：" + profile.name()
             + "（" + AttackProfiles.file(profile.name()) + "）"));
         source.sendFeedback(switchLine(ROOT + "profile current auto_switch",
             "自动切换物品", profile.autoSwitch()));
@@ -305,25 +305,25 @@ public final class AttackCommand {
                 "默认" + field.label(), field.getDefault(profile)));
         }
 
-        source.sendFeedback(Text.literal("攻击实体：" + profile.rules().size() + " 种"));
+        source.sendFeedback(Component.literal("攻击实体：" + profile.rules().size() + " 种"));
         if (profile.isEmpty()) {
-            source.sendFeedback(Text.literal("§7  还没有（/pc attack show_all_mobs 里点 [添加]）"));
+            source.sendFeedback(Component.literal("§7  还没有（/pc attack show_all_mobs 里点 [添加]）"));
         }
         for (Rule rule : profile.rules()) {
-            MutableText line = Text.literal(" ");
+            MutableComponent line = Component.literal(" ");
             line.append(fillButton("[删除]", EDIT + "del " + rule.entitieId(),
                 "把「把 " + rule.entitieId() + " 移出列表」的命令填进聊天栏，回车生效"));
-            line.append(Text.literal(" "));
+            line.append(Component.literal(" "));
             line.append(runButton("[编辑]", EDIT + "edit " + rule.entitieId(),
                 "直接显示 " + rule.entitieId() + " 的特殊配置"));
-            line.append(Text.literal(" "));
+            line.append(Component.literal(" "));
             line.append(entityLabel(rule.entitieId()));
             source.sendFeedback(line);
 
             if (rule.hasSetting()) {
-                source.sendFeedback(Text.literal("  特殊策略："));
+                source.sendFeedback(Component.literal("  特殊策略："));
                 for (Field field : rule.settings()) {
-                    source.sendFeedback(Text.literal("   " + field.label() + "："
+                    source.sendFeedback(Component.literal("   " + field.label() + "："
                         + Field.text(field.get(rule))));
                 }
             }
@@ -336,10 +336,10 @@ public final class AttackCommand {
     // ------------------------------------------------------------------
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> autoSwitch() {
-        return ClientCommandManager.literal("auto_switch")
-            .then(ClientCommandManager.literal("true")
+        return ClientCommands.literal("auto_switch")
+            .then(ClientCommands.literal("true")
                 .executes(context -> setAutoSwitch(context, true)))
-            .then(ClientCommandManager.literal("false")
+            .then(ClientCommands.literal("false")
                 .executes(context -> setAutoSwitch(context, false)));
     }
 
@@ -352,16 +352,16 @@ public final class AttackCommand {
         profile.autoSwitch(value);
         profile.save();
 
-        source.sendFeedback(Text.literal("自动切换物品：" + Field.text(before) + " -> "
+        source.sendFeedback(Component.literal("自动切换物品：" + Field.text(before) + " -> "
             + Field.text(value)));
         return 1;
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> defaultFlag(Field field) {
-        return ClientCommandManager.literal(field.defaultId())
-            .then(ClientCommandManager.literal("true")
+        return ClientCommands.literal(field.defaultId())
+            .then(ClientCommands.literal("true")
                 .executes(context -> setDefault(context, field, true)))
-            .then(ClientCommandManager.literal("false")
+            .then(ClientCommands.literal("false")
                 .executes(context -> setDefault(context, field, false)));
     }
 
@@ -375,7 +375,7 @@ public final class AttackCommand {
         field.setDefault(profile, value);
         profile.save();
 
-        source.sendFeedback(Text.literal("默认" + field.label() + "：" + Field.text(before)
+        source.sendFeedback(Component.literal("默认" + field.label() + "：" + Field.text(before)
             + " -> " + Field.text(value)));
         return 1;
     }
@@ -385,18 +385,18 @@ public final class AttackCommand {
     // ------------------------------------------------------------------
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> entities() {
-        return ClientCommandManager.literal("entities")
-            .then(ClientCommandManager.literal("add")
-                .then(ClientCommandManager.argument("entitie_id", AttackArguments.EntityId.entityId())
+        return ClientCommands.literal("entities")
+            .then(ClientCommands.literal("add")
+                .then(ClientCommands.argument("entitie_id", AttackArguments.EntityId.entityId())
                     .executes(AttackCommand::addEntity)))
-            .then(ClientCommandManager.literal("add_batch")
-                .then(ClientCommandManager.argument("group_id", AttackArguments.GroupId.groupId())
+            .then(ClientCommands.literal("add_batch")
+                .then(ClientCommands.argument("group_id", AttackArguments.GroupId.groupId())
                     .executes(AttackCommand::addBatch)))
-            .then(ClientCommandManager.literal("del")
-                .then(ClientCommandManager.argument("entitie_id", AttackArguments.EntityId.entityId())
+            .then(ClientCommands.literal("del")
+                .then(ClientCommands.argument("entitie_id", AttackArguments.EntityId.entityId())
                     .executes(AttackCommand::delEntity)))
-            .then(ClientCommandManager.literal("del_batch")
-                .then(ClientCommandManager.argument("group_id", AttackArguments.GroupId.groupId())
+            .then(ClientCommands.literal("del_batch")
+                .then(ClientCommands.argument("group_id", AttackArguments.GroupId.groupId())
                     .executes(AttackCommand::delBatch)))
             .then(edit())
             .then(editBatch());
@@ -405,36 +405,36 @@ public final class AttackCommand {
     /** {@code edit <实体> [开关 [true|false|default]]}。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> edit() {
         RequiredArgumentBuilder<FabricClientCommandSource, Identifier> withId =
-            ClientCommandManager.argument("entitie_id", AttackArguments.EntityId.entityId())
+            ClientCommands.argument("entitie_id", AttackArguments.EntityId.entityId())
                 .executes(AttackCommand::showEntity);
 
         for (Field field : Field.values()) {
             LiteralArgumentBuilder<FabricClientCommandSource> node =
-                ClientCommandManager.literal(field.id());
+                ClientCommands.literal(field.id());
             for (AttackArguments.Value value : AttackArguments.Value.all()) {
-                node.then(ClientCommandManager.literal(value.id())
+                node.then(ClientCommands.literal(value.id())
                     .executes(context -> editEntity(context, field, value.value())));
             }
             withId.then(node);
         }
-        return ClientCommandManager.literal("edit").then(withId);
+        return ClientCommands.literal("edit").then(withId);
     }
 
     /** {@code edit_batch <组> <开关> <true|false|default>}。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> editBatch() {
         RequiredArgumentBuilder<FabricClientCommandSource, EntityGroups.Group> withGroup =
-            ClientCommandManager.argument("group_id", AttackArguments.GroupId.groupId());
+            ClientCommands.argument("group_id", AttackArguments.GroupId.groupId());
 
         for (Field field : Field.values()) {
             LiteralArgumentBuilder<FabricClientCommandSource> node =
-                ClientCommandManager.literal(field.id());
+                ClientCommands.literal(field.id());
             for (AttackArguments.Value value : AttackArguments.Value.all()) {
-                node.then(ClientCommandManager.literal(value.id())
+                node.then(ClientCommands.literal(value.id())
                     .executes(context -> editBatch(context, field, value.value())));
             }
             withGroup.then(node);
         }
-        return ClientCommandManager.literal("edit_batch").then(withGroup);
+        return ClientCommands.literal("edit_batch").then(withGroup);
     }
 
     // ------------------------------------------------------------------
@@ -447,24 +447,24 @@ public final class AttackCommand {
         if (profile == null) return 0;
 
         Identifier id = AttackArguments.EntityId.get(context, "entitie_id");
-        EntityType<?> type = Registries.ENTITY_TYPE.getOptionalValue(id).orElse(null);
+        EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(id).orElse(null);
         if (type == null) {
-            source.sendError(Text.literal("没有这个实体：" + id));
+            source.sendError(Component.literal("没有这个实体：" + id));
             return 0;
         }
         EntityGroups.Group group = EntityGroups.groupOf(type);
         if (group == null) {
-            source.sendError(Text.literal(id + " 不是活物，打不了（还是说还没进世界？）"));
+            source.sendError(Component.literal(id + " 不是活物，打不了（还是说还没进世界？）"));
             return 0;
         }
         if (!profile.addEntity(type)) {
-            source.sendFeedback(Text.literal("本来就在列表里：" + id));
+            source.sendFeedback(Component.literal("本来就在列表里：" + id));
             return 1;
         }
         profile.save();
 
-        source.sendFeedback(Text.literal("已加入攻击实体：").append(entityLabel(id.toString()))
-            .append(Text.literal("（组：" + group.label() + "）")));
+        source.sendFeedback(Component.literal("已加入攻击实体：").append(entityLabel(id.toString()))
+            .append(Component.literal("（组：" + group.label() + "）")));
         return 1;
     }
 
@@ -476,7 +476,7 @@ public final class AttackCommand {
         EntityGroups.Group group = AttackArguments.GroupId.get(context, "group_id");
         List<EntityType<?>> mobs = group.mobs();
         if (mobs.isEmpty()) {
-            source.sendError(Text.literal("「" + group.label() + "」里一个生物都没有"));
+            source.sendError(Component.literal("「" + group.label() + "」里一个生物都没有"));
             return 0;
         }
 
@@ -486,7 +486,7 @@ public final class AttackCommand {
         }
         profile.save();
 
-        source.sendFeedback(Text.literal("已把「" + group.label() + "」加进攻击实体：" + added
+        source.sendFeedback(Component.literal("已把「" + group.label() + "」加进攻击实体：" + added
             + " 种（本来就有 " + (mobs.size() - added) + " 种）"));
         return 1;
     }
@@ -498,11 +498,11 @@ public final class AttackCommand {
 
         Identifier id = AttackArguments.EntityId.get(context, "entitie_id");
         if (!profile.delEntity(id.toString())) {
-            source.sendError(Text.literal("列表里本来就没有 " + id));
+            source.sendError(Component.literal("列表里本来就没有 " + id));
             return 0;
         }
         profile.save();
-        source.sendFeedback(Text.literal("已移出攻击实体：" + id));
+        source.sendFeedback(Component.literal("已移出攻击实体：" + id));
         return 1;
     }
 
@@ -514,21 +514,21 @@ public final class AttackCommand {
         EntityGroups.Group group = AttackArguments.GroupId.get(context, "group_id");
         List<EntityType<?>> mobs = group.mobs();
         if (mobs.isEmpty()) {
-            source.sendError(Text.literal("「" + group.label() + "」里一个生物都没有"));
+            source.sendError(Component.literal("「" + group.label() + "」里一个生物都没有"));
             return 0;
         }
 
         int removed = 0;
         for (EntityType<?> type : mobs) {
-            if (profile.delEntity(Registries.ENTITY_TYPE.getId(type).toString())) removed++;
+            if (profile.delEntity(BuiltInRegistries.ENTITY_TYPE.getKey(type).toString())) removed++;
         }
         if (removed == 0) {
-            source.sendError(Text.literal("「" + group.label() + "」里的生物一个都不在列表里，没东西可删"));
+            source.sendError(Component.literal("「" + group.label() + "」里的生物一个都不在列表里，没东西可删"));
             return 0;
         }
         profile.save();
 
-        source.sendFeedback(Text.literal("已从攻击实体里移出「" + group.label() + "」的 " + removed
+        source.sendFeedback(Component.literal("已从攻击实体里移出「" + group.label() + "」的 " + removed
             + " 种（组里还有 " + (mobs.size() - removed) + " 种本来就不在列表里，跳过）"));
         return 1;
     }
@@ -542,16 +542,16 @@ public final class AttackCommand {
         Identifier id = AttackArguments.EntityId.get(context, "entitie_id");
         Rule rule = profile.rule(id.toString());
         if (rule == null) {
-            source.sendError(Text.literal("这个 profile 里没有 " + id + "（先用 entities add 加进来）"));
+            source.sendError(Component.literal("这个 profile 里没有 " + id + "（先用 entities add 加进来）"));
             return 0;
         }
 
-        source.sendFeedback(Text.literal("实体：").append(entityLabel(rule.entitieId())));
+        source.sendFeedback(Component.literal("实体：").append(entityLabel(rule.entitieId())));
         for (Field field : Field.values()) {
             source.sendFeedback(threeStateLine(EDIT + "edit " + rule.entitieId() + " " + field.id(),
                 field.label(), field.get(rule)));
         }
-        source.sendFeedback(Text.literal("§7  「默认」= 实体上不写这一项，跟着 profile 的默认值走"));
+        source.sendFeedback(Component.literal("§7  「默认」= 实体上不写这一项，跟着 profile 的默认值走"));
         return 1;
     }
 
@@ -564,7 +564,7 @@ public final class AttackCommand {
         Identifier id = AttackArguments.EntityId.get(context, "entitie_id");
         Rule rule = profile.rule(id.toString());
         if (rule == null) {
-            source.sendError(Text.literal("这个 profile 里没有 " + id + "（先用 entities add 加进来）"));
+            source.sendError(Component.literal("这个 profile 里没有 " + id + "（先用 entities add 加进来）"));
             return 0;
         }
 
@@ -572,7 +572,7 @@ public final class AttackCommand {
         field.set(rule, value);
         profile.save();
 
-        source.sendFeedback(Text.literal(id + " " + field.label() + "：" + Field.text(before)
+        source.sendFeedback(Component.literal(id + " " + field.label() + "：" + Field.text(before)
             + " -> " + Field.text(value)));
         return 1;
     }
@@ -586,7 +586,7 @@ public final class AttackCommand {
         EntityGroups.Group group = AttackArguments.GroupId.get(context, "group_id");
         List<EntityType<?>> mobs = group.mobs();
         if (mobs.isEmpty()) {
-            source.sendError(Text.literal("「" + group.label() + "」里一个生物都没有"));
+            source.sendError(Component.literal("「" + group.label() + "」里一个生物都没有"));
             return 0;
         }
 
@@ -602,12 +602,12 @@ public final class AttackCommand {
             changed++;
         }
         if (changed == 0) {
-            source.sendError(Text.literal("「" + group.label() + "」里的生物一个都不在列表里，没东西可改"));
+            source.sendError(Component.literal("「" + group.label() + "」里的生物一个都不在列表里，没东西可改"));
             return 0;
         }
         profile.save();
 
-        source.sendFeedback(Text.literal("已把「" + group.label() + "」里 " + changed + " 种生物的"
+        source.sendFeedback(Component.literal("已把「" + group.label() + "」里 " + changed + " 种生物的"
             + field.label() + "设成「" + Field.text(value) + "」"
             + "（组里还有 " + skipped + " 种不在列表里，跳过）"));
         return 1;
@@ -620,40 +620,40 @@ public final class AttackCommand {
     private static int showAllMobs(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
 
-        if (MinecraftClient.getInstance().world == null) {
-            source.sendError(Text.literal("还没进世界，读不到实体注册表"));
+        if (Minecraft.getInstance().level == null) {
+            source.sendError(Component.literal("还没进世界，读不到实体注册表"));
             return 0;
         }
 
         AttackProfile profile = AttackConfig.get().currentProfile();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7所有生物（"
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7所有生物（"
             + EntityGroups.allMobs().size() + " 种）；金色按钮点了是填命令，回车才生效"));
         if (profile == null) {
-            source.sendError(Text.literal("当前 profile 读不出来，下面一律按「不在列表里」显示"));
+            source.sendError(Component.literal("当前 profile 读不出来，下面一律按「不在列表里」显示"));
         }
 
         for (EntityGroups.Group group : EntityGroups.Group.values()) {
             List<EntityType<?>> mobs = group.mobs();
             if (mobs.isEmpty()) continue;
 
-            MutableText head = Text.empty();
+            MutableComponent head = Component.empty();
             head.append(fillButton("[批量添加]", EDIT + "add_batch " + group.id(),
                 "把「" + group.label() + "」整组加进攻击实体"));
-            head.append(Text.literal(" "));
+            head.append(Component.literal(" "));
             head.append(fillButton("[批量删除]", EDIT + "del_batch " + group.id(),
                 "把「" + group.label() + "」整组移出攻击实体"));
-            head.append(Text.literal(" "));
+            head.append(Component.literal(" "));
             head.append(fillButton("[批量编辑]", EDIT + "edit_batch " + group.id() + " ",
                 "把「批量改这一组」的命令填进聊天栏，后面再补开关和 true/false/default"));
-            head.append(Text.literal(" " + group.label() + " (" + group.id() + ")"));
+            head.append(Component.literal(" " + group.label() + " (" + group.id() + ")"));
             source.sendFeedback(head);
 
             for (EntityType<?> type : mobs) {
-                String id = Registries.ENTITY_TYPE.getId(type).toString();
+                String id = BuiltInRegistries.ENTITY_TYPE.getKey(type).toString();
                 boolean inList = profile != null && profile.rule(id) != null;
 
-                MutableText line = Text.literal(" ");
+                MutableComponent line = Component.literal(" ");
                 if (inList) {
                     line.append(fillButton("[删除]", EDIT + "del " + id,
                         "把「把 " + id + " 移出列表」的命令填进聊天栏，回车生效"));
@@ -661,7 +661,7 @@ public final class AttackCommand {
                     line.append(fillButton("[添加]", EDIT + "add " + id,
                         "把「把 " + id + " 加进列表」的命令填进聊天栏，回车生效"));
                 }
-                line.append(Text.literal(" ")).append(entityLabel(id));
+                line.append(Component.literal(" ")).append(entityLabel(id));
                 source.sendFeedback(line);
             }
         }
@@ -676,8 +676,8 @@ public final class AttackCommand {
      * 「[启用] 自动切换物品：关」这种只有开 / 关的配置项：
      * 现在是关就给 {@code [启用]}，是开就给 {@code [禁用]}。
      */
-    private static MutableText switchLine(String command, String label, boolean value) {
-        MutableText line = Text.literal(" ");
+    private static MutableComponent switchLine(String command, String label, boolean value) {
+        MutableComponent line = Component.literal(" ");
         if (value) {
             line.append(fillButton("[禁用]", command + " false",
                 "把「关掉" + label + "」的命令填进聊天栏，回车生效"));
@@ -685,7 +685,7 @@ public final class AttackCommand {
             line.append(fillButton("[启用]", command + " true",
                 "把「打开" + label + "」的命令填进聊天栏，回车生效"));
         }
-        line.append(Text.literal(" " + label + "：" + Field.text(value)));
+        line.append(Component.literal(" " + label + "：" + Field.text(value)));
         return line;
     }
 
@@ -695,14 +695,14 @@ public final class AttackCommand {
      * <p>已经是开 / 关的时候，前面还给一个 {@code [默认]}（回到跟随默认值）；
      * 已经在默认态的时候不给 {@code [默认]}（没意义），只给开 / 关两个。
      */
-    private static MutableText threeStateLine(String command, String label,
+    private static MutableComponent threeStateLine(String command, String label,
                                              @Nullable Boolean value) {
-        MutableText line = Text.literal(" ");
+        MutableComponent line = Component.literal(" ");
 
         if (value != null) {
             line.append(fillButton("[默认]", command + " default",
                 "把「" + label + " 回到跟着默认值走」的命令填进聊天栏，回车生效"));
-            line.append(Text.literal(" "));
+            line.append(Component.literal(" "));
         }
 
         if (value == null || !value) {
@@ -710,12 +710,12 @@ public final class AttackCommand {
                 "把「打开" + label + "」的命令填进聊天栏，回车生效"));
         }
         if (value == null || value) {
-            if (value == null) line.append(Text.literal(" "));
+            if (value == null) line.append(Component.literal(" "));
             line.append(fillButton("[禁用]", command + " false",
                 "把「关掉" + label + "」的命令填进聊天栏，回车生效"));
         }
 
-        line.append(Text.literal(" " + label + "：" + Field.text(value)));
+        line.append(Component.literal(" " + label + "：" + Field.text(value)));
         return line;
     }
 
@@ -725,21 +725,21 @@ public final class AttackCommand {
         AttackConfig config = AttackConfig.get();
         AttackProfile profile = config.currentProfile();
         if (profile == null) {
-            source.sendError(Text.literal("当前 profile「" + config.profileName()
+            source.sendError(Component.literal("当前 profile「" + config.profileName()
                 + "」读不出来：" + AttackProfiles.file(config.profileName())));
         }
         return profile;
     }
 
     /** 「僵尸 (minecraft:zombie)」：名字用当前语言，id 灰色可复制。 */
-    private static MutableText entityLabel(String entitieId) {
+    private static MutableComponent entityLabel(String entitieId) {
         Identifier identifier = Identifier.tryParse(entitieId);
         EntityType<?> type = identifier == null
             ? null
-            : Registries.ENTITY_TYPE.getOptionalValue(identifier).orElse(null);
+            : BuiltInRegistries.ENTITY_TYPE.getOptional(identifier).orElse(null);
         if (type == null) return gray(entitieId, entitieId);
 
-        return Text.literal(type.getName().getString())
+        return Component.literal(type.getDescription().getString())
             .append(gray(" (" + entitieId + ")", entitieId));
     }
 }

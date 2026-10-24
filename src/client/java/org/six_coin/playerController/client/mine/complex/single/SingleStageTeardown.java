@@ -1,10 +1,10 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.FluidBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.mine.MineRegion;
 import org.six_coin.playerController.client.stock.MineBlockAction;
@@ -65,8 +65,8 @@ class SingleStageTeardown extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -287,8 +287,8 @@ class SingleStageTeardown extends SingleStageStep {
     // ------------------------------------------------------------------
 
     private void queueFastBreakPlatform() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) {
             fail("世界不存在");
             return;
         }
@@ -313,18 +313,18 @@ class SingleStageTeardown extends SingleStageStep {
 
     /** 平台 20 格是不是都空了。 */
     private boolean platformCleared() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return true;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return true;
         for (BlockPos cell : ctx.platform()) {
-            if (!cleared(mc.world.getBlockState(cell))) return false;
+            if (!cleared(mc.level.getBlockState(cell))) return false;
         }
         return true;
     }
 
     /** 4 5 4 那个圆石是不是挖掉了。 */
     private boolean markerCleared() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        return mc.world == null || cleared(mc.world.getBlockState(ctx.marker()));
+        Minecraft mc = Minecraft.getInstance();
+        return mc.level == null || cleared(mc.level.getBlockState(ctx.marker()));
     }
 
     /**
@@ -334,7 +334,7 @@ class SingleStageTeardown extends SingleStageStep {
      * 只看空气会一直等到超时。
      */
     private static boolean cleared(BlockState state) {
-        return state.isAir() || state.getBlock() instanceof FluidBlock;
+        return state.isAir() || state.getBlock() instanceof LiquidBlock;
     }
 
     @Override

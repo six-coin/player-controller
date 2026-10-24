@@ -7,22 +7,22 @@ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.command.CommandSource;
-import net.minecraft.command.argument.IdentifierArgumentType;
-import net.minecraft.registry.Registries;
-import net.minecraft.text.ClickEvent;
-import net.minecraft.text.HoverEvent;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Style;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.client.Minecraft;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.IdentifierArgument;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.Component;
+import net.minecraft.ChatFormatting;
+import net.minecraft.resources.Identifier;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.mine.station.MineAccessPos;
@@ -77,16 +77,16 @@ public final class MineStationCommand {
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
         LiteralArgumentBuilder<FabricClientCommandSource> builder =
-            ClientCommandManager.literal("station")
+            ClientCommands.literal("station")
                 .executes(context -> {
                     showStatus(context.getSource());
                     return 1;
                 })
-                .then(ClientCommandManager.literal("list")
+                .then(ClientCommands.literal("list")
                     .executes(MineStationCommand::list))
-                .then(ClientCommandManager.literal("check")
+                .then(ClientCommands.literal("check")
                     .executes(MineStationCommand::check))
-                .then(ClientCommandManager.literal("show")
+                .then(ClientCommands.literal("show")
                     .executes(MineStationCommand::toggleShow));
 
         for (MineStationPart part : MineStationPart.values()) {
@@ -103,17 +103,17 @@ public final class MineStationCommand {
     public static void showStatus(FabricClientCommandSource source) {
         MineStationManager manager = MineStationManager.get();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7挖掘站（world_" + manager.loadedWorld()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7挖掘站（world_" + manager.loadedWorld()
             + "，共 " + manager.totalCount() + " 个坐标，高亮 "
             + (manager.isShowing() ? "§a开" : "§c关") + "§r§7）："));
         for (MineStationPart part : MineStationPart.values()) {
             int count = manager.positions(part).size();
             String note = count > 0 ? "" : (part.optional() ? "§7（无，可选）" : "§c（无）");
-            source.sendFeedback(Text.literal("  " + part.display() + "：" + count + " 个" + note));
+            source.sendFeedback(Component.literal("  " + part.display() + "：" + count + " 个" + note));
         }
-        source.sendFeedback(Text.literal("  文件: " + manager.currentFile()));
-        source.sendFeedback(Text.literal("  报告: " + manager.currentCheckFile()));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT + "check§7 - 算落点并走过去开箱检查"
+        source.sendFeedback(Component.literal("  文件: " + manager.currentFile()));
+        source.sendFeedback(Component.literal("  报告: " + manager.currentCheckFile()));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "check§7 - 算落点并走过去开箱检查"
             + "；§f" + ROOT + "list§7 - 看坐标和落点"));
     }
 
@@ -121,106 +121,106 @@ public final class MineStationCommand {
         FabricClientCommandSource source = context.getSource();
         MineStationManager manager = MineStationManager.get();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7挖掘站（world_" + manager.loadedWorld()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7挖掘站（world_" + manager.loadedWorld()
             + "，共 " + manager.totalCount() + " 个坐标）："));
 
         for (MineStationPart part : MineStationPart.values()) {
             if (part.isList()) continue;
             MinePlace place = manager.single(part);
-            MutableText line = Text.literal(" ").append(colorTag(part)).append(Text.literal(" "));
-            line.append(place == null ? Text.literal("§c未设置") : placeLine(part, place));
+            MutableComponent line = Component.literal(" ").append(colorTag(part)).append(Component.literal(" "));
+            line.append(place == null ? Component.literal("§c未设置") : placeLine(part, place));
             source.sendFeedback(line);
         }
 
         for (MineStationPart part : MineStationPart.values()) {
             if (!part.isList()) continue;
             List<MinePlace> places = manager.list(part);
-            source.sendFeedback(Text.literal(" ").append(colorTag(part))
-                .append(Text.literal("（" + places.size() + " 个）：")));
+            source.sendFeedback(Component.literal(" ").append(colorTag(part))
+                .append(Component.literal("（" + places.size() + " 个）：")));
             if (places.isEmpty()) {
-                source.sendFeedback(Text.literal("    §8（空）"));
+                source.sendFeedback(Component.literal("    §8（空）"));
                 continue;
             }
             for (MinePlace place : places) {
-                source.sendFeedback(Text.literal("  ").append(placeLine(part, place)));
+                source.sendFeedback(Component.literal("  ").append(placeLine(part, place)));
             }
         }
         return 1;
     }
 
     /** 一行：{@code #id [产物 物品] [主] [x y z] [删除] 落点 x y z}。 */
-    private static Text placeLine(MineStationPart part, MinePlace place) {
-        MutableText text = Text.literal("#" + place.id() + " ").formatted(Formatting.DARK_GRAY);
+    private static Component placeLine(MineStationPart part, MinePlace place) {
+        MutableComponent text = Component.literal("#" + place.id() + " ").withStyle(ChatFormatting.DARK_GRAY);
 
         if (part == MineStationPart.ITEM_COLLECTOR && place.itemId() != null) {
-            text.append(Text.literal(place.itemId()).formatted(Formatting.GREEN)).append(Text.literal(" "));
+            text.append(Component.literal(place.itemId()).withStyle(ChatFormatting.GREEN)).append(Component.literal(" "));
         }
 
         text.append(dimensionTag(place.dimension()));
-        text.append(Text.literal(" "));
-        text.append(Text.literal("[" + place.coordString() + "]")
+        text.append(Component.literal(" "));
+        text.append(Component.literal("[" + place.coordString() + "]")
             .setStyle(Style.EMPTY
-                .withColor(Formatting.AQUA)
+                .withColor(ChatFormatting.AQUA)
                 .withClickEvent(new ClickEvent.CopyToClipboard(place.coordString()))
-                .withHoverEvent(new HoverEvent.ShowText(Text.literal(
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal(
                     "点击复制坐标（" + place.describe() + "）")))));
 
         if (part.isList()) {
-            text.append(Text.literal(" "));
+            text.append(Component.literal(" "));
             text.append(deleteButton(part, place));
         }
 
         MineAccessPos access = place.access();
-        text.append(Text.literal("  " + (access == null ? "§8落点未生成" : "§8落点 " + access.coordString())));
+        text.append(Component.literal("  " + (access == null ? "§8落点未生成" : "§8落点 " + access.coordString())));
         return text;
     }
 
-    private static Text deleteButton(MineStationPart part, MinePlace place) {
+    private static Component deleteButton(MineStationPart part, MinePlace place) {
         String command = ROOT + part.id() + " del " + place.coordString() + " " + place.dimension();
-        return Text.literal("[删除]").setStyle(Style.EMPTY
-            .withColor(Formatting.YELLOW)
+        return Component.literal("[删除]").setStyle(Style.EMPTY
+            .withColor(ChatFormatting.YELLOW)
             .withClickEvent(new ClickEvent.SuggestCommand(command))
-            .withHoverEvent(new HoverEvent.ShowText(Text.literal("点击把删除命令填到聊天栏：" + command))));
+            .withHoverEvent(new HoverEvent.ShowText(Component.literal("点击把删除命令填到聊天栏：" + command))));
     }
 
-    private static MutableText colorTag(MineStationPart part) {
-        return Text.literal("[" + part.display() + "]")
+    private static MutableComponent colorTag(MineStationPart part) {
+        return Component.literal("[" + part.display() + "]")
             .setStyle(Style.EMPTY.withColor(part.color() & 0xFFFFFF));
     }
 
-    private static MutableText dimensionTag(String dimension) {
+    private static MutableComponent dimensionTag(String dimension) {
         String shortName = switch (dimension) {
             case DimensionUtils.NETHER -> "下";
             case DimensionUtils.END -> "末";
             case DimensionUtils.OVERWORLD -> "主";
             default -> dimension;
         };
-        Formatting color = switch (dimension) {
-            case DimensionUtils.NETHER -> Formatting.RED;
-            case DimensionUtils.END -> Formatting.LIGHT_PURPLE;
-            case DimensionUtils.OVERWORLD -> Formatting.GREEN;
-            default -> Formatting.GRAY;
+        ChatFormatting color = switch (dimension) {
+            case DimensionUtils.NETHER -> ChatFormatting.RED;
+            case DimensionUtils.END -> ChatFormatting.LIGHT_PURPLE;
+            case DimensionUtils.OVERWORLD -> ChatFormatting.GREEN;
+            default -> ChatFormatting.GRAY;
         };
-        return Text.literal("[" + shortName + "]").formatted(color);
+        return Component.literal("[" + shortName + "]").withStyle(color);
     }
 
     private static int toggleShow(CommandContext<FabricClientCommandSource> context) {
         boolean showing = MineStationManager.get().toggleShow();
-        context.getSource().sendFeedback(Text.literal("挖掘站高亮已"
+        context.getSource().sendFeedback(Component.literal("挖掘站高亮已"
             + (showing ? "§a开启" : "§c关闭") + "§r（各部分的颜色见 /pc mine complex station list 的行首标签）"));
         return 1;
     }
 
     private static int check(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
-            source.sendError(Text.literal("没有玩家或世界"));
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
             return 0;
         }
 
         ActionManager.get().submit(new MineStationCheckAction());
-        source.sendFeedback(Text.literal("开始检查挖掘站：先给每个容器算落点，再按路径图一个接一个走过去开箱"
+        source.sendFeedback(Component.literal("开始检查挖掘站：先给每个容器算落点，再按路径图一个接一个走过去开箱"
             + "（不显示界面，会走很久）"));
         return 1;
     }
@@ -231,17 +231,17 @@ public final class MineStationCommand {
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> singlePart(MineStationPart part) {
         LiteralArgumentBuilder<FabricClientCommandSource> builder =
-            ClientCommandManager.literal(part.id());
+            ClientCommands.literal(part.id());
 
         if (part == MineStationPart.SAFE_POINT) {
-            builder.then(ClientCommandManager.literal("set_here")
+            builder.then(ClientCommands.literal("set_here")
                 .executes(context -> setHere(context, part)));
         } else {
-            builder.then(ClientCommandManager.literal("set_target")
+            builder.then(ClientCommands.literal("set_target")
                 .executes(context -> setTarget(context, part)));
         }
 
-        builder.then(ClientCommandManager.literal("set")
+        builder.then(ClientCommands.literal("set")
             .then(coordsWithDim(context -> setCoords(context, part))));
         return builder;
     }
@@ -250,7 +250,7 @@ public final class MineStationCommand {
         FabricClientCommandSource source = context.getSource();
         BlockPos here = PlayerUtils.currentBlockPos();
         if (here == null) {
-            source.sendError(Text.literal("拿不到玩家位置"));
+            source.sendError(Component.literal("拿不到玩家位置"));
             return 0;
         }
         return set(source, part, DimensionUtils.current(), here);
@@ -260,7 +260,7 @@ public final class MineStationCommand {
         FabricClientCommandSource source = context.getSource();
         BlockPos pos = PlayerUtils.lookedAtBlock();
         if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
+            source.sendError(Component.literal("你没有看向任何方块"));
             return 0;
         }
         return set(source, part, DimensionUtils.current(), pos);
@@ -275,7 +275,7 @@ public final class MineStationCommand {
         boolean wasSet = MineStationManager.get().single(part) != null;
         MineStationManager.get().setSingle(part, dimension, pos);
 
-        source.sendFeedback(Text.literal((wasSet ? "已更新 " : "已设置 ") + part.display()
+        source.sendFeedback(Component.literal((wasSet ? "已更新 " : "已设置 ") + part.display()
             + " = " + DimensionUtils.display(dimension) + " " + pos.toShortString()));
         hintBlockType(source, part, pos);
         return 1;
@@ -287,34 +287,34 @@ public final class MineStationCommand {
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> listPart(MineStationPart part) {
         LiteralArgumentBuilder<FabricClientCommandSource> builder =
-            ClientCommandManager.literal(part.id());
+            ClientCommands.literal(part.id());
 
         if (part == MineStationPart.ITEM_COLLECTOR) {
-            builder.then(ClientCommandManager.literal("add")
-                .then(ClientCommandManager.argument("item_id", IdentifierArgumentType.identifier())
+            builder.then(ClientCommands.literal("add")
+                .then(ClientCommands.argument("item_id", IdentifierArgument.id())
                     .suggests(MineStationCommand::suggestItems)
                     .then(coordsWithDim(context -> addCoords(context, part)))));
-            builder.then(ClientCommandManager.literal("add_target")
-                .then(ClientCommandManager.argument("item_id", IdentifierArgumentType.identifier())
+            builder.then(ClientCommands.literal("add_target")
+                .then(ClientCommands.argument("item_id", IdentifierArgument.id())
                     .suggests(MineStationCommand::suggestItems)
                     .executes(context -> addTargetWithItem(context, part))));
-            builder.then(ClientCommandManager.literal("del")
+            builder.then(ClientCommands.literal("del")
                 .then(coordsWithDim(context -> delCoords(context, part)))
-                .then(ClientCommandManager.argument("item_id", IdentifierArgumentType.identifier())
+                .then(ClientCommands.argument("item_id", IdentifierArgument.id())
                     .suggests(MineStationCommand::suggestItems)
                     .executes(MineStationCommand::delByItemId)));
         } else {
-            builder.then(ClientCommandManager.literal("add")
+            builder.then(ClientCommands.literal("add")
                 .then(coordsWithDim(context -> addCoords(context, part))));
-            builder.then(ClientCommandManager.literal("add_target")
+            builder.then(ClientCommands.literal("add_target")
                 .executes(context -> addTarget(context, part)));
-            builder.then(ClientCommandManager.literal("del")
+            builder.then(ClientCommands.literal("del")
                 .then(coordsWithDim(context -> delCoords(context, part))));
         }
 
-        builder.then(ClientCommandManager.literal("del_target")
+        builder.then(ClientCommands.literal("del_target")
             .executes(context -> delTarget(context, part)));
-        builder.then(ClientCommandManager.literal("list")
+        builder.then(ClientCommands.literal("list")
             .executes(context -> listPart(part, context)));
         return builder;
     }
@@ -323,7 +323,7 @@ public final class MineStationCommand {
         FabricClientCommandSource source = context.getSource();
         BlockPos pos = PlayerUtils.lookedAtBlock();
         if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
+            source.sendError(Component.literal("你没有看向任何方块"));
             return 0;
         }
         return add(source, part, DimensionUtils.current(), pos, null);
@@ -334,7 +334,7 @@ public final class MineStationCommand {
         FabricClientCommandSource source = context.getSource();
         BlockPos pos = PlayerUtils.lookedAtBlock();
         if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
+            source.sendError(Component.literal("你没有看向任何方块"));
             return 0;
         }
         return add(source, part, DimensionUtils.current(), pos, readItemId(context));
@@ -349,26 +349,26 @@ public final class MineStationCommand {
                            String dimension, BlockPos pos, String itemId) {
         if (part == MineStationPart.ITEM_COLLECTOR) {
             if (itemId == null || itemId.isBlank()) {
-                source.sendError(Text.literal("产物收集要写清楚产物 id："
+                source.sendError(Component.literal("产物收集要写清楚产物 id："
                     + ROOT + "item_collector add <item_id> <x> <y> <z> <dim>"));
                 return 0;
             }
             Identifier id = Identifier.tryParse(itemId);
-            if (id == null || Registries.ITEM.getOptionalValue(id).isEmpty()) {
-                source.sendError(Text.literal("没有这个物品：" + itemId));
+            if (id == null || BuiltInRegistries.ITEM.getOptional(id).isEmpty()) {
+                source.sendError(Component.literal("没有这个物品：" + itemId));
                 return 0;
             }
         }
 
         if (!MineStationManager.get().add(part, dimension, pos, itemId)) {
-            source.sendFeedback(Text.literal(part.display() + " 里已经有 "
+            source.sendFeedback(Component.literal(part.display() + " 里已经有 "
                 + DimensionUtils.display(dimension) + " " + pos.toShortString() + " 了"));
             return 1;
         }
 
         List<MinePlace> places = MineStationManager.get().list(part);
         MinePlace added = places.isEmpty() ? null : places.get(places.size() - 1);
-        source.sendFeedback(Text.literal("已加入 " + part.display()
+        source.sendFeedback(Component.literal("已加入 " + part.display()
             + (itemId == null ? "" : "（产物 " + itemId + "）")
             + " " + DimensionUtils.display(dimension) + " " + pos.toShortString()
             + "（现在 " + places.size() + " 个" + (added == null ? "" : "，#" + added.id()) + "）"));
@@ -376,7 +376,7 @@ public final class MineStationCommand {
         // 卸货潜影盒摆放处要正好 9 个：允许先多配，但超了要说一声
         if (part == MineStationPart.UNLOADING_PLACEMENT
             && places.size() > MineStationCheckAction.UNLOADING_PLACEMENT_COUNT) {
-            source.sendFeedback(Text.literal("§e提示：" + part.display() + " 必须正好 "
+            source.sendFeedback(Component.literal("§e提示：" + part.display() + " 必须正好 "
                 + MineStationCheckAction.UNLOADING_PLACEMENT_COUNT + " 个，现在有 " + places.size()
                 + " 个，check 会报错（多出来的请 del 掉）"));
         }
@@ -389,7 +389,7 @@ public final class MineStationCommand {
         FabricClientCommandSource source = context.getSource();
         BlockPos pos = PlayerUtils.lookedAtBlock();
         if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
+            source.sendError(Component.literal("你没有看向任何方块"));
             return 0;
         }
         return remove(source, part, DimensionUtils.current(), pos);
@@ -402,11 +402,11 @@ public final class MineStationCommand {
     private static int remove(FabricClientCommandSource source, MineStationPart part,
                               String dimension, BlockPos pos) {
         if (!MineStationManager.get().remove(part, dimension, pos)) {
-            source.sendFeedback(Text.literal(part.display() + " 里没有 "
+            source.sendFeedback(Component.literal(part.display() + " 里没有 "
                 + DimensionUtils.display(dimension) + " " + pos.toShortString()));
             return 1;
         }
-        source.sendFeedback(Text.literal("已从 " + part.display() + " 删掉 "
+        source.sendFeedback(Component.literal("已从 " + part.display() + " 删掉 "
             + DimensionUtils.display(dimension) + " " + pos.toShortString()
             + "（现在 " + MineStationManager.get().list(part).size() + " 个）"));
         return 1;
@@ -418,10 +418,10 @@ public final class MineStationCommand {
 
         int removed = MineStationManager.get().removeByItemId(MineStationPart.ITEM_COLLECTOR, itemId);
         if (removed == 0) {
-            source.sendFeedback(Text.literal("产物收集里没有产物是 " + itemId + " 的条目"));
+            source.sendFeedback(Component.literal("产物收集里没有产物是 " + itemId + " 的条目"));
             return 1;
         }
-        source.sendFeedback(Text.literal("已删掉产物收集里 " + removed + " 条产物为 " + itemId
+        source.sendFeedback(Component.literal("已删掉产物收集里 " + removed + " 条产物为 " + itemId
             + " 的（现在 " + MineStationManager.get().list(MineStationPart.ITEM_COLLECTOR).size() + " 个）"));
         return 1;
     }
@@ -430,13 +430,13 @@ public final class MineStationCommand {
         FabricClientCommandSource source = context.getSource();
         List<MinePlace> places = MineStationManager.get().list(part);
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7" + part.display() + "（" + places.size() + " 个）："));
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7" + part.display() + "（" + places.size() + " 个）："));
         if (places.isEmpty()) {
-            source.sendFeedback(Text.literal("  §8（空）"));
+            source.sendFeedback(Component.literal("  §8（空）"));
             return 1;
         }
         for (MinePlace place : places) {
-            source.sendFeedback(Text.literal("  ").append(placeLine(part, place)));
+            source.sendFeedback(Component.literal("  ").append(placeLine(part, place)));
         }
         return 1;
     }
@@ -452,20 +452,20 @@ public final class MineStationCommand {
     private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> coordsWithDim(
         Command<FabricClientCommandSource> command) {
 
-        return ClientCommandManager.argument("x", IntegerArgumentType.integer())
+        return ClientCommands.argument("x", IntegerArgumentType.integer())
             .suggests(LookSuggestions::x)
-            .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+            .then(ClientCommands.argument("y", IntegerArgumentType.integer())
                 .suggests(LookSuggestions::y)
-                .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                .then(ClientCommands.argument("z", IntegerArgumentType.integer())
                     .suggests(LookSuggestions::z)
-                    .then(ClientCommandManager.argument("dim", IdentifierArgumentType.identifier())
+                    .then(ClientCommands.argument("dim", IdentifierArgument.id())
                         .suggests(DimensionSuggestions::suggest)
                         .executes(command))));
     }
 
     private static CompletableFuture<Suggestions> suggestItems(
         CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
-        return CommandSource.suggestIdentifiers(Registries.ITEM.getIds(), builder);
+        return SharedSuggestionProvider.suggestResource(BuiltInRegistries.ITEM.keySet(), builder);
     }
 
     private static BlockPos readPos(CommandContext<FabricClientCommandSource> context) {
@@ -491,16 +491,16 @@ public final class MineStationCommand {
 
     /** 设置 / 添加的时候顺便提醒方块类型对不对（硬性检查在 check 里）。 */
     private static void hintBlockType(FabricClientCommandSource source, MineStationPart part, BlockPos pos) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
 
-        BlockState state = mc.world.getBlockState(pos);
+        BlockState state = mc.level.getBlockState(pos);
         String expected = null;
 
         if (!part.isContainer()) {
             // 摆放处：check 要求这里是空的
             if (part != MineStationPart.SAFE_POINT && !state.isAir()) {
-                source.sendFeedback(Text.literal("§e提示：这里现在是 " + ContainerTypes.idOf(state)
+                source.sendFeedback(Component.literal("§e提示：这里现在是 " + ContainerTypes.idOf(state)
                     + "，check 会要求这里空着（是空气）"));
             }
         } else if (part == MineStationPart.ITEM_COLLECTOR) {
@@ -510,7 +510,7 @@ public final class MineStationCommand {
         }
 
         if (expected != null) {
-            source.sendFeedback(Text.literal("§e提示：这里现在是 " + ContainerTypes.idOf(state)
+            source.sendFeedback(Component.literal("§e提示：这里现在是 " + ContainerTypes.idOf(state)
                 + "，check 会要求是" + expected));
         }
     }

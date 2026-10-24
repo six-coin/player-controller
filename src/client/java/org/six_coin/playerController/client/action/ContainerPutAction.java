@@ -1,12 +1,12 @@
 package org.six_coin.playerController.client.action;
 
 import com.google.gson.JsonObject;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerSession;
@@ -118,7 +118,7 @@ public class ContainerPutAction extends Action {
 
     private ContainerPutAction(BlockPos pos, Mode mode, boolean wantDetail, @Nullable ItemList wanted,
                                int hotbarFrom, int hotbarTo, boolean includeHotbar, int skipIndex) {
-        this.pos = pos.toImmutable();
+        this.pos = pos.immutable();
         this.mode = mode;
         this.wantDetail = wantDetail;
         this.wanted = wanted;
@@ -244,9 +244,9 @@ public class ContainerPutAction extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("没有玩家或世界");
             return;
         }
@@ -266,8 +266,8 @@ public class ContainerPutAction extends Action {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -293,7 +293,7 @@ public class ContainerPutAction extends Action {
 
     @Override
     protected void onEnd() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
 
         // 先趁界面还开着，把「放完之后容器里剩什么 / 满没满 / 还剩几格」记下来（备货流程要用）
         if (wantDetail && session.isOpen()) {
@@ -321,7 +321,7 @@ public class ContainerPutAction extends Action {
 
     // ------------------------------------------------------------------
 
-    private void tickOpening(MinecraftClient mc) {
+    private void tickOpening(Minecraft mc) {
         switch (session.awaitOpen(mc)) {
             case READY -> phase = Phase.PUT;
             case TIMEOUT -> fail("等待容器界面超时");
@@ -364,11 +364,11 @@ public class ContainerPutAction extends Action {
     private List<Slot> candidates() {
         List<Slot> result = new ArrayList<>();
         for (Slot slot : session.handler().slots) {
-            if (!(slot.inventory instanceof PlayerInventory)) continue;
-            int index = slot.getIndex();
+            if (!(slot.container instanceof Inventory)) continue;
+            int index = slot.getContainerSlot();
             if (index < rangeStart() || index >= rangeEnd()) continue;
 
-            ItemStack stack = slot.getStack();
+            ItemStack stack = slot.getItem();
             if (stack.isEmpty() || !matches(index, stack)) continue;
             result.add(slot);
         }
@@ -378,10 +378,10 @@ public class ContainerPutAction extends Action {
     // ------------------------------------------------------------------
 
     /** 要动的那几格里有这类东西一共有多少。 */
-    private int countInInventory(ClientPlayerEntity player) {
+    private int countInInventory(LocalPlayer player) {
         int total = 0;
         for (int i = rangeStart(); i < rangeEnd(); i++) {
-            ItemStack stack = player.getInventory().getStack(i);
+            ItemStack stack = player.getInventory().getItem(i);
             if (stack.isEmpty() || !matches(i, stack)) continue;
             total += stack.getCount();
         }

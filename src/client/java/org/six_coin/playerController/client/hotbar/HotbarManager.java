@@ -1,11 +1,11 @@
 package org.six_coin.playerController.client.hotbar;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
-import net.minecraft.registry.Registries;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -25,7 +25,7 @@ import org.six_coin.playerController.client.util.ChatUtils;
  *   <li>用完 {@link #release}（备货的动作结束、攻击不动手的时候）。</li>
  * </ul>
  *
- * <p>切的时候会**立刻**补一个 {@code UpdateSelectedSlotC2SPacket}：原版是每 tick 自己同步一次，
+ * <p>切的时候会**立刻**补一个 {@code ServerboundSetCarriedItemPacket}：原版是每 tick 自己同步一次，
  * 同一 tick 里先切再打的话，服务端那一头还在用旧的那格（武器不对、伤害和冷却都按旧的算）。
  */
 public final class HotbarManager {
@@ -68,7 +68,7 @@ public final class HotbarManager {
      * @return {@code false} = 这次不让切（别人用着，而且优先级更高），调用方应当放弃这一次操作
      */
     public boolean request(Owner requester, int slot) {
-        if (!PlayerInventory.isValidHotbarIndex(slot)) {
+        if (!Inventory.isHotbarSlot(slot)) {
             ChatUtils.error("快捷栏没有第 " + (slot + 1) + " 格");
             return false;
         }
@@ -107,26 +107,26 @@ public final class HotbarManager {
      * <p>客户端这一头只改 {@code selectedSlot}，不碰任何按键，也不动玩家的视角。
      */
     private static void apply(int slot) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) return;
 
-        PlayerInventory inventory = player.getInventory();
+        Inventory inventory = player.getInventory();
         if (inventory.getSelectedSlot() == slot) return;
 
         inventory.setSelectedSlot(slot);
-        if (player.networkHandler != null) {
-            player.networkHandler.sendPacket(new UpdateSelectedSlotC2SPacket(slot));
+        if (player.connection != null) {
+            player.connection.send(new ServerboundSetCarriedItemPacket(slot));
         }
     }
 
     private static String describe() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) return "手上一格";
 
-        ItemStack held = player.getInventory().getSelectedStack();
+        ItemStack held = player.getInventory().getSelectedItem();
         if (held.isEmpty()) return "空手";
-        return Registries.ITEM.getId(held.getItem()) + " x" + held.getCount();
+        return BuiltInRegistries.ITEM.getKey(held.getItem()) + " x" + held.getCount();
     }
 }

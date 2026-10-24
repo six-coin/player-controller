@@ -1,12 +1,12 @@
 package org.six_coin.playerController.client.recipe;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.recipe.Ingredient;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.Holder;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.stock.materials.MaterialsConfig;
 import org.six_coin.playerController.client.stock.materials.MaterialsRecipes;
@@ -93,7 +93,7 @@ public final class RecipePlanner {
 
     /** 按偏好挑配方。 */
     private static MaterialsRecipes.Decision decide(Item target, MaterialsRecipes.Kind only) {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         return MaterialsRecipes.decide(mc, MaterialsConfig.load(), target, only);
     }
 
@@ -102,8 +102,8 @@ public final class RecipePlanner {
     // ------------------------------------------------------------------
 
     public static Result planCrafting(Item target, int count) {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        if (player == null || MinecraftClient.getInstance().world == null) return fail("没有玩家或世界");
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null || Minecraft.getInstance().level == null) return fail("没有玩家或世界");
         if (count < 1) return fail("数量至少 1");
 
         int maxCount = maxResultCount(player);
@@ -124,8 +124,8 @@ public final class RecipePlanner {
     // ------------------------------------------------------------------
 
     public static Result planStonecutting(Item target, int count) {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        if (player == null || MinecraftClient.getInstance().world == null) return fail("没有玩家或世界");
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null || Minecraft.getInstance().level == null) return fail("没有玩家或世界");
         if (count < 1) return fail("数量至少 1");
 
         int maxCount = maxResultCount(player);
@@ -146,7 +146,7 @@ public final class RecipePlanner {
     // ------------------------------------------------------------------
 
     private static Result planFromOptions(List<Option> options, CraftPlan.Station station,
-                                          Item target, int count, ClientPlayerEntity player,
+                                          Item target, int count, LocalPlayer player,
                                           int maxCount) {
         Map<Item, Integer> available = inventoryCounts(player);
         List<String> rejected = new ArrayList<>();
@@ -220,12 +220,19 @@ public final class RecipePlanner {
                                             int count, Map<Item, Integer> available,
                                             List<String> rejected) {
         int perCraft = option.perCraft();
-        if (perCraft <= 0) return null;
+        if (perCraft <= 0) {
+            // 不该发生；真发生了也要说清楚，别让报错变成一句空的「这个配方不行：」
+            rejected.add("这条配方单次产量是 " + perCraft + " 个（" + option.recipeType() + "）");
+            return null;
+        }
 
         // 数量不是单次产量的整数倍就**向上取整**（要 53 个栅栏、一次出 3 个 → 合 18 次 = 54 个）。
         // 多出来的那部分由调用方处理（备货里 final=true 的步骤会把多余的放回 item_storage）。
         int crafts = (count + perCraft - 1) / perCraft;
-        if (crafts <= 0) return null;
+        if (crafts <= 0) {
+            rejected.add("算出来要合 " + crafts + " 次（要 " + count + " 个，每次 " + perCraft + " 个）");
+            return null;
+        }
 
         Map<Item, Integer> left = new HashMap<>(available);
         List<CraftPlan.Cell> cells = new ArrayList<>();
@@ -251,10 +258,16 @@ public final class RecipePlanner {
 
             left.put(chosen, left.getOrDefault(chosen, 0) - crafts);
             cells.add(new CraftPlan.Cell(gridSlot, chosen));
-            roundCrafts = Math.min(roundCrafts, Math.max(1, chosen.getMaxCount()));
+            roundCrafts = Math.min(roundCrafts, Math.max(1, chosen.getDefaultMaxStackSize()));
         }
 
-        if (cells.isEmpty()) return null;
+        if (cells.isEmpty()) {
+            // 也是不该发生的情况：配方一条材料格都没解析出来（以前这里会静默返回，
+            // 于是用户只看到一句「这个配方不行：」后面什么都没有）
+            rejected.add("这条配方一个材料格都没解析出来（" + option.recipeType() + "，"
+                + option.cells().size() + " 格都是空的）");
+            return null;
+        }
         return new CraftPlan(station, target, count, perCraft, crafts, roundCrafts, cells);
     }
 
@@ -263,24 +276,24 @@ public final class RecipePlanner {
     // ------------------------------------------------------------------
 
     /** 快捷栏第 4~9 格（背包下标 3~8）空着几格。 */
-    public static int hotbarFreeSlots(ClientPlayerEntity player) {
+    public static int hotbarFreeSlots(LocalPlayer player) {
         int free = 0;
         for (int i = RESULT_HOTBAR_FROM; i <= RESULT_HOTBAR_TO; i++) {
-            if (player.getInventory().getStack(i).isEmpty()) free++;
+            if (player.getInventory().getItem(i).isEmpty()) free++;
         }
         return free;
     }
 
     /** 一次最多能做多少个：快捷栏第 4~9 格的空位 × 64。 */
-    public static int maxResultCount(ClientPlayerEntity player) {
+    public static int maxResultCount(LocalPlayer player) {
         return hotbarFreeSlots(player) * 64;
     }
 
     /** 主背包 27 格（不含快捷栏）里每种物品有多少。 */
-    public static Map<Item, Integer> inventoryCounts(ClientPlayerEntity player) {
+    public static Map<Item, Integer> inventoryCounts(LocalPlayer player) {
         Map<Item, Integer> counts = new LinkedHashMap<>();
         for (int i = 9; i < 36; i++) {
-            ItemStack stack = player.getInventory().getStack(i);
+            ItemStack stack = player.getInventory().getItem(i);
             if (stack.isEmpty()) continue;
             counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
         }
@@ -306,7 +319,7 @@ public final class RecipePlanner {
     @Nullable
     private static ItemStack firstMatch(List<ItemStack> options, Item target) {
         for (ItemStack option : options) {
-            if (!option.isEmpty() && option.isOf(target)) return option;
+            if (!option.isEmpty() && option.is(target)) return option;
         }
         return null;
     }
@@ -320,7 +333,7 @@ public final class RecipePlanner {
     }
 
     private static String name(Item item) {
-        return Registries.ITEM.getId(item).toString();
+        return BuiltInRegistries.ITEM.getKey(item).toString();
     }
 
     private static String acceptedNames(List<Item> accepted) {
@@ -335,13 +348,13 @@ public final class RecipePlanner {
 
     /** 日志用：这个物品一格最多叠多少。 */
     public static int maxStackOf(Item item) {
-        return Math.max(1, item.getMaxCount());
+        return Math.max(1, item.getDefaultMaxStackSize());
     }
 
     /** 切石机的输入（{@link Ingredient}）名字，错误信息用。 */
     public static String inputNames(Ingredient ingredient) {
         StringBuilder sb = new StringBuilder();
-        List<RegistryEntry<Item>> items = ingredient.getMatchingItems().toList();
+        List<Holder<Item>> items = ingredient.items().toList();
         for (int i = 0; i < items.size() && i < 4; i++) {
             if (i > 0) sb.append("/");
             sb.append(name(items.get(i).value()));

@@ -1,16 +1,16 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.FluidBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.tag.BlockTags;
-import net.minecraft.state.property.Properties;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.stock.MineBlockAction;
@@ -89,7 +89,7 @@ class SingleStageStage1 extends SingleStageStep {
 
     /** 粘液块 / 树脂块。 */
     static final Predicate<ItemStack> SLIME = stack ->
-        stack.isOf(Items.SLIME_BLOCK) || stack.isOf(Items.RESIN_BLOCK);
+        stack.is(Items.SLIME_BLOCK) || stack.is(Items.RESIN_BLOCK);
 
     private enum Phase {
         /** 从盒子里拿粘液块。 */
@@ -190,19 +190,19 @@ class SingleStageStage1 extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("玩家或世界不存在");
             return;
         }
 
         region.addAll(ctx.regionCells(iteration));
-        shell.addAll(ctx.shellCells(iteration, mc.world));
+        shell.addAll(ctx.shellCells(iteration, mc.level));
         for (BlockPos pos : shell) shellKeys.add(pos.asLong());
         wrap.addAll(region);
         wrap.addAll(shell);
-        List<BlockPos> gaps = scanGaps(mc.world);
-        int water = countWaterlogged(mc.world);
+        List<BlockPos> gaps = scanGaps(mc.level);
+        int water = countWaterlogged(mc.level);
 
         if (gaps.isEmpty() && water == 0) {
             ChatUtils.debug(phase() + "：没有含水方块也没有漏洞，跳过");
@@ -231,8 +231,8 @@ class SingleStageStage1 extends SingleStageStep {
     protected void tick() {
         if (isFinished()) return;
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -267,7 +267,7 @@ class SingleStageStage1 extends SingleStageStep {
     // 主循环
     // ------------------------------------------------------------------
 
-    private void step(MinecraftClient mc) {
+    private void step(Minecraft mc) {
         while (!isFinished()) {
             switch (phase) {
                 case TAKE -> {
@@ -280,7 +280,7 @@ class SingleStageStage1 extends SingleStageStep {
                 }
                 case MINE -> {
                     // 先把够得着的含水方块一次性全打掉（同时发包，不等），再统一放粘液块
-                    List<BlockPos> targets = reachableWaterlogged(mc.world);
+                    List<BlockPos> targets = reachableWaterlogged(mc.level);
                     if (!targets.isEmpty()) {
                         startChild(new SingleStageMineBatchAction(ctx, targets), Phase.PLACE);
                         return;
@@ -301,8 +301,8 @@ class SingleStageStage1 extends SingleStageStep {
                         phase = Phase.TRAVEL;
                     } else {
                         // 收尾前把「还剩什么」报出来（够不着的地方会留下来，挖到那层就冒水）
-                        List<BlockPos> leftHoles = scanGaps(mc.world);
-                        List<BlockPos> leftWater = unminedWaterlogged(mc.world);
+                        List<BlockPos> leftHoles = scanGaps(mc.level);
+                        List<BlockPos> leftWater = unminedWaterlogged(mc.level);
                         if (!leftHoles.isEmpty() || !leftWater.isEmpty()) {
                             ChatUtils.error("补粘液块收尾：还有 " + leftHoles.size() + " 个洞、"
                                 + leftWater.size() + " 个含水方块够不着（走位层上放不到 / 挖不到）");
@@ -409,9 +409,9 @@ class SingleStageStage1 extends SingleStageStep {
      *
      * @return {@code false} = 起了子动作（等它跑完再继续）
      */
-    private boolean placeHere(MinecraftClient mc, Phase next) {
+    private boolean placeHere(Minecraft mc, Phase next) {
         BlockPos here = PlayerUtils.currentBlockPos();
-        List<BlockPos> gaps = holes(here, mc.world);
+        List<BlockPos> gaps = holes(here, mc.level);
         if (gaps.isEmpty()) {
             phase = next;
             return true;
@@ -507,15 +507,15 @@ class SingleStageStage1 extends SingleStageStep {
      *
      * @return false = 剩下的洞哪个位置都放不了（这一阶段该结束了）
      */
-    private boolean pickNext(MinecraftClient mc) {
+    private boolean pickNext(Minecraft mc) {
         BlockPos here = PlayerUtils.currentBlockPos();
         if (here == null) return false;
 
-        List<BlockPos> gaps = scanGaps(mc.world);
+        List<BlockPos> gaps = scanGaps(mc.level);
         // **还没打掉的含水方块也要算**：它们只有站在够得着的地方才能打，
         // 光按「能放几个洞」挑落脚点的话，离得远的含水方块（海底的 kelp 之类）会一直没人管，
         // 留在那儿就是一条水路，挖到那层就冒水。
-        List<BlockPos> water = unminedWaterlogged(mc.world);
+        List<BlockPos> water = unminedWaterlogged(mc.level);
         if (gaps.isEmpty() && water.isEmpty()) return false;
         if (++stops > MAX_STOPS) {
             ChatUtils.error("补粘液块挪了 " + MAX_STOPS + " 次还是没弄完，先停下（还剩 "
@@ -536,7 +536,7 @@ class SingleStageStage1 extends SingleStageStep {
                     if (canMineFrom(stand, pos)) cover++;
                 }
                 if (cover == 0) continue;
-                candidates.add(new Stand(stand, cover, here.getSquaredDistance(stand)));
+                candidates.add(new Stand(stand, cover, here.distSqr(stand)));
             }
         }
 
@@ -568,10 +568,10 @@ class SingleStageStage1 extends SingleStageStep {
      *
      * @param stand {@code null} = 不看距离（全扫一遍）
      */
-    private List<BlockPos> holes(@Nullable BlockPos stand, World world) {
+    private List<BlockPos> holes(@Nullable BlockPos stand, Level level) {
         List<BlockPos> result = new ArrayList<>();
         for (BlockPos pos : wrap) {
-            if (!isHole(pos, world.getBlockState(pos))) continue;
+            if (!isHole(pos, level.getBlockState(pos))) continue;
             if (stand != null && !SingleStageCtx.canPlaceFrom(stand, pos)) continue;
             result.add(pos);
         }
@@ -589,8 +589,8 @@ class SingleStageStage1 extends SingleStageStep {
     }
 
     /** 全量目标区域里现在还有哪些洞（不看距离）。 */
-    private List<BlockPos> scanGaps(World world) {
-        return holes(null, world);
+    private List<BlockPos> scanGaps(Level level) {
+        return holes(null, level);
     }
 
     /**
@@ -605,29 +605,29 @@ class SingleStageStage1 extends SingleStageStep {
     }
 
     /** 全量目标区域里**还没打掉**的含水方块（不管够不够得着）。 */
-    private List<BlockPos> unminedWaterlogged(World world) {
+    private List<BlockPos> unminedWaterlogged(Level level) {
         List<BlockPos> result = new ArrayList<>();
         for (BlockPos pos : wrap) {
-            if (isWaterlogged(world.getBlockState(pos))) result.add(pos);
+            if (isWaterlogged(level.getBlockState(pos))) result.add(pos);
         }
         return result;
     }
 
     /** 够得着的含水方块（同样只看全量目标区域）。 */
-    private List<BlockPos> reachableWaterlogged(World world) {
+    private List<BlockPos> reachableWaterlogged(Level level) {
         List<BlockPos> result = new ArrayList<>();
         for (BlockPos pos : wrap) {
-            if (!isWaterlogged(world.getBlockState(pos))) continue;
+            if (!isWaterlogged(level.getBlockState(pos))) continue;
             if (!PlayerUtils.isWithinReach(pos)) continue;
             result.add(pos);
         }
         return result;
     }
 
-    private int countWaterlogged(World world) {
+    private int countWaterlogged(Level level) {
         int total = 0;
         for (BlockPos pos : wrap) {
-            if (isWaterlogged(world.getBlockState(pos))) total++;
+            if (isWaterlogged(level.getBlockState(pos))) total++;
         }
         return total;
     }
@@ -641,16 +641,16 @@ class SingleStageStage1 extends SingleStageStep {
      * 它们没有 waterlogged 这个状态，但一定泡在水里 —— 不挖掉的话水会顺着它们漏进区域。
      */
     static boolean isWaterlogged(BlockState state) {
-        if (state.isOf(Blocks.SEAGRASS) || state.isOf(Blocks.TALL_SEAGRASS)
-            || state.isOf(Blocks.KELP) || state.isOf(Blocks.KELP_PLANT)) {
+        if (state.is(Blocks.SEAGRASS) || state.is(Blocks.TALL_SEAGRASS)
+            || state.is(Blocks.KELP) || state.is(Blocks.KELP_PLANT)) {
             return true;
         }
-        return state.contains(Properties.WATERLOGGED) && state.get(Properties.WATERLOGGED);
+        return state.hasProperty(BlockStateProperties.WATERLOGGED) && state.getValue(BlockStateProperties.WATERLOGGED);
     }
 
     /** 这个方块是不是水 / 熔岩（目标区域里只替换这两种）。 */
     static boolean isFluid(BlockState state) {
-        return state.getBlock() instanceof FluidBlock;
+        return state.getBlock() instanceof LiquidBlock;
     }
 
     /**
@@ -661,16 +661,16 @@ class SingleStageStage1 extends SingleStageStep {
      * 只用在「边缘目标区域」（壳）上 —— 目标区域里只替换水和熔岩，见 {@link #isFluid}。
      */
     static boolean isGap(BlockState state) {
-        return state.isReplaceable();
+        return state.canBeReplaced();
     }
 
     /** 物品栏里还有多少个粘液块 / 树脂块。 */
     private int slimeCount() {
-        ClientPlayerEntity player = PlayerUtils.player();
+        LocalPlayer player = PlayerUtils.player();
         if (player == null) return 0;
         int total = 0;
-        for (int i = 0; i < player.getInventory().size(); i++) {
-            ItemStack stack = player.getInventory().getStack(i);
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = player.getInventory().getItem(i);
             if (SLIME.test(stack)) total += stack.getCount();
         }
         return total;
@@ -710,8 +710,8 @@ class SingleStageStage1 extends SingleStageStep {
         if (junk.isEmpty()) return;
 
         ChatUtils.info(phase() + "：快捷栏 6~8 被占着，先去把垃圾扔了");
-        BlockPos high = ctx.initialMin.add(6, 14, 6);
-        BlockPos drop = ctx.initialMin.add(4, 14, 4);
+        BlockPos high = ctx.initialMin.offset(6, 14, 6);
+        BlockPos drop = ctx.initialMin.offset(4, 14, 4);
 
         junkQueue.child("snap 到 6 14 6", () -> new SingleStageSnapAction(ctx, high));
         junkQueue.child("snap 到 4 14 4", () -> new SingleStageSnapAction(ctx, drop));
@@ -799,10 +799,10 @@ class SingleStageStage1 extends SingleStageStep {
 
     /** 挖这个方块该用快捷栏第几格（剑镐斧铲锄，下标 0~4）。 */
     static int toolSlotFor(BlockState state) {
-        if (state.isIn(BlockTags.PICKAXE_MINEABLE)) return SingleStageCtx.HOTBAR_PICKAXE;
-        if (state.isIn(BlockTags.AXE_MINEABLE)) return SingleStageCtx.HOTBAR_AXE;
-        if (state.isIn(BlockTags.SHOVEL_MINEABLE)) return SingleStageCtx.HOTBAR_SHOVEL;
-        if (state.isIn(BlockTags.HOE_MINEABLE)) return SingleStageCtx.HOTBAR_HOE;
+        if (state.is(BlockTags.MINEABLE_WITH_PICKAXE)) return SingleStageCtx.HOTBAR_PICKAXE;
+        if (state.is(BlockTags.MINEABLE_WITH_AXE)) return SingleStageCtx.HOTBAR_AXE;
+        if (state.is(BlockTags.MINEABLE_WITH_SHOVEL)) return SingleStageCtx.HOTBAR_SHOVEL;
+        if (state.is(BlockTags.MINEABLE_WITH_HOE)) return SingleStageCtx.HOTBAR_HOE;
         return SingleStageCtx.HOTBAR_PICKAXE;
     }
 }

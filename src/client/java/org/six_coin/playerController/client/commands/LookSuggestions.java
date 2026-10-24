@@ -3,7 +3,7 @@ package org.six_coin.playerController.client.commands;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
 import java.util.concurrent.CompletableFuture;

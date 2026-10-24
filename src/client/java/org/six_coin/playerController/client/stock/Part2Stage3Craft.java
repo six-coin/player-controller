@@ -3,15 +3,15 @@ package org.six_coin.playerController.client.stock;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.ContainerGetAction;
@@ -185,8 +185,8 @@ final class Part2Stage3Craft extends StockStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("没有玩家或世界");
             return;
         }
@@ -223,7 +223,7 @@ final class Part2Stage3Craft extends StockStep {
         // 挖盒子要用钻石镐；捡起来的盒子会落在快捷栏第二格，所以它得是空的
         pushSync("检查快捷栏", () -> {
             ItemStack tool = hotbarStack(PICKAXE_HOTBAR);
-            if (!tool.isOf(net.minecraft.item.Items.DIAMOND_PICKAXE)) {
+            if (!tool.is(net.minecraft.world.item.Items.DIAMOND_PICKAXE)) {
                 ChatUtils.error("快捷栏第一格里不是钻石镐（是 " + describe(tool) + "），挖盒子会很慢");
             }
             if (!hotbarStack(PICKUP_HOTBAR).isEmpty()) {
@@ -331,7 +331,7 @@ final class Part2Stage3Craft extends StockStep {
             if (!object.has("item") || !object.has("count")) continue;
             Item item = StockMaterials.parseItem(object.get("item").getAsString());
             if (item == null) continue;
-            String itemId = Registries.ITEM.getId(item).toString();
+            String itemId = BuiltInRegistries.ITEM.getKey(item).toString();
 
             int count = object.get("count").getAsInt();
             if (count <= 0) continue;
@@ -348,7 +348,7 @@ final class Part2Stage3Craft extends StockStep {
                     if (material == null) continue;
                     int amount = entry.getValue().getAsInt();
                     if (amount <= 0) continue;
-                    materials.merge(Registries.ITEM.getId(material).toString(), amount, Integer::sum);
+                    materials.merge(BuiltInRegistries.ITEM.getKey(material).toString(), amount, Integer::sum);
                 }
             }
 
@@ -393,7 +393,7 @@ final class Part2Stage3Craft extends StockStep {
             }
             if (!state.isAir()) {
                 fail("摆放处 #1 " + spot.coordString() + " 上有别的方块（"
-                    + Registries.BLOCK.getId(state.getBlock()) + "），先自己清掉");
+                    + BuiltInRegistries.BLOCK.getKey(state.getBlock()) + "），先自己清掉");
                 return;
             }
 
@@ -629,7 +629,7 @@ final class Part2Stage3Craft extends StockStep {
                 List<String> missing = new ArrayList<>();
                 for (Item needed : RecipePlanner.recipeMaterials(item, kind)) {
                     if (!available.contains(needed)) {
-                        missing.add(Registries.ITEM.getId(needed).toString());
+                        missing.add(BuiltInRegistries.ITEM.getKey(needed).toString());
                     }
                 }
                 fail("配方要的材料和这一步的材料对不上：缺 "
@@ -682,7 +682,7 @@ final class Part2Stage3Craft extends StockStep {
             int craftTimes = (want + perCraft - 1) / perCraft;
             Map<String, Integer> perCraftNeed = new LinkedHashMap<>();
             for (Map.Entry<Item, Integer> entry : max.materials().entrySet()) {
-                String id = Registries.ITEM.getId(entry.getKey()).toString();
+                String id = BuiltInRegistries.ITEM.getKey(entry.getKey()).toString();
                 perCraftNeed.put(id, Math.max(1, entry.getValue() / Math.max(1, max.crafts())));
             }
 
@@ -934,10 +934,10 @@ final class Part2Stage3Craft extends StockStep {
 
     /** 物品栏 27 格（不含快捷栏）里有没有东西。 */
     private static boolean hasMainInventoryItems() {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) return false;
         for (int i = 9; i < 36; i++) {
-            if (!player.getInventory().getStack(i).isEmpty()) return true;
+            if (!player.getInventory().getItem(i).isEmpty()) return true;
         }
         return false;
     }
@@ -1293,7 +1293,7 @@ final class Part2Stage3Craft extends StockStep {
             BlockState blockState = worldState(spot.pos());
             if (!blockState.isAir() && !(blockState.getBlock() instanceof ShulkerBoxBlock)) {
                 fail("摆放处 #" + placementId + " " + spot.coordString() + " 上有别的方块（"
-                    + Registries.BLOCK.getId(blockState.getBlock()) + "），先自己清掉");
+                    + BuiltInRegistries.BLOCK.getKey(blockState.getBlock()) + "），先自己清掉");
                 return;
             }
             if (!blockState.isAir()) {
@@ -1330,7 +1330,7 @@ final class Part2Stage3Craft extends StockStep {
                 boxesMined++;
             });
 
-        pushMoveTo(spot.pos().up(), "走到潜影盒上面那一格 " + spot.pos().up().toShortString());
+        pushMoveTo(spot.pos().above(), "走到潜影盒上面那一格 " + spot.pos().above().toShortString());
         pushChild("等自然下落并捡起潜影盒",
             () -> new WaitAction("捡起潜影盒", this::hasPickupBox, PICKUP_WAIT_TICKS, false),
             action -> {
@@ -1549,13 +1549,13 @@ final class Part2Stage3Craft extends StockStep {
 
     /** 物品栏 27 格里有多少个这种物品。 */
     private int inventoryCount(String itemId) {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) return 0;
         int total = 0;
         for (int i = 9; i < 36; i++) {
-            ItemStack stack = player.getInventory().getStack(i);
+            ItemStack stack = player.getInventory().getItem(i);
             if (stack.isEmpty()) continue;
-            if (!Registries.ITEM.getId(stack.getItem()).toString().equals(itemId)) continue;
+            if (!BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(itemId)) continue;
             total += stack.getCount();
         }
         return total;
@@ -1627,9 +1627,9 @@ final class Part2Stage3Craft extends StockStep {
     }
 
     private BlockState worldState(BlockPos pos) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        return mc.world == null ? net.minecraft.block.Blocks.AIR.getDefaultState()
-            : mc.world.getBlockState(pos);
+        Minecraft mc = Minecraft.getInstance();
+        return mc.level == null ? net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()
+            : mc.level.getBlockState(pos);
     }
 
     private boolean hasPickupBox() {
@@ -1637,14 +1637,14 @@ final class Part2Stage3Craft extends StockStep {
     }
 
     private ItemStack hotbarStack(int index) {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        return player == null ? ItemStack.EMPTY : player.getInventory().getStack(index);
+        LocalPlayer player = Minecraft.getInstance().player;
+        return player == null ? ItemStack.EMPTY : player.getInventory().getItem(index);
     }
 
     @Nullable
     private BlockPos currentBlock() {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        return player == null ? null : BlockPos.ofFloored(player.getEntityPos());
+        LocalPlayer player = Minecraft.getInstance().player;
+        return player == null ? null : BlockPos.containing(player.position());
     }
 
     // ------------------------------------------------------------------
@@ -1684,6 +1684,6 @@ final class Part2Stage3Craft extends StockStep {
 
     private static String describe(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "空";
-        return Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount();
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()) + " x" + stack.getCount();
     }
 }

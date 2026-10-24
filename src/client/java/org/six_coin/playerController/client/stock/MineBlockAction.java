@@ -1,16 +1,17 @@
 package org.six_coin.playerController.client.stock;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.world.item.component.SwingAnimation;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import org.six_coin.playerController.client.mixin.ClientPlayerInteractionManagerAccessor;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
@@ -49,7 +50,7 @@ public class MineBlockAction extends Action {
     private Block original;
 
     public MineBlockAction(BlockPos pos, int hotbarIndex) {
-        this.pos = pos.toImmutable();
+        this.pos = pos.immutable();
         this.hotbarIndex = hotbarIndex;
     }
 
@@ -62,18 +63,18 @@ public class MineBlockAction extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
-        if (mc.interactionManager == null) {
+        if (mc.gameMode == null) {
             fail("拿不到 interactionManager");
             return;
         }
 
-        BlockState state = mc.world.getBlockState(pos);
+        BlockState state = mc.level.getBlockState(pos);
         if (state.isAir()) {
             ChatUtils.debug(pos.toShortString() + " 本来就是空气，不用挖");
             finish();
@@ -91,41 +92,41 @@ public class MineBlockAction extends Action {
             return;
         }
 
-        ItemStack tool = player.getInventory().getStack(hotbarIndex);
+        ItemStack tool = player.getInventory().getItem(hotbarIndex);
         side = PlayerUtils.facingSide(pos);
         RotateManager.get().rotateTo(Owner.STOCK, pos);
 
         original = state.getBlock();
         ChatUtils.debug("开始挖 %s（%s，面 %s，手上 %s）",
-            pos.toShortString(), Registries.BLOCK.getId(state.getBlock()), side.asString(), describe(tool));
-        if (!mc.interactionManager.attackBlock(pos, side)) {
+            pos.toShortString(), BuiltInRegistries.BLOCK.getKey(state.getBlock()), side.getName(), describe(tool));
+        if (!mc.gameMode.startDestroyBlock(pos, side)) {
             fail("挖不动 " + pos.toShortString() + "（够不着？）");
         }
     }
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
 
-        BlockState state = mc.world.getBlockState(pos);
+        BlockState state = mc.level.getBlockState(pos);
         if (broken(state)) {
             ChatUtils.debug(pos.toShortString() + " 已经挖掉了（用了 " + mineTicks + " tick，现在是 "
-                + Registries.BLOCK.getId(state.getBlock()) + "）");
+                + BuiltInRegistries.BLOCK.getKey(state.getBlock()) + "）");
             finish();
             return;
         }
 
         if (++mineTicks > MAX_MINE_TICKS) {
             fail("挖 " + pos.toShortString() + " 超时（" + mineTicks + " tick，还是 "
-                + Registries.BLOCK.getId(state.getBlock()) + "）");
+                + BuiltInRegistries.BLOCK.getKey(state.getBlock()) + "）");
             return;
         }
 
-        mc.interactionManager.updateBlockBreakingProgress(pos, side);
+        mc.gameMode.continueDestroyBlock(pos, side);
     }
 
     @Override
@@ -133,10 +134,10 @@ public class MineBlockAction extends Action {
         HotbarManager.get().release(Owner.STOCK);
         RotateManager.get().release(Owner.STOCK);
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.interactionManager == null || mc.world == null) return;
-        if (!broken(mc.world.getBlockState(pos))) {
-            mc.interactionManager.cancelBlockBreaking();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.gameMode == null || mc.level == null) return;
+        if (!broken(mc.level.getBlockState(pos))) {
+            mc.gameMode.stopDestroyBlock();
         }
     }
 
@@ -148,7 +149,7 @@ public class MineBlockAction extends Action {
      */
     private boolean broken(BlockState state) {
         if (state.isAir()) return true;
-        return original != null && !state.isOf(original);
+        return original != null && !state.is(original);
     }
 
     /**
@@ -158,24 +159,24 @@ public class MineBlockAction extends Action {
      * （和 {@code MineManager} 里的一样）：一次把一堆方块全发出去，之后再统一按世界方块核对。
      * 用原版的 {@code sendSequencedPacket} 带 sequence 号。
      */
-    public static void breakNow(MinecraftClient mc, ClientPlayerEntity player, BlockPos pos) {
-        if (mc.world == null || mc.interactionManager == null) return;
+    public static void breakNow(Minecraft mc, LocalPlayer player, BlockPos pos) {
+        if (mc.level == null || mc.gameMode == null) return;
         Direction side = PlayerUtils.facingSide(pos);
-        ClientWorld world = mc.world;
+        ClientLevel level = mc.level;
         ClientPlayerInteractionManagerAccessor accessor =
-            (ClientPlayerInteractionManagerAccessor) mc.interactionManager;
+            (ClientPlayerInteractionManagerAccessor) mc.gameMode;
 
-        accessor.playerController$sendSequencedPacket(world, sequence ->
-            new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, side,
+        accessor.playerController$startPrediction(level, sequence ->
+            new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, pos, side,
                 sequence));
-        player.swingHand(Hand.MAIN_HAND);
-        accessor.playerController$sendSequencedPacket(world, sequence ->
-            new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, side,
+        player.swing(InteractionHand.MAIN_HAND, SwingAnimation.DEFAULT, false);
+        accessor.playerController$startPrediction(level, sequence ->
+            new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, side,
                 sequence));
     }
 
     private static String describe(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "空手";
-        return Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount();
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()) + " x" + stack.getCount();
     }
 }

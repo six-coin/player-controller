@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.MoveAction;
 import org.six_coin.playerController.client.util.PlayerUtils;
@@ -26,7 +26,7 @@ class SingleStageSnapAction extends SingleStageStep {
 
     SingleStageSnapAction(SingleStageCtx ctx, BlockPos target) {
         super(ctx);
-        this.target = target.toImmutable();
+        this.target = target.immutable();
     }
 
     @Override
@@ -36,9 +36,9 @@ class SingleStageSnapAction extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         BlockPos from = PlayerUtils.currentBlockPos();
-        if (from == null || mc.world == null) {
+        if (from == null || mc.level == null) {
             fail("拿不到玩家位置");
             return;
         }

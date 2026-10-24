@@ -1,25 +1,32 @@
 package org.six_coin.playerController.client.rotate;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.feature.MovePackets;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.util.ChatUtils;
 
 /**
  * 自动转头的调度：**所有**自动转头都经过这里。
  *
- * <p>转的方式很特别：**只给服务端发转头包，客户端自己的视角一动不动**。
+ * <p>转的方式很特别：**只让服务端以为我们在看别处，客户端自己的视角一动不动**。
  * 也就是说服务端以为我们正看着那个方块 / 那只生物，而玩家屏幕上看到的还是自己原本看的方向。
  *
- * <p>做法就是发 {@code PlayerMoveC2SPacket.LookAndOnGround}（只带 yaw / pitch，
- * 不带坐标，所以不会影响位置校验），客户端从来不调 {@code player.setYaw / setPitch}。
+ * <p><b>怎么发</b>：不自己发 {@code Rot} 包，而是把朝向<b>写进原版这一 tick 本来就要发的移动包</b>
+ * （见 {@link MovePackets#overrideRotation}）—— 需要的话原版那个 {@code Pos} 会被换成
+ * {@code PosRot}，反正一个 tick 只出去一个包。客户端从来不调 {@code player.setYaw / setPitch}。
  *
- * <p><b>角度没变就不发</b>（见 {@link #rotateTo}）：原版自己的移动包也是「视角真的变了才发」。
+ * <p>为什么不能自己发 {@code Rot}：26.3 的服务端一个 tick 只准有一个<b>带位置</b>的移动包，
+ * 而别的模组（比如 Meteor 的 Flight 防踢）会把 {@code Rot} 包<b>升级成带位置的包</b>再发出去。
+ * 一旦这一 tick 原版自己也发了一个位置包，服务端就判 {@code Invalid move player packet received}
+ * 直接断开 —— {@code /pc mine simple} 就是因为这个秒掉线的。
+ *
+ * <p><b>角度没变就不改</b>（见 {@link #rotateTo}）：原版自己的移动包也是「视角真的变了才发」。
  * 多发的移动包只能白带一遍 onGround，而别的模组（比如 anti-hunger）会把这个 onGround 改成
  * false，服务端就会以为我们悬空 —— 原版判扫击（剑气）要求服务端认为我们站在地上，
  * 所以这种多余的包还会把剑气弄没。
@@ -69,14 +76,14 @@ public final class RotateManager {
 
     /** 现在让服务端以为在看的 yaw（没生效时就是客户端真实 yaw）。 */
     public float yaw() {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        return active || player == null ? yaw : player.getYaw();
+        LocalPlayer player = Minecraft.getInstance().player;
+        return active || player == null ? yaw : player.getYRot();
     }
 
     /** 现在让服务端以为在看的 pitch。 */
     public float pitch() {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        return active || player == null ? pitch : player.getPitch();
+        LocalPlayer player = Minecraft.getInstance().player;
+        return active || player == null ? pitch : player.getXRot();
     }
 
     // ------------------------------------------------------------------
@@ -85,15 +92,15 @@ public final class RotateManager {
 
     /** 让服务端以为我们在看某个方块的中心。 */
     public boolean rotateTo(Owner requester, BlockPos pos) {
-        return rotateTo(requester, Vec3d.ofCenter(pos));
+        return rotateTo(requester, Vec3.atCenterOf(pos));
     }
 
     /** 让服务端以为我们在看空间里的某个点。 */
-    public boolean rotateTo(Owner requester, Vec3d target) {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+    public boolean rotateTo(Owner requester, Vec3 target) {
+        LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) return false;
 
-        Vec3d eye = player.getEyePos();
+        Vec3 eye = player.getEyePosition();
         double dx = target.x - eye.x;
         double dy = target.y - eye.y;
         double dz = target.z - eye.z;
@@ -118,8 +125,8 @@ public final class RotateManager {
             return false;
         }
 
-        float wrapped = MathHelper.wrapDegrees(yaw);
-        float clamped = MathHelper.clamp(pitch, -90.0F, 90.0F);
+        float wrapped = Mth.wrapDegrees(yaw);
+        float clamped = Mth.clamp(pitch, -90.0F, 90.0F);
 
         this.owner = requester;
         this.yaw = wrapped;
@@ -127,7 +134,11 @@ public final class RotateManager {
         this.active = true;
 
         if (!sent || wrapped != sentYaw || clamped != sentPitch) {
-            send(wrapped, clamped);
+            // 不额外发 Rot 包：把朝向塞进原版这一 tick 本来就要发的移动包（见 MovePackets）。
+            // 26.3 一个 tick 只准有一个带位置的包，多发的那些会被 Meteor 之类的模组
+            // 升级成带位置的包，直接把人踢下线（Invalid move player packet received）。
+            MovePackets.overrideRotation(wrapped, clamped);
+            MovePackets.forceNext();
             sentYaw = wrapped;
             sentPitch = clamped;
             sent = true;
@@ -142,10 +153,15 @@ public final class RotateManager {
      * 算速度）、用桶（服务端会拿包里带的 yaw / pitch 覆盖自己的朝向再射线）……
      * 这些操作之前重发一次，就不用管中间有没有别的东西把服务端的朝向改掉了。
      *
+     * <p>这里必须**马上**发出去（后面紧跟的 {@code use_item} / {@code drop} 包要靠它排前面），
+     * 所以走的是真包 {@code Rot}。它不带坐标，不受「一个 tick 一个位置包」的限制。
+     * 同时也把朝向记成「待写入」，万一这一包被别人改掉了，下一包还会带上。
+     *
      * @return {@code false} = 现在没有生效中的朝向（没人请求过转头）
      */
     public boolean resend() {
         if (!active) return false;
+        MovePackets.overrideRotation(yaw, pitch);
         send(yaw, pitch);
         sentYaw = yaw;
         sentPitch = pitch;
@@ -173,13 +189,18 @@ public final class RotateManager {
 
     // ------------------------------------------------------------------
 
-    /** 只发转头包：客户端视角不动。 */
+    /**
+     * 马上发一个只带朝向的包（客户端视角不动）。
+     *
+     * <p>只有 {@link #resend()} 用它：那个场景要求朝向包<b>排在后面的 use_item / drop 包前面</b>，
+     * 不能等原版下一 tick 的移动包。{@code Rot} 不带坐标，本身不违反「一个 tick 一个位置包」。
+     */
     private static void send(float yaw, float pitch) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || player.networkHandler == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || player.connection == null) return;
 
-        player.networkHandler.sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
-            yaw, pitch, player.isOnGround(), player.horizontalCollision));
+        player.connection.send(new ServerboundMovePlayerPacket.Rot(
+            yaw, pitch, player.onGround(), player.horizontalCollision));
     }
 }

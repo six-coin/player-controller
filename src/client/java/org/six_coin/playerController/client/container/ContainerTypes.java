@@ -1,13 +1,13 @@
 package org.six_coin.playerController.client.container;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.ChestBlock;
-import net.minecraft.block.enums.ChestType;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.world.World;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.state.properties.ChestType;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -26,19 +26,19 @@ public final class ContainerTypes {
         "minecraft:barrel"
     );
 
-    /** 大箱子两半的方向就按方块状态算，见 {@link #otherHalf(World, BlockPos)}。 */
+    /** 大箱子两半的方向就按方块状态算，见 {@link #otherHalf(Level, BlockPos)}。 */
 
     private ContainerTypes() {
     }
 
     /** 这个方块是不是支持的容器类型。 */
     public static boolean isSupported(Block block) {
-        return SUPPORTED.contains(Registries.BLOCK.getId(block).toString());
+        return SUPPORTED.contains(BuiltInRegistries.BLOCK.getKey(block).toString());
     }
 
     /** 方块 id 文本（缓存里存的就是这个）。 */
     public static String idOf(BlockState state) {
-        return Registries.BLOCK.getId(state.getBlock()).toString();
+        return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
     }
 
     /** 一句话描述支持的类型，给提示用。 */
@@ -59,17 +59,17 @@ public final class ContainerTypes {
      * @return 另一半的位置；这个位置不是箱子、或者箱子是单格的返回 null
      */
     @Nullable
-    public static BlockPos otherHalf(World world, BlockPos pos) {
-        BlockState state = world.getBlockState(pos);
+    public static BlockPos otherHalf(Level level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
         if (!(state.getBlock() instanceof ChestBlock)) return null;
 
-        ChestType type = state.get(ChestBlock.CHEST_TYPE);
+        ChestType type = state.getValue(ChestBlock.TYPE);
         if (type == ChestType.SINGLE) return null;
 
-        Direction facing = state.get(ChestBlock.FACING);
+        Direction facing = state.getValue(ChestBlock.FACING);
         Direction direction = type == ChestType.LEFT
-            ? facing.rotateYClockwise()
-            : facing.rotateYCounterclockwise();
-        return pos.offset(direction);
+            ? facing.getClockWise()
+            : facing.getCounterClockWise();
+        return pos.relative(direction);
     }
 }

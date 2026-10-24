@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.waypoint;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
@@ -563,11 +563,11 @@ public final class WaypointGraph {
      */
     private void linkAdjacentWaypoints(Waypoint waypoint) {
         for (Direction direction : Direction.values()) {
-            Waypoint other = at(waypoint.dimension(), waypoint.pos().offset(direction));
+            Waypoint other = at(waypoint.dimension(), waypoint.pos().relative(direction));
             if (other == null || other.id() == waypoint.id()) continue;
             if (!addWalkEdge(waypoint.dimension(), waypoint.pos(), other.pos())) continue;
             ChatUtils.debug("新路径点 #" + waypoint.id() + " 和相邻的 #" + other.id() + "（"
-                + direction.asString() + "）自动连了一条双向边");
+                + direction.getName() + "）自动连了一条双向边");
         }
     }
 

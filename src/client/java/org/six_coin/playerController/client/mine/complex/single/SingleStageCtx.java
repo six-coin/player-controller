@@ -1,9 +1,9 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.mine.MineFilter;
 import org.six_coin.playerController.client.mine.MineRegion;
@@ -123,8 +123,8 @@ public final class SingleStageCtx {
     public SingleStageCtx(String dimension, BlockPos initialMin, MineFilter filter,
                           Set<String> collectorItems, SingleStageData data) {
         this.dimension = dimension;
-        this.initialMin = initialMin.toImmutable();
-        this.targetMin = initialMin.down(16);
+        this.initialMin = initialMin.immutable();
+        this.targetMin = initialMin.below(16);
         this.filter = filter;
         this.collectorItems = Set.copyOf(collectorItems);
         this.data = data;
@@ -136,17 +136,17 @@ public final class SingleStageCtx {
 
     /** 临时站立点（6 4 6）。 */
     public BlockPos standPoint() {
-        return initialMin.add(6, 4, 6);
+        return initialMin.offset(6, 4, 6);
     }
 
     /** 单独放的那个圆石（4 5 4）。 */
     public BlockPos marker() {
-        return initialMin.add(4, 5, 4);
+        return initialMin.offset(4, 5, 4);
     }
 
     /** 倒熔岩时站的位置（6 6 6）。 */
     public BlockPos lavaStandPoint() {
-        return initialMin.add(6, 6, 6);
+        return initialMin.offset(6, 6, 6);
     }
 
     /** 倒熔岩时给服务端的 yaw（135°，朝 -x / -z 那一边）。 */
@@ -156,34 +156,34 @@ public final class SingleStageCtx {
     public static final float LAVA_PITCH = 30.0f;
 
     public BlockPos slimeSpotA() {
-        return initialMin.add(7, 3, 7);
+        return initialMin.offset(7, 3, 7);
     }
 
     public BlockPos slimeSpotB() {
-        return initialMin.add(7, 3, 8);
+        return initialMin.offset(7, 3, 8);
     }
 
     public BlockPos cobbleSpotA() {
-        return initialMin.add(8, 3, 7);
+        return initialMin.offset(8, 3, 7);
     }
 
     public BlockPos cobbleSpotB() {
-        return initialMin.add(8, 3, 8);
+        return initialMin.offset(8, 3, 8);
     }
 
     public BlockPos collectSpotA() {
-        return initialMin.add(9, 3, 7);
+        return initialMin.offset(9, 3, 7);
     }
 
     public BlockPos collectSpotB() {
-        return initialMin.add(9, 3, 8);
+        return initialMin.offset(9, 3, 8);
     }
 
     /** 4×5 的圆石平台（20 格，相对坐标 6 2 6 ~ 10 2 9）。 */
     public List<BlockPos> platform() {
         List<BlockPos> cells = new ArrayList<>(PLATFORM_XZ.length);
         for (int[] xz : PLATFORM_XZ) {
-            cells.add(initialMin.add(xz[0], 2, xz[1]));
+            cells.add(initialMin.offset(xz[0], 2, xz[1]));
         }
         return cells;
     }
@@ -196,7 +196,7 @@ public final class SingleStageCtx {
      * 站到平台正上方就全都在 4.5 格以内了。
      */
     public BlockPos platformHover() {
-        return initialMin.add(8, 4, 8);
+        return initialMin.offset(8, 4, 8);
     }
 
     /** 六个盒子的位置（顺序：黏液块 ×2、圆石 ×2、收集 ×2）。 */
@@ -214,7 +214,7 @@ public final class SingleStageCtx {
      */
     public MineRegion platformRegion() {
         return MineRegion.of(dimension,
-            initialMin.add(4, 2, 4), initialMin.add(10, 5, 9), MineFilter.ALL);
+            initialMin.offset(4, 2, 4), initialMin.offset(10, 5, 9), MineFilter.ALL);
     }
 
     /** 这个坐标是不是我们放的某个盒子。 */
@@ -279,9 +279,9 @@ public final class SingleStageCtx {
      * <p><b>某一面旁边那个子区块整块都是空气的话，这一面的墙就不建</b>
      * （见 {@link #subChunkEmpty}）：那边本来就是空的，挡了也没用，纯浪费粘液块。
      *
-     * @param world 拿不到世界（{@code null}）就按「四面都要建」算
+     * @param level 拿不到世界（{@code null}）就按「四面都要建」算
      */
-    public List<BlockPos> shellCells(int iteration, @Nullable World world) {
+    public List<BlockPos> shellCells(int iteration, @Nullable Level level) {
         List<BlockPos> cells = new ArrayList<>();
         int minX = targetMin.getX();
         int minZ = targetMin.getZ();
@@ -289,10 +289,10 @@ public final class SingleStageCtx {
         int top = regionTop(iteration);
         int subY = targetMin.getY();
 
-        boolean west = !skipWall(world, minX - 16, subY, minZ);
-        boolean east = !skipWall(world, minX + 16, subY, minZ);
-        boolean north = !skipWall(world, minX, subY, minZ - 16);
-        boolean south = !skipWall(world, minX, subY, minZ + 16);
+        boolean west = !skipWall(level, minX - 16, subY, minZ);
+        boolean east = !skipWall(level, minX + 16, subY, minZ);
+        boolean north = !skipWall(level, minX, subY, minZ - 16);
+        boolean south = !skipWall(level, minX, subY, minZ + 16);
 
         for (int y = bottom; y <= top; y++) {
             for (int i = 0; i < 16; i++) {
@@ -311,18 +311,18 @@ public final class SingleStageCtx {
     }
 
     /** 这一面旁边那个子区块是不是整块空气（是就不用建这面墙）。 */
-    private static boolean skipWall(@Nullable World world, int x, int y, int z) {
-        return world != null && subChunkEmpty(world, new BlockPos(x, y, z));
+    private static boolean skipWall(@Nullable Level level, int x, int y, int z) {
+        return level != null && subChunkEmpty(level, new BlockPos(x, y, z));
     }
 
     /** 这个 16×16×16 的子区块是不是全是空气。 */
-    public static boolean subChunkEmpty(World world, BlockPos min) {
-        BlockPos.Mutable pos = new BlockPos.Mutable();
+    public static boolean subChunkEmpty(Level level, BlockPos min) {
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int x = 0; x < 16; x++) {
             for (int y = 0; y < 16; y++) {
                 for (int z = 0; z < 16; z++) {
                     pos.set(min.getX() + x, min.getY() + y, min.getZ() + z);
-                    if (!world.getBlockState(pos).isAir()) return false;
+                    if (!level.getBlockState(pos).isAir()) return false;
                 }
             }
         }
@@ -330,9 +330,9 @@ public final class SingleStageCtx {
     }
 
     /** 全量目标区域 = 目标区域 + 那一圈壳。 */
-    public List<BlockPos> wrapCells(int iteration, @Nullable World world) {
+    public List<BlockPos> wrapCells(int iteration, @Nullable Level level) {
         List<BlockPos> cells = new ArrayList<>(regionCells(iteration));
-        cells.addAll(shellCells(iteration, world));
+        cells.addAll(shellCells(iteration, level));
         return cells;
     }
 
@@ -384,15 +384,15 @@ public final class SingleStageCtx {
 
     /** 重新拍一张物品栏快照（每次要判断之前调）。 */
     public void refresh() {
-        ClientPlayerEntity player = PlayerUtils.player();
+        LocalPlayer player = PlayerUtils.player();
         if (player != null) data.refreshInventory(player.getInventory());
     }
 
     /** 物品栏里这一格（实时读，不走快照）。 */
     public ItemStack live(int index) {
-        ClientPlayerEntity player = PlayerUtils.player();
+        LocalPlayer player = PlayerUtils.player();
         if (player == null) return ItemStack.EMPTY;
-        return player.getInventory().getStack(index);
+        return player.getInventory().getItem(index);
     }
 
     /**

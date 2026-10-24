@@ -1,6 +1,6 @@
 package org.six_coin.playerController.client.container;
 
-import net.minecraft.screen.slot.Slot;
+import net.minecraft.world.inventory.Slot;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
 import java.util.ArrayList;
@@ -96,12 +96,12 @@ public final class ContainerStash {
         // 一 tick 最多点这么多下（点完下一 tick 再核对）
         int budget = ContainerClicks.MAX_CLICKS_PER_TICK;
         for (Slot slot : candidates) {
-            if (slot.getStack().isEmpty()) continue;
+            if (slot.getItem().isEmpty()) continue;
             anything = true;
-            if (tried.contains(slot.id) || batch.size() >= budget) continue;
+            if (tried.contains(slot.index) || batch.size() >= budget) continue;
 
             batch.add(slot);
-            batchBefore.add(slot.getStack().getCount());
+            batchBefore.add(slot.getItem().getCount());
             if (!ContainerClicks.quickMoveQuiet(session.handler(), slot)) rejected = true;
             clicks++;
         }
@@ -121,12 +121,12 @@ public final class ContainerStash {
 
         for (int i = 0; i < clicked; i++) {
             Slot slot = batch.get(i);
-            if (slot.getStack().getCount() < batchBefore.get(i)) {
+            if (slot.getItem().getCount() < batchBefore.get(i)) {
                 moved++;
-                tried.remove(slot.id);
-                if (slot.getStack().isEmpty()) emptied++;
+                tried.remove(slot.index);
+                if (slot.getItem().isEmpty()) emptied++;
             } else {
-                tried.add(slot.id);
+                tried.add(slot.index);
             }
         }
 

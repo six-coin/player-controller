@@ -6,23 +6,23 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.block.BarrelBlock;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.ChestBlock;
-import net.minecraft.block.CraftingTableBlock;
-import net.minecraft.block.StonecutterBlock;
-import net.minecraft.block.enums.ChestType;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.text.ClickEvent;
-import net.minecraft.text.HoverEvent;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Style;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.level.block.BarrelBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.CraftingTableBlock;
+import net.minecraft.world.level.block.StonecutterBlock;
+import net.minecraft.world.level.block.state.properties.ChestType;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.Container;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.Component;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.stock.station.StationCheckAction;
 import org.six_coin.playerController.client.container.ContainerTypes;
@@ -68,11 +68,11 @@ public final class StationCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        LiteralArgumentBuilder<FabricClientCommandSource> builder = ClientCommandManager.literal("station")
+        LiteralArgumentBuilder<FabricClientCommandSource> builder = ClientCommands.literal("station")
             .executes(StationCommand::status)
-            .then(ClientCommandManager.literal("show").executes(StationCommand::toggleShow))
-            .then(ClientCommandManager.literal("list").executes(StationCommand::list))
-            .then(ClientCommandManager.literal("check").executes(StationCommand::check));
+            .then(ClientCommands.literal("show").executes(StationCommand::toggleShow))
+            .then(ClientCommands.literal("list").executes(StationCommand::list))
+            .then(ClientCommands.literal("check").executes(StationCommand::check));
 
         for (StationPart part : StationPart.values()) {
             builder.then(part.isList() ? listPart(part) : singlePart(part));
@@ -88,21 +88,21 @@ public final class StationCommand {
         FabricClientCommandSource source = context.getSource();
         StationManager manager = StationManager.get();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7工作站（world_" + manager.loadedWorld()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7工作站（world_" + manager.loadedWorld()
             + "，当前维度 " + DimensionUtils.display(DimensionUtils.current()) + "）："
             + manager.totalCount() + " 个坐标，高亮 " + (manager.isShowing() ? "§a开" : "§c关")));
         for (StationPart part : StationPart.values()) {
             int count = manager.positions(part).size();
-            source.sendFeedback(Text.literal("  " + part.display() + "：" + count + " 个"
+            source.sendFeedback(Component.literal("  " + part.display() + "：" + count + " 个"
                 + (count == 0 ? "§c（无）" : "")));
         }
-        source.sendFeedback(Text.literal("  文件: " + manager.currentFile()));
+        source.sendFeedback(Component.literal("  文件: " + manager.currentFile()));
         return 1;
     }
 
     private static int toggleShow(CommandContext<FabricClientCommandSource> context) {
         boolean showing = StationManager.get().toggleShow();
-        context.getSource().sendFeedback(Text.literal("工作站高亮已"
+        context.getSource().sendFeedback(Component.literal("工作站高亮已"
             + (showing ? "§a开启" : "§c关闭") + "§r（各部分的颜色见 /pc stock station list 的行首标签）"));
         return 1;
     }
@@ -111,29 +111,29 @@ public final class StationCommand {
         FabricClientCommandSource source = context.getSource();
         StationManager manager = StationManager.get();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7工作站（world_" + manager.loadedWorld()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7工作站（world_" + manager.loadedWorld()
             + "，共 " + manager.totalCount() + " 个坐标）："));
 
         // 单点部分在前面
         for (StationPart part : StationPart.values()) {
             if (part.isList()) continue;
             StationPos pos = manager.single(part);
-            MutableText line = Text.literal(" ").append(colorTag(part)).append(Text.literal(" "));
-            line.append(pos == null ? Text.literal("§c未设置") : line(part, pos));
+            MutableComponent line = Component.literal(" ").append(colorTag(part)).append(Component.literal(" "));
+            line.append(pos == null ? Component.literal("§c未设置") : line(part, pos));
             source.sendFeedback(line);
         }
 
         for (StationPart part : StationPart.values()) {
             if (!part.isList()) continue;
             List<StationPos> positions = manager.list(part);
-            source.sendFeedback(Text.literal(" ").append(colorTag(part))
-                .append(Text.literal("（" + positions.size() + " 个）：")));
+            source.sendFeedback(Component.literal(" ").append(colorTag(part))
+                .append(Component.literal("（" + positions.size() + " 个）：")));
             if (positions.isEmpty()) {
-                source.sendFeedback(Text.literal("    §8（空）"));
+                source.sendFeedback(Component.literal("    §8（空）"));
                 continue;
             }
             for (StationPos pos : positions) {
-                source.sendFeedback(Text.literal("  ").append(line(part, pos)));
+                source.sendFeedback(Component.literal("  ").append(line(part, pos)));
             }
         }
         return 1;
@@ -143,61 +143,61 @@ public final class StationCommand {
         FabricClientCommandSource source = context.getSource();
         List<StationPos> positions = StationManager.get().list(part);
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7" + part.display() + "（" + positions.size() + " 个）："));
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7" + part.display() + "（" + positions.size() + " 个）："));
         if (positions.isEmpty()) {
-            source.sendFeedback(Text.literal("  §8（空）"));
+            source.sendFeedback(Component.literal("  §8（空）"));
             return 1;
         }
         for (StationPos pos : positions) {
-            source.sendFeedback(Text.literal("  ").append(line(part, pos)));
+            source.sendFeedback(Component.literal("  ").append(line(part, pos)));
         }
         return 1;
     }
 
     /** 一行的显示：{@code #id [主] [x y z]} + （列表才有）删除按钮。 */
-    private static Text line(StationPart part, StationPos stationPos) {
-        MutableText text = Text.literal("#" + stationPos.id() + " ").formatted(Formatting.DARK_GRAY);
+    private static Component line(StationPart part, StationPos stationPos) {
+        MutableComponent text = Component.literal("#" + stationPos.id() + " ").withStyle(ChatFormatting.DARK_GRAY);
         text.append(dimensionTag(stationPos.dimension()));
-        text.append(Text.literal(" "));
-        text.append(Text.literal("[" + stationPos.coordString() + "]")
+        text.append(Component.literal(" "));
+        text.append(Component.literal("[" + stationPos.coordString() + "]")
             .setStyle(Style.EMPTY
-                .withColor(Formatting.AQUA)
+                .withColor(ChatFormatting.AQUA)
                 .withClickEvent(new ClickEvent.CopyToClipboard(stationPos.coordString()))
-                .withHoverEvent(new HoverEvent.ShowText(Text.literal(
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal(
                     "点击复制坐标（" + stationPos.describe() + "）")))));
 
         if (part.isList()) {
-            text.append(Text.literal(" "));
-            text.append(Text.literal("[删除]").setStyle(Style.EMPTY
-                .withColor(Formatting.YELLOW)
+            text.append(Component.literal(" "));
+            text.append(Component.literal("[删除]").setStyle(Style.EMPTY
+                .withColor(ChatFormatting.YELLOW)
                 .withClickEvent(new ClickEvent.SuggestCommand(ROOT + part.id() + " del "
                     + stationPos.coordString() + " " + stationPos.dimension()))
-                .withHoverEvent(new HoverEvent.ShowText(Text.literal(
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal(
                     "点击把删除命令填到聊天栏：" + ROOT + part.id() + " del "
                         + stationPos.coordString() + " " + stationPos.dimension())))));
         }
         return text;
     }
 
-    private static MutableText colorTag(StationPart part) {
-        return Text.literal("[" + part.display() + "]")
+    private static MutableComponent colorTag(StationPart part) {
+        return Component.literal("[" + part.display() + "]")
             .setStyle(Style.EMPTY.withColor(part.color() & 0xFFFFFF));
     }
 
-    private static MutableText dimensionTag(String dimension) {
+    private static MutableComponent dimensionTag(String dimension) {
         String shortName = switch (dimension) {
             case DimensionUtils.NETHER -> "下";
             case DimensionUtils.END -> "末";
             case DimensionUtils.OVERWORLD -> "主";
             default -> dimension;
         };
-        Formatting color = switch (dimension) {
-            case DimensionUtils.NETHER -> Formatting.RED;
-            case DimensionUtils.END -> Formatting.LIGHT_PURPLE;
-            case DimensionUtils.OVERWORLD -> Formatting.GREEN;
-            default -> Formatting.GRAY;
+        ChatFormatting color = switch (dimension) {
+            case DimensionUtils.NETHER -> ChatFormatting.RED;
+            case DimensionUtils.END -> ChatFormatting.LIGHT_PURPLE;
+            case DimensionUtils.OVERWORLD -> ChatFormatting.GREEN;
+            default -> ChatFormatting.GRAY;
         };
-        return Text.literal("[" + shortName + "]").formatted(color);
+        return Component.literal("[" + shortName + "]").withStyle(color);
     }
 
     // ------------------------------------------------------------------
@@ -205,17 +205,17 @@ public final class StationCommand {
     // ------------------------------------------------------------------
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> singlePart(StationPart part) {
-        LiteralArgumentBuilder<FabricClientCommandSource> builder = ClientCommandManager.literal(part.id());
+        LiteralArgumentBuilder<FabricClientCommandSource> builder = ClientCommands.literal(part.id());
 
         if (part == StationPart.STAND_POINT) {
-            builder.then(ClientCommandManager.literal("set_here")
+            builder.then(ClientCommands.literal("set_here")
                 .executes(context -> setHere(context, part)));
         } else {
-            builder.then(ClientCommandManager.literal("set_target")
+            builder.then(ClientCommands.literal("set_target")
                 .executes(context -> setTarget(context, part)));
         }
 
-        builder.then(ClientCommandManager.literal("set")
+        builder.then(ClientCommands.literal("set")
             .then(coords(context -> setCoords(context, part))));
         return builder;
     }
@@ -223,13 +223,13 @@ public final class StationCommand {
     private static int setHere(CommandContext<FabricClientCommandSource> context, StationPart part) {
         FabricClientCommandSource source = context.getSource();
         if (source.getPlayer() == null) {
-            source.sendError(Text.literal("没有玩家"));
+            source.sendError(Component.literal("没有玩家"));
             return 0;
         }
 
         BlockPos here = PlayerUtils.currentBlockPos();
         if (here == null) {
-            source.sendError(Text.literal("拿不到玩家位置"));
+            source.sendError(Component.literal("拿不到玩家位置"));
             return 0;
         }
         String dimension = DimensionUtils.current();
@@ -247,18 +247,18 @@ public final class StationCommand {
         }
 
         if (!otherDimension.isEmpty()) {
-            source.sendError(Text.literal("有 " + otherDimension.size() + " 个工作站方块不在"
+            source.sendError(Component.literal("有 " + otherDimension.size() + " 个工作站方块不在"
                 + DimensionUtils.display(dimension) + "："));
             for (StationPos pos : otherDimension) {
-                source.sendError(Text.literal("  · " + pos.describe()));
+                source.sendError(Component.literal("  · " + pos.describe()));
             }
             return 0;
         }
         if (!tooFar.isEmpty()) {
-            source.sendError(Text.literal("有 " + tooFar.size() + " 个工作站方块不在这个位置的触及范围内"
+            source.sendError(Component.literal("有 " + tooFar.size() + " 个工作站方块不在这个位置的触及范围内"
                 + "（触及距离 " + format(PlayerUtils.reach()) + "）："));
             for (StationPos pos : tooFar) {
-                source.sendError(Text.literal("  · " + pos.coordString() + "  距离 "
+                source.sendError(Component.literal("  · " + pos.coordString() + "  距离 "
                     + format(PlayerUtils.eyeDistanceFrom(here, pos.pos()))));
             }
             return 0;
@@ -266,7 +266,7 @@ public final class StationCommand {
 
         boolean wasSet = StationManager.get().single(part) != null;
         StationManager.get().setSingle(part, dimension, here);
-        source.sendFeedback(Text.literal((wasSet ? "已更新 " : "已设置 ") + part.display()
+        source.sendFeedback(Component.literal((wasSet ? "已更新 " : "已设置 ") + part.display()
             + " = " + DimensionUtils.display(dimension) + " " + here.toShortString()
             + "（其它工作站坐标都够得着）"));
         return 1;
@@ -277,7 +277,7 @@ public final class StationCommand {
 
         BlockPos pos = PlayerUtils.lookedAtBlock();
         if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
+            source.sendError(Component.literal("你没有看向任何方块"));
             return 0;
         }
         return set(context.getSource(), part, pos);
@@ -292,7 +292,7 @@ public final class StationCommand {
         if (!withinStandReach(source, dimension, pos)) return 0;
 
         StationManager.get().setSingle(part, dimension, pos);
-        source.sendFeedback(Text.literal("已设置 " + part.display() + " = "
+        source.sendFeedback(Component.literal("已设置 " + part.display() + " = "
             + DimensionUtils.display(dimension) + " " + pos.toShortString()));
         hintBlockType(source, part, pos);
         return 1;
@@ -303,16 +303,16 @@ public final class StationCommand {
     // ------------------------------------------------------------------
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> listPart(StationPart part) {
-        return ClientCommandManager.literal(part.id())
-            .then(ClientCommandManager.literal("add_target")
+        return ClientCommands.literal(part.id())
+            .then(ClientCommands.literal("add_target")
                 .executes(context -> addTarget(context, part)))
-            .then(ClientCommandManager.literal("add")
+            .then(ClientCommands.literal("add")
                 .then(coords(context -> addCoords(context, part))))
-            .then(ClientCommandManager.literal("del_target")
+            .then(ClientCommands.literal("del_target")
                 .executes(context -> delTarget(context, part)))
-            .then(ClientCommandManager.literal("del")
+            .then(ClientCommands.literal("del")
                 .then(dimCoords(context -> delCoords(context, part))))
-            .then(ClientCommandManager.literal("list")
+            .then(ClientCommands.literal("list")
                 .executes(context -> listPart(context, part)));
     }
 
@@ -321,7 +321,7 @@ public final class StationCommand {
 
         BlockPos pos = PlayerUtils.lookedAtBlock();
         if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
+            source.sendError(Component.literal("你没有看向任何方块"));
             return 0;
         }
         return add(context, part, DimensionUtils.current(), pos);
@@ -337,12 +337,12 @@ public final class StationCommand {
         if (!withinStandReach(source, dimension, pos)) return 0;
 
         if (!StationManager.get().add(part, dimension, pos)) {
-            source.sendFeedback(Text.literal(part.display() + " 里已经有 "
+            source.sendFeedback(Component.literal(part.display() + " 里已经有 "
                 + DimensionUtils.display(dimension) + " " + pos.toShortString() + " 了"));
             return 1;
         }
 
-        source.sendFeedback(Text.literal("已加入 " + part.display() + " "
+        source.sendFeedback(Component.literal("已加入 " + part.display() + " "
             + DimensionUtils.display(dimension) + " " + pos.toShortString()
             + "（现在 " + StationManager.get().list(part).size() + " 个）"));
         hintBlockType(source, part, pos);
@@ -354,7 +354,7 @@ public final class StationCommand {
 
         BlockPos pos = PlayerUtils.lookedAtBlock();
         if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
+            source.sendError(Component.literal("你没有看向任何方块"));
             return 0;
         }
         return remove(context, part, DimensionUtils.current(), pos);
@@ -369,11 +369,11 @@ public final class StationCommand {
         FabricClientCommandSource source = context.getSource();
 
         if (!StationManager.get().remove(part, dimension, pos)) {
-            source.sendFeedback(Text.literal(part.display() + " 里没有 "
+            source.sendFeedback(Component.literal(part.display() + " 里没有 "
                 + DimensionUtils.display(dimension) + " " + pos.toShortString()));
             return 1;
         }
-        source.sendFeedback(Text.literal("已从 " + part.display() + " 删掉 "
+        source.sendFeedback(Component.literal("已从 " + part.display() + " 删掉 "
             + DimensionUtils.display(dimension) + " " + pos.toShortString()
             + "（现在 " + StationManager.get().list(part).size() + " 个）"));
         return 1;
@@ -385,24 +385,24 @@ public final class StationCommand {
 
     private static int check(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
-            source.sendError(Text.literal("没有玩家或世界"));
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
             return 0;
         }
 
         // 不开箱子就能查的那部分（/pc stock task start_collect 用的是同一套）
         StationPrecheck.Result result = StationPrecheck.run(mc);
-        for (String hint : result.hints()) source.sendFeedback(Text.literal("§e提示：" + hint));
+        for (String hint : result.hints()) source.sendFeedback(Component.literal("§e提示：" + hint));
 
         if (!result.ok()) {
-            source.sendError(Text.literal("工作站检查没通过（" + result.problems().size() + " 条）："));
-            for (String problem : result.problems()) source.sendError(Text.literal("  · " + problem));
+            source.sendError(Component.literal("工作站检查没通过（" + result.problems().size() + " 条）："));
+            for (String problem : result.problems()) source.sendError(Component.literal("  · " + problem));
             return 0;
         }
 
         ActionManager.get().submit(new StationCheckAction());
-        source.sendFeedback(Text.literal("方块都对了，开始逐个打开容器数内容"
+        source.sendFeedback(Component.literal("方块都对了，开始逐个打开容器数内容"
             + "（物品暂存处、空潜影盒提供处、存储区、产物区，以及摆放处上已经放着的潜影盒；"
             + "不显示界面，要几秒）"));
         return 1;
@@ -420,11 +420,11 @@ public final class StationCommand {
      */
     private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> coords(
             Command<FabricClientCommandSource> command) {
-        return ClientCommandManager.argument("x", IntegerArgumentType.integer())
+        return ClientCommands.argument("x", IntegerArgumentType.integer())
             .suggests(LookSuggestions::x)
-            .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+            .then(ClientCommands.argument("y", IntegerArgumentType.integer())
                 .suggests(LookSuggestions::y)
-                .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                .then(ClientCommands.argument("z", IntegerArgumentType.integer())
                     .suggests(LookSuggestions::z)
                     .executes(command)));
     }
@@ -432,14 +432,14 @@ public final class StationCommand {
     /** del 用的 x y z：z 上挂「不带 dim」的版本，可选的 [dim] 上挂同一个命令。 */
     private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> dimCoords(
             Command<FabricClientCommandSource> command) {
-        return ClientCommandManager.argument("x", IntegerArgumentType.integer())
+        return ClientCommands.argument("x", IntegerArgumentType.integer())
             .suggests(LookSuggestions::x)
-            .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+            .then(ClientCommands.argument("y", IntegerArgumentType.integer())
                 .suggests(LookSuggestions::y)
-                .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                .then(ClientCommands.argument("z", IntegerArgumentType.integer())
                     .suggests(LookSuggestions::z)
                     .executes(command)
-                    .then(ClientCommandManager.argument("dim", StringArgumentType.greedyString())
+                    .then(ClientCommands.argument("dim", StringArgumentType.greedyString())
                         .suggests(DimensionSuggestions::suggest)
                         .executes(command))));
     }
@@ -467,13 +467,13 @@ public final class StationCommand {
         if (stand == null) return true;
 
         if (!stand.dimension().equals(dimension)) {
-            source.sendError(Text.literal(DimensionUtils.display(dimension) + " " + pos.toShortString()
+            source.sendError(Component.literal(DimensionUtils.display(dimension) + " " + pos.toShortString()
                 + " 和站立点（" + stand.describe() + "）不在一个维度，"
                 + "工作站的所有方块都要在站立点的触及范围内"));
             return false;
         }
         if (!PlayerUtils.isWithinReachFrom(stand.pos(), pos)) {
-            source.sendError(Text.literal(pos.toShortString() + " 离站立点 " + stand.coordString()
+            source.sendError(Component.literal(pos.toShortString() + " 离站立点 " + stand.coordString()
                 + " 太远（距离 " + format(PlayerUtils.eyeDistanceFrom(stand.pos(), pos))
                 + " > " + format(PlayerUtils.reach()) + "），工作站的所有方块都要在站立点的触及范围内"));
             return false;
@@ -483,10 +483,10 @@ public final class StationCommand {
 
     /** 设置的时候顺便提醒方块类型对不对（真正的硬性检查在 check 里）。 */
     private static void hintBlockType(FabricClientCommandSource source, StationPart part, BlockPos pos) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
 
-        BlockState state = mc.world.getBlockState(pos);
+        BlockState state = mc.level.getBlockState(pos);
         String expected = null;
 
         if (part == StationPart.CRAFTING_TABLE && !(state.getBlock() instanceof CraftingTableBlock)) {
@@ -496,7 +496,7 @@ public final class StationCommand {
         } else if (part == StationPart.ITEM_TEMP) {
             if (!(state.getBlock() instanceof ChestBlock)) {
                 expected = "大箱子";
-            } else if (state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) {
+            } else if (state.getValue(ChestBlock.TYPE) == ChestType.SINGLE) {
                 expected = "大箱子（两个连在一起的箱子）";
             }
         } else if (part == StationPart.SHULKER_BOX_PROVIDER && !(state.getBlock() instanceof BarrelBlock)) {
@@ -504,12 +504,12 @@ public final class StationCommand {
         } else if (part == StationPart.SHULKER_BOX_PLACEMENT && !state.isAir()) {
             expected = "空气";
         } else if ((part == StationPart.ITEM_STORAGE || part == StationPart.ITEM_FINAL)
-            && !(mc.world.getBlockEntity(pos) instanceof Inventory)) {
+            && !(mc.level.getBlockEntity(pos) instanceof Container)) {
             expected = "容器";
         }
 
         if (expected != null) {
-            source.sendFeedback(Text.literal("§e提示：这里现在是 " + ContainerTypes.idOf(state)
+            source.sendFeedback(Component.literal("§e提示：这里现在是 " + ContainerTypes.idOf(state)
                 + "，check 会要求是" + expected));
         }
     }

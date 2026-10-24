@@ -1,8 +1,8 @@
 package org.six_coin.playerController.client.action;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.CachedContainer;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
@@ -19,7 +19,7 @@ import java.util.TreeMap;
  * 把（一批）容器加进容器缓存：逐个打开、数里面的东西、写进缓存。
  *
  * <p>流程：看向方块 → 右键打开 → 等槽位同步 → 用
- * {@link ContainerCacheManager#snapshot(net.minecraft.screen.ScreenHandler)} 数一遍容器格子 →
+ * {@link ContainerCacheManager#snapshot(net.minecraft.world.inventory.AbstractContainerMenu)} 数一遍容器格子 →
  * 写入缓存 → 关界面 → 下一个。
  *
  * <p>单个添加（{@code add_position} / {@code add_target}）时 {@code verbose = true}，每个容器都报一行；
@@ -77,8 +77,8 @@ public class ContainerCacheAddAction extends Action {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null || session == null) {
             fail("玩家不存在");
             return;
@@ -128,7 +128,7 @@ public class ContainerCacheAddAction extends Action {
 
     @Override
     protected void onEnd() {
-        if (session != null) session.close(MinecraftClient.getInstance());
+        if (session != null) session.close(Minecraft.getInstance());
 
         if (verbose) {
             output().info("容器缓存：新加 " + added + " 个，更新 " + updated + " 个"
@@ -148,9 +148,9 @@ public class ContainerCacheAddAction extends Action {
     // ------------------------------------------------------------------
 
     private void openNext() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -159,7 +159,7 @@ public class ContainerCacheAddAction extends Action {
         session = new ContainerSession(pos);
 
         ChatUtils.debug("第 " + (index + 1) + "/" + positions.size() + " 个："
-            + pos.toShortString() + "（" + ContainerTypes.idOf(mc.world.getBlockState(pos)) + "）");
+            + pos.toShortString() + "（" + ContainerTypes.idOf(mc.level.getBlockState(pos)) + "）");
         session.open(mc, player);
     }
 
@@ -173,10 +173,10 @@ public class ContainerCacheAddAction extends Action {
     }
 
     /** 数一遍当前界面里容器格子的东西，写进缓存。 */
-    private void record(MinecraftClient mc, BlockPos pos) {
+    private void record(Minecraft mc, BlockPos pos) {
         ContainerCacheManager cache = ContainerCacheManager.get();
         String dimension = DimensionUtils.current();
-        String type = ContainerTypes.idOf(mc.world.getBlockState(pos));
+        String type = ContainerTypes.idOf(mc.level.getBlockState(pos));
         Map<String, Integer> items = ContainerCacheManager.snapshot(session.handler());
 
         CachedContainer existing = cache.at(dimension, pos);

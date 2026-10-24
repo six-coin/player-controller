@@ -1,9 +1,9 @@
 package org.six_coin.playerController.client.util;
 
-import net.minecraft.block.Blocks;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -26,13 +26,13 @@ public final class PortalUtils {
     }
 
     public static boolean isEndPortal(BlockPos pos) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        return mc.world != null && mc.world.getBlockState(pos).isOf(Blocks.END_PORTAL);
+        Minecraft mc = Minecraft.getInstance();
+        return mc.level != null && mc.level.getBlockState(pos).is(Blocks.END_PORTAL);
     }
 
     public static boolean isNetherPortal(BlockPos pos) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        return mc.world != null && mc.world.getBlockState(pos).isOf(Blocks.NETHER_PORTAL);
+        Minecraft mc = Minecraft.getInstance();
+        return mc.level != null && mc.level.getBlockState(pos).is(Blocks.NETHER_PORTAL);
     }
 
     /**
@@ -43,10 +43,10 @@ public final class PortalUtils {
      * 正好站进传送门的那一刻。
      */
     public static boolean isNetherPortalOnObsidian(BlockPos pos) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return false;
-        if (!mc.world.getBlockState(pos).isOf(Blocks.NETHER_PORTAL)) return false;
-        return mc.world.getBlockState(pos.down()).isOf(Blocks.OBSIDIAN);
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return false;
+        if (!mc.level.getBlockState(pos).is(Blocks.NETHER_PORTAL)) return false;
+        return mc.level.getBlockState(pos.below()).is(Blocks.OBSIDIAN);
     }
 
     /**
@@ -68,15 +68,15 @@ public final class PortalUtils {
     @Nullable
     public static BlockPos endPortalFor(BlockPos pos) {
         if (isEndPortal(pos)) return pos;
-        BlockPos below = pos.down();
+        BlockPos below = pos.below();
         if (isEndPortal(below)) return below;
         return null;
     }
 
     /** 出错信息里用：这个位置实际是什么方块。 */
     public static String blockId(BlockPos pos) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return "?";
-        return Registries.BLOCK.getId(mc.world.getBlockState(pos).getBlock()).toString();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return "?";
+        return BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(pos).getBlock()).toString();
     }
 }

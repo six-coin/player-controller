@@ -1,10 +1,10 @@
 package org.six_coin.playerController.client.action;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -112,7 +112,7 @@ public class PathMoveAction extends Action {
 
     @Override
     protected void onStart() {
-        ClientPlayerEntity player = PlayerUtils.player();
+        LocalPlayer player = PlayerUtils.player();
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -128,7 +128,7 @@ public class PathMoveAction extends Action {
                 + "，但路径起点在 " + DimensionUtils.display(start.dimension()));
             return;
         }
-        BlockPos current = BlockPos.ofFloored(player.getEntityPos());
+        BlockPos current = BlockPos.containing(player.position());
         if (!current.equals(start.pos())) {
             fail("当前位置 " + current.toShortString() + " 和路径起点 "
                 + start.pos().toShortString() + " 不一致");
@@ -222,7 +222,7 @@ public class PathMoveAction extends Action {
         if (index >= steps.size()) {
             if (!finishedAll) {
                 finishedAll = true;
-                ClientPlayerEntity player = PlayerUtils.player();
+                LocalPlayer player = PlayerUtils.player();
                 if (player != null) {
                     snapIfNeeded(player, path.get(path.size() - 1).pos());
                 }
@@ -255,7 +255,7 @@ public class PathMoveAction extends Action {
             return;
         }
 
-        ClientPlayerEntity player = PlayerUtils.player();
+        LocalPlayer player = PlayerUtils.player();
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -291,7 +291,7 @@ public class PathMoveAction extends Action {
     // ------------------------------------------------------------------
 
     private void tickPortal(Step step) {
-        ClientPlayerEntity player = PlayerUtils.player();
+        LocalPlayer player = PlayerUtils.player();
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -309,7 +309,7 @@ public class PathMoveAction extends Action {
             boolean nether = step.kind() == StepKind.NETHER_PORTAL;
 
             // 传送可能在上一步结束时就已经触发了（踩进传送门方块会被立刻传走），
-            // 这时候 mc.world 已经是目标维度了，再去源维度找传送门方块肯定找不到。
+            // 这时候 mc.level 已经是目标维度了，再去源维度找传送门方块肯定找不到。
             if (!DimensionUtils.current().equals(fromDimension)) {
                 ChatUtils.debug("进入传送门步骤时已经在 "
                     + DimensionUtils.display(DimensionUtils.current())
@@ -330,7 +330,7 @@ public class PathMoveAction extends Action {
                 recover("传送门点 " + DimensionUtils.display(fromDimension) + " " + source.toShortString()
                     + (nether ? " 不是下界传送门方块" : " 及其下方都不是末地传送门方块")
                     + "（该处是 " + PortalUtils.blockId(source)
-                    + "，下方是 " + PortalUtils.blockId(source.down()) + "）");
+                    + "，下方是 " + PortalUtils.blockId(source.below()) + "）");
                 return;
             }
 
@@ -347,7 +347,7 @@ public class PathMoveAction extends Action {
 
         // 阶段二：悬停在传送门里等维度变化
         if (arrivalTicks < 0) {
-            FlightVelocity.apply(Vec3d.ZERO);
+            FlightVelocity.apply(Vec3.ZERO);
             portalWaitTicks++;
 
             if (!DimensionUtils.current().equals(fromDimension)) {
@@ -363,7 +363,7 @@ public class PathMoveAction extends Action {
 
         // 阶段三：等落点坐标同步，然后校验并继续
         arrivalTicks++;
-        FlightVelocity.apply(Vec3d.ZERO);
+        FlightVelocity.apply(Vec3.ZERO);
         if (arrivalTicks < ARRIVAL_DELAY_TICKS) return;
 
         String nowDimension = DimensionUtils.current();
@@ -373,13 +373,13 @@ public class PathMoveAction extends Action {
             return;
         }
 
-        ClientPlayerEntity arrived = PlayerUtils.player();
+        LocalPlayer arrived = PlayerUtils.player();
         if (arrived == null) {
             fail("传送后玩家不存在");
             return;
         }
 
-        BlockPos actual = BlockPos.ofFloored(arrived.getEntityPos());
+        BlockPos actual = BlockPos.containing(arrived.position());
         if (!actual.equals(step.to().pos())) {
             int dx = Math.abs(actual.getX() - step.to().pos().getX());
             int dy = Math.abs(actual.getY() - step.to().pos().getY());
@@ -444,9 +444,9 @@ public class PathMoveAction extends Action {
 
     /** 已经在路径点体系里就跳过 snap，否则飞到最近的能走通的路径点。 */
     private void beginSnap() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail(lastProblem + "；自动恢复时玩家或世界不存在");
             return;
         }
@@ -556,8 +556,8 @@ public class PathMoveAction extends Action {
     }
 
     /** 玩家偏离方块中心时，直接对齐过去。 */
-    private static void snapIfNeeded(ClientPlayerEntity player, BlockPos pos) {
-        Vec3d center = PlayerUtils.blockCenter(pos);
+    private static void snapIfNeeded(LocalPlayer player, BlockPos pos) {
+        Vec3 center = PlayerUtils.blockCenter(pos);
         double dx = player.getX() - center.x;
         double dy = player.getY() - center.y;
         double dz = player.getZ() - center.z;

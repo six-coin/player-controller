@@ -41,7 +41,7 @@ import java.nio.file.Path;
  * }
  * </pre>
  *
- * <p>{@code world} 是全局的世界配置编号，和游戏内的存档 / 服务器无关，
+ * <p>{@code level} 是全局的世界配置编号，和游戏内的存档 / 服务器无关，
  * 路径点数据放在 {@code config/player-controller/world_<num>/waypoints.json}。
  *
  * <p>老版本（没有后加的键）的配置文件读进来时那些键会取默认值，然后立刻回写一份补全的。
@@ -176,7 +176,7 @@ public final class PlayerControllerConfig {
     private boolean debug = false;
 
     /** 当前使用的世界配置编号，对应 world_{@code <num>} 目录。 */
-    private int world = 1;
+    private int level = 1;
 
     private Actions actions = new Actions();
 
@@ -441,11 +441,11 @@ public final class PlayerControllerConfig {
     }
 
     public static int getWorld() {
-        return instance.world;
+        return instance.level;
     }
 
     public static void setWorld(int value) {
-        instance.world = Math.max(1, value);
+        instance.level = Math.max(1, value);
         instance.save();
     }
 
@@ -623,7 +623,7 @@ public final class PlayerControllerConfig {
             }
             instance = loaded;
             ChatUtils.debug("已读取配置文件: " + path + " (debug=" + instance.debug
-                + ", world=" + instance.world
+                + ", world=" + instance.level
                 + ", move_speed=" + instance.actions.moveSpeed()
                 + ", move_max_descent_speed_blocks_per_tick="
                 + instance.actions.moveMaxDescentSpeedBlocksPerTick()

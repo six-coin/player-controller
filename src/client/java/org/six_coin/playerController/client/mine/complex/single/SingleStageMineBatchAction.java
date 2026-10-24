@@ -1,9 +1,9 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.rotate.RotateManager;
@@ -51,17 +51,17 @@ class SingleStageMineBatchAction extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null || mc.interactionManager == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null || mc.gameMode == null) {
             fail("玩家或世界不存在");
         }
     }
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -77,7 +77,7 @@ class SingleStageMineBatchAction extends SingleStageStep {
 
         List<BlockPos> left = new ArrayList<>();
         for (BlockPos pos : targets) {
-            if (SingleStageStage1.isWaterlogged(mc.world.getBlockState(pos))) left.add(pos);
+            if (SingleStageStage1.isWaterlogged(mc.level.getBlockState(pos))) left.add(pos);
         }
         if (left.isEmpty()) {
             ChatUtils.debug(phase() + "：核对通过（都打掉了）");
@@ -98,12 +98,12 @@ class SingleStageMineBatchAction extends SingleStageStep {
     }
 
     /** 把这一 tick 额度内的目标全部发包（该换工具就换）。 */
-    private void sendBatch(MinecraftClient mc, ClientPlayerEntity player) {
+    private void sendBatch(Minecraft mc, LocalPlayer player) {
         int budget = MAX_PER_TICK;
         while (index < targets.size() && budget-- > 0) {
             BlockPos pos = targets.get(index++);
 
-            BlockState state = mc.world.getBlockState(pos);
+            BlockState state = mc.level.getBlockState(pos);
             if (!SingleStageStage1.isWaterlogged(state)) continue;      // 已经没了
 
             int slot = SingleStageStage1.toolSlotFor(state);

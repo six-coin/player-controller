@@ -1,9 +1,9 @@
 package org.six_coin.playerController.client.feature;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 
 /**
@@ -61,20 +61,20 @@ public final class FlightVelocity {
         if (holds > 0) return;
 
         active = false;
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        LocalPlayer player = Minecraft.getInstance().player;
         if (player != null) {
-            player.setVelocity(Vec3d.ZERO);
+            player.setDeltaMovement(Vec3.ZERO);
         }
     }
 
     /** 这一 tick 的移动速度（在客户端 tick 开始时调用）。 */
-    public static void apply(Vec3d velocity) {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+    public static void apply(Vec3 velocity) {
+        LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) return;
 
         // 与 Meteor 的 velocity 模式保持一致
         player.getAbilities().flying = false;
-        player.setVelocity(velocity);
+        player.setDeltaMovement(velocity);
     }
 
     /**
@@ -92,11 +92,11 @@ public final class FlightVelocity {
         return speed;
     }
 
-    public static Vec3d velocityFor(net.minecraft.util.math.Direction.Axis axis, double step) {
+    public static Vec3 velocityFor(net.minecraft.core.Direction.Axis axis, double step) {
         return switch (axis) {
-            case X -> new Vec3d(step, 0.0, 0.0);
-            case Y -> new Vec3d(0.0, step, 0.0);
-            case Z -> new Vec3d(0.0, 0.0, step);
+            case X -> new Vec3(step, 0.0, 0.0);
+            case Y -> new Vec3(0.0, step, 0.0);
+            case Z -> new Vec3(0.0, 0.0, step);
         };
     }
 }

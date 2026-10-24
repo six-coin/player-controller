@@ -1,8 +1,8 @@
 package org.six_coin.playerController.client.action;
 
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -56,7 +56,7 @@ public class MoveAction extends Action {
 
     @Override
     protected void onStart() {
-        ClientPlayerEntity player = PlayerUtils.player();
+        LocalPlayer player = PlayerUtils.player();
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -68,18 +68,18 @@ public class MoveAction extends Action {
         //    （飞行用的是 velocity，和 yaw 无关；服务端那边要朝向的话由 RotateManager 单独发包）
 
         // 2. 对齐到所在方块的中心
-        BlockPos block = BlockPos.ofFloored(player.getEntityPos());
+        BlockPos block = BlockPos.containing(player.position());
         if (!PlayerUtils.isAtBlockCenter()) {
             ChatUtils.debug("先对齐到方块中心 " + block.toShortString()
                 + "（当前位置 " + String.format("%.3f, %.3f, %.3f", player.getX(), player.getY(), player.getZ()) + "）");
             PlayerUtils.snapToBlockCenter(block);
         }
         startBlock = block;
-        endBlock = block.offset(axis, blocks);
+        endBlock = block.relative(axis, blocks);
 
         // 3. 终点如果在末地传送门处，编辑模式下先连一条到末地的单向边。
         //    放在这里而不是收尾时做，是因为走进去会立刻被传送走，
-        //    那时候 mc.world 已经是末地了，查不到主世界的方块。
+        //    那时候 mc.level 已经是末地了，查不到主世界的方块。
         WaypointManager.get().recordEndPortalLink(dimension, endBlock);
 
         // 3.5 终点如果是「下面垫着黑曜石的下界传送门方块」，编辑模式下把这次传送武装起来。
@@ -105,7 +105,7 @@ public class MoveAction extends Action {
 
     @Override
     protected void tick() {
-        ClientPlayerEntity player = PlayerUtils.player();
+        LocalPlayer player = PlayerUtils.player();
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -119,7 +119,7 @@ public class MoveAction extends Action {
         if (dimension != null && !DimensionUtils.current().equals(dimension)) {
             ChatUtils.debug("移动过程中被传送到了 " + DimensionUtils.display(DimensionUtils.current())
                 + "，按已到达处理");
-            FlightVelocity.apply(net.minecraft.util.math.Vec3d.ZERO);
+            FlightVelocity.apply(net.minecraft.world.phys.Vec3.ZERO);
             finish();
             return;
         }

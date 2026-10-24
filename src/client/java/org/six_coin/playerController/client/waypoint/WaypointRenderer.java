@@ -1,15 +1,13 @@
 package org.six_coin.playerController.client.waypoint;
 
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.RenderLayers;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.VertexRendering;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.shape.VoxelShapes;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
+import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.Shapes;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
 /**
@@ -44,25 +42,24 @@ public final class WaypointRenderer {
     }
 
     public static void register() {
-        WorldRenderEvents.END_MAIN.register(WaypointRenderer::render);
+        LevelRenderEvents.COLLECT_SUBMITS.register(WaypointRenderer::render);
     }
 
-    private static void render(WorldRenderContext context) {
+    private static void render(LevelRenderContext context) {
         WaypointManager manager = WaypointManager.get();
         if (!manager.isShowing()) return;
         if (manager.graph().isEmpty()) return;
-        if (context.worldState() == null) return;
+        if (context.levelState() == null) return;
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
 
         try {
-            if (context.worldState().cameraRenderState == null) return;
-            Vec3d camera = context.worldState().cameraRenderState.pos;
+            if (context.levelState().cameraRenderState == null) return;
+            Vec3 camera = context.levelState().cameraRenderState.pos;
             if (camera == null) return;
 
-            MatrixStack matrices = context.matrices();
-            VertexConsumer buffer = context.consumers().getBuffer(RenderLayers.lines());
+            PoseStack matrices = context.poseStack();
 
             WaypointGraph graph = manager.graph();
             String dimension = DimensionUtils.current();
@@ -82,7 +79,7 @@ public final class WaypointRenderer {
                 for (BlockPos pos : WaypointGraph.blocksAlong(a.pos(), b.pos())) {
                     if (budget <= 0) break;
                     if (tooFar(pos, camera)) continue;
-                    drawBox(matrices, buffer, pos, camera, EDGE_COLOR);
+                    drawBox(context, matrices, pos, camera, EDGE_COLOR);
                     budget--;
                 }
             }
@@ -93,7 +90,7 @@ public final class WaypointRenderer {
                 if (waypoint.isSpawn()) continue;
                 if (!waypoint.dimension().equals(dimension)) continue;
                 if (tooFar(waypoint.pos(), camera)) continue;
-                drawBox(matrices, buffer, waypoint.pos(), camera, colorFor(graph, waypoint));
+                drawBox(context, matrices, waypoint.pos(), camera, colorFor(graph, waypoint));
                 budget--;
             }
 
@@ -101,7 +98,7 @@ public final class WaypointRenderer {
             if (budget > 0 && spawn != null
                 && spawn.dimension().equals(dimension)
                 && !tooFar(spawn.pos(), camera)) {
-                drawBox(matrices, buffer, spawn.pos(), camera, SPAWN_COLOR);
+                drawBox(context, matrices, spawn.pos(), camera, SPAWN_COLOR);
             }
         } catch (Exception e) {
             // 渲染出错就不要拖垮整个游戏
@@ -118,14 +115,14 @@ public final class WaypointRenderer {
     }
 
 
-    private static boolean tooFar(BlockPos pos, Vec3d camera) {        double dx = pos.getX() + 0.5 - camera.x;
+    private static boolean tooFar(BlockPos pos, Vec3 camera) {        double dx = pos.getX() + 0.5 - camera.x;
         double dy = pos.getY() + 0.5 - camera.y;
         double dz = pos.getZ() + 0.5 - camera.z;
         return dx * dx + dy * dy + dz * dz > MAX_DISTANCE * MAX_DISTANCE;
     }
 
     /** 整条边离摄像机最近的距离是否在范围内（先用它把远处的长边整条跳过）。 */
-    private static boolean segmentNear(BlockPos a, BlockPos b, Vec3d camera) {
+    private static boolean segmentNear(BlockPos a, BlockPos b, Vec3 camera) {
         double ax = a.getX() + 0.5;
         double ay = a.getY() + 0.5;
         double az = a.getZ() + 0.5;
@@ -146,16 +143,12 @@ public final class WaypointRenderer {
         return cx * cx + cy * cy + cz * cz <= MAX_DISTANCE * MAX_DISTANCE;
     }
 
-    private static void drawBox(MatrixStack matrices, VertexConsumer buffer, BlockPos pos, Vec3d camera, int color) {
-        VertexRendering.drawOutline(
-            matrices,
-            buffer,
-            VoxelShapes.fullCube(),
-            pos.getX() - camera.x,
-            pos.getY() - camera.y,
-            pos.getZ() - camera.z,
-            color,
-            LINE_WIDTH
-        );
+    private static void drawBox(LevelRenderContext context, PoseStack matrices, BlockPos pos, Vec3 camera, int color) {
+        // 26.x 的渲染管线不再直接写顶点缓冲：把矩阵挪到方块位置，交给提交收集器去画描边
+        matrices.pushPose();
+        matrices.translate(pos.getX() - camera.x, pos.getY() - camera.y, pos.getZ() - camera.z);
+        context.submitNodeCollector().submitShapeOutline(
+            matrices, Shapes.block(), RenderTypes.lines(), color, LINE_WIDTH, false);
+        matrices.popPose();
     }
 }

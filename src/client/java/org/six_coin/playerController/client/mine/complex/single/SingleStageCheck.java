@@ -1,13 +1,13 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.enchantment.Enchantments;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 import org.six_coin.playerController.client.mine.station.MineToolRules;
 import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
@@ -72,26 +72,26 @@ public final class SingleStageCheck {
     // ------------------------------------------------------------------
 
     /** (1)：初始子区块全空 + 目标子区块全部可挖。 */
-    public static List<String> checkSubChunks(World world, SingleStageCtx ctx) {
+    public static List<String> checkSubChunks(Level level, SingleStageCtx ctx) {
         List<String> problems = new ArrayList<>();
 
         int solid = 0;
         BlockPos firstSolid = null;
         for (BlockPos pos : cells(ctx.initialMin)) {
-            if (world.getBlockState(pos).isAir()) continue;
+            if (level.getBlockState(pos).isAir()) continue;
             solid++;
             if (firstSolid == null) firstSolid = pos;
         }
         if (solid > 0) {
             problems.add("初始子区块 " + ctx.initialMin.toShortString() + " 不是空的（有 " + solid
-                + " 个非空气方块，第一个是 " + firstSolid.toShortString() + " " + idOf(world, firstSolid)
+                + " 个非空气方块，第一个是 " + firstSolid.toShortString() + " " + idOf(level, firstSolid)
                 + "）—— 先站到一个全是空气的子区块里");
         }
 
         int blocked = 0;
         List<String> samples = new ArrayList<>();
         for (BlockPos pos : cells(ctx.targetMin)) {
-            BlockState state = world.getBlockState(pos);
+            BlockState state = level.getBlockState(pos);
             if (state.isAir()) continue;
             String why = notMineable(ctx, state);
             if (why == null) continue;
@@ -113,7 +113,7 @@ public final class SingleStageCheck {
      */
     private static String notMineable(SingleStageCtx ctx, BlockState state) {
         if (!ctx.filter.allows(state.getBlock())) {
-            return "被 mine filter 排除（" + Registries.BLOCK.getId(state.getBlock()) + "）";
+            return "被 mine filter 排除（" + BuiltInRegistries.BLOCK.getKey(state.getBlock()) + "）";
         }
         return null;
     }
@@ -130,8 +130,8 @@ public final class SingleStageCheck {
         return cells;
     }
 
-    private static String idOf(World world, BlockPos pos) {
-        return Registries.BLOCK.getId(world.getBlockState(pos).getBlock()).toString();
+    private static String idOf(Level level, BlockPos pos) {
+        return BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString();
     }
 
     // ------------------------------------------------------------------
@@ -175,7 +175,7 @@ public final class SingleStageCheck {
         ItemStack food = data.stack(SingleStageCtx.HOTBAR_FOOD);
         if (food.isEmpty()) {
             problems.add("快捷栏 9 是空的，要放熟猪排（≥" + FOOD_MIN + " 个）");
-        } else if (!food.isOf(Items.COOKED_PORKCHOP)) {
+        } else if (!food.is(Items.COOKED_PORKCHOP)) {
             problems.add("快捷栏 9 是 " + SingleStageData.idOf(food) + "，要放熟猪排");
         } else if (food.getCount() < FOOD_MIN) {
             problems.add("快捷栏 9 的熟猪排只有 " + food.getCount() + " 个（要 ≥" + FOOD_MIN + "）");
@@ -183,7 +183,7 @@ public final class SingleStageCheck {
 
         // 副手：不死图腾
         ItemStack offhand = data.stack(SingleStageCtx.OFFHAND);
-        if (!offhand.isOf(Items.TOTEM_OF_UNDYING)) {
+        if (!offhand.is(Items.TOTEM_OF_UNDYING)) {
             problems.add("副手是 " + SingleStageData.idOf(offhand) + "，要放不死图腾");
         }
 
@@ -215,7 +215,7 @@ public final class SingleStageCheck {
 
         // 背包 12：熔岩桶（拆平台前拿去烧垃圾，烧完归位）
         ItemStack lava = data.stack(SingleStageCtx.LAVA_BUCKET);
-        if (!lava.isOf(Items.LAVA_BUCKET)) {
+        if (!lava.is(Items.LAVA_BUCKET)) {
             problems.add("背包 12 是 " + SingleStageData.idOf(lava) + "，要放一个熔岩桶");
         }
 
@@ -298,9 +298,9 @@ public final class SingleStageCheck {
         if (MineToolRules.level(stack, Enchantments.UNBREAKING) < 3) {
             problems.add(label + " 的" + kind.label() + "没有耐久 III");
         }
-        if (requireFull && stack.getDamage() > 0) {
+        if (requireFull && stack.getDamageValue() > 0) {
             problems.add(label + " 的" + kind.label() + "耐久不是满的（剩 "
-                + (stack.getMaxDamage() - stack.getDamage()) + "/" + stack.getMaxDamage() + "）");
+                + (stack.getMaxDamage() - stack.getDamageValue()) + "/" + stack.getMaxDamage() + "）");
         }
     }
 

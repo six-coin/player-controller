@@ -5,10 +5,10 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.stock.station.StationManager;
@@ -77,7 +77,7 @@ public final class StockMaterials {
 
     public static Result process(String task) throws IOException {
         StockManager manager = StockManager.get();
-        int world = manager.loadedWorld() >= 0 ? manager.loadedWorld()
+        int level = manager.loadedWorld() >= 0 ? manager.loadedWorld()
             : org.six_coin.playerController.client.config.PlayerControllerConfig.getWorld();
 
         // 第一步：materials.json -> 1_1_material_clean.json
@@ -88,7 +88,7 @@ public final class StockMaterials {
         }
         // 已经收好的成品（最终产物地 + 最终产物暂存盒）：某种东西够数了，
         // materials.json 里对应的那个根节点整个不要
-        Map<Item, Integer> collected = readCollectedItems(world);
+        Map<Item, Integer> collected = readCollectedItems(level);
         List<String> coveredByFinal = new ArrayList<>();
 
         Map<Item, Integer> clean = readMaterial(material, collected, coveredByFinal);
@@ -100,8 +100,8 @@ public final class StockMaterials {
         }
 
         // 第二步：用仓库（item_storage）和容器（overall）算出还要去取的量
-        Map<Item, Integer> storage = readItems(readObject(StationManager.checkFile(world), "item_storage"));
-        Map<Item, Integer> overall = readItems(readObject(ContainerCacheManager.itemsFile(world), "overall"));
+        Map<Item, Integer> storage = readItems(readObject(StationManager.checkFile(level), "item_storage"));
+        Map<Item, Integer> overall = readItems(readObject(ContainerCacheManager.itemsFile(level), "overall"));
 
         Map<Item, Integer> optimized = new LinkedHashMap<>();
         List<String> shortItems = new ArrayList<>();
@@ -204,8 +204,8 @@ public final class StockMaterials {
     }
 
     /** check.json 里的 {@code already_collected}：已经收好的成品（最终产物地 + 暂存盒里那些）。 */
-    private static Map<Item, Integer> readCollectedItems(int world) {
-        return readItems(readObject(StationManager.checkFile(world), "already_collected"));
+    private static Map<Item, Integer> readCollectedItems(int level) {
+        return readItems(readObject(StationManager.checkFile(level), "already_collected"));
     }
 
     /** 从某个 json 文件里取一个对象出来（比如 check.json 的 item_storage）；没有就当空的。 */
@@ -248,7 +248,7 @@ public final class StockMaterials {
             ChatUtils.error("认不出的物品 id：" + raw);
             return null;
         }
-        Optional<Item> item = Registries.ITEM.getOptionalValue(identifier);
+        Optional<Item> item = BuiltInRegistries.ITEM.getOptional(identifier);
         if (item.isEmpty() || item.get() == Items.AIR) {
             ChatUtils.error("没有这个物品：" + raw);
             return null;
@@ -275,6 +275,6 @@ public final class StockMaterials {
     }
 
     private static String id(Item item) {
-        return Registries.ITEM.getId(item).toString();
+        return BuiltInRegistries.ITEM.getKey(item).toString();
     }
 }

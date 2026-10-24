@@ -3,10 +3,10 @@ package org.six_coin.playerController.client.commands;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.command.CommandSource;
-import net.minecraft.text.Text;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.network.chat.Component;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.stock.StockManager;
 import org.six_coin.playerController.client.stock.StockTask;
@@ -36,22 +36,22 @@ public final class StockCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("stock")
+        return ClientCommands.literal("stock")
             .executes(StockCommand::status)
             .then(StationCommand.build())
-            .then(ClientCommandManager.literal("add_task")
-                .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
+            .then(ClientCommands.literal("add_task")
+                .then(ClientCommands.argument("task_name", StringArgumentType.word())
                     .executes(StockCommand::addTask)))
-            .then(ClientCommandManager.literal("del_task")
-                .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
-                    .suggests((context, builder) -> CommandSource.suggestMatching(StockManager.get().tasks(), builder))
+            .then(ClientCommands.literal("del_task")
+                .then(ClientCommands.argument("task_name", StringArgumentType.word())
+                    .suggests((context, builder) -> SharedSuggestionProvider.suggest(StockManager.get().tasks(), builder))
                     .executes(StockCommand::delTask)))
-            .then(ClientCommandManager.literal("task")
-                .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
-                    .suggests((context, builder) -> CommandSource.suggestMatching(StockManager.get().tasks(), builder))
-                    .then(ClientCommandManager.literal("generate_materials_list")
+            .then(ClientCommands.literal("task")
+                .then(ClientCommands.argument("task_name", StringArgumentType.word())
+                    .suggests((context, builder) -> SharedSuggestionProvider.suggest(StockManager.get().tasks(), builder))
+                    .then(ClientCommands.literal("generate_materials_list")
                         .executes(StockCommand::generateMaterialsList))
-                    .then(ClientCommandManager.literal("start_collect")
+                    .then(ClientCommands.literal("start_collect")
                         .executes(StockCommand::startCollect))));
     }
 
@@ -61,13 +61,13 @@ public final class StockCommand {
         FabricClientCommandSource source = context.getSource();
         StockManager manager = StockManager.get();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7备货任务（world_" + manager.loadedWorld()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7备货任务（world_" + manager.loadedWorld()
             + "）：" + manager.tasks().size() + " 个"));
         if (manager.tasks().isEmpty()) {
-            source.sendFeedback(Text.literal("  §8（还没有任务，用 /pc stock add_task <名字> 新建）"));
+            source.sendFeedback(Component.literal("  §8（还没有任务，用 /pc stock add_task <名字> 新建）"));
         } else {
             for (String task : manager.tasks()) {
-                source.sendFeedback(Text.literal("  " + task + " §8→ " + manager.currentTaskDir(task)));
+                source.sendFeedback(Component.literal("  " + task + " §8→ " + manager.currentTaskDir(task)));
             }
         }
         return 1;
@@ -79,16 +79,16 @@ public final class StockCommand {
 
         try {
             if (!StockManager.get().addTask(task)) {
-                source.sendFeedback(Text.literal("已经有 " + task + " 这个任务了（文件夹 "
+                source.sendFeedback(Component.literal("已经有 " + task + " 这个任务了（文件夹 "
                     + StockManager.get().currentTaskDir(task) + "）"));
                 return 1;
             }
         } catch (IOException e) {
-            source.sendError(Text.literal("新建任务失败：" + e.getMessage()));
+            source.sendError(Component.literal("新建任务失败：" + e.getMessage()));
             return 0;
         }
 
-        source.sendFeedback(Text.literal("已新建任务 " + task + "，把 litematica 导出的 original.json 放到 "
+        source.sendFeedback(Component.literal("已新建任务 " + task + "，把 litematica 导出的 original.json 放到 "
             + StockManager.get().currentOriginalFile(task)
             + "，再跑 /pc stock task " + task + " generate_materials_list"));
         return 1;
@@ -100,15 +100,15 @@ public final class StockCommand {
 
         try {
             if (!StockManager.get().delTask(task)) {
-                source.sendError(Text.literal("没有 " + task + " 这个任务"));
+                source.sendError(Component.literal("没有 " + task + " 这个任务"));
                 return 0;
             }
         } catch (IOException e) {
-            source.sendError(Text.literal("删除任务失败：" + e.getMessage()));
+            source.sendError(Component.literal("删除任务失败：" + e.getMessage()));
             return 0;
         }
 
-        source.sendFeedback(Text.literal("已删除任务 " + task + "（文件夹和记录都没了）"));
+        source.sendFeedback(Component.literal("已删除任务 " + task + "（文件夹和记录都没了）"));
         return 1;
     }
 
@@ -116,7 +116,7 @@ public final class StockCommand {
     private static int generateMaterialsList(CommandContext<FabricClientCommandSource> context) {
         String task = StringArgumentType.getString(context, "task_name");
         if (!StockManager.get().has(task)) {
-            context.getSource().sendError(Text.literal("没有 " + task + " 这个任务（/pc stock add_task " + task + "）"));
+            context.getSource().sendError(Component.literal("没有 " + task + " 这个任务（/pc stock add_task " + task + "）"));
             return 0;
         }
         return MaterialsCommand.generate(context, task);
@@ -127,21 +127,21 @@ public final class StockCommand {
         String task = StringArgumentType.getString(context, "task_name");
 
         if (!StockManager.get().has(task)) {
-            source.sendError(Text.literal("没有 " + task + " 这个任务（/pc stock add_task " + task + "）"));
+            source.sendError(Component.literal("没有 " + task + " 这个任务（/pc stock add_task " + task + "）"));
             return 0;
         }
-        if (source.getPlayer() == null || source.getWorld() == null) {
-            source.sendError(Text.literal("没有玩家或世界"));
+        if (source.getPlayer() == null || source.getLevel() == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
             return 0;
         }
         if (!Files.exists(StockManager.get().currentMaterialFile(task))) {
-            source.sendError(Text.literal("还没有材料清单 "
+            source.sendError(Component.literal("还没有材料清单 "
                 + StockManager.get().currentMaterialFile(task)
                 + "（先跑 /pc stock task " + task + " generate_materials_list）"));
             return 0;
         }
 
-        source.sendFeedback(Text.literal("开始备货任务 " + task
+        source.sendFeedback(Component.literal("开始备货任务 " + task
             + " —— 第一部分（预检查 → 取货 → 分盒重装）+ 第二部分（预检查 → 取货 → 合成）"));
         ActionManager.get().submit(new StockTask(task));
         return 1;

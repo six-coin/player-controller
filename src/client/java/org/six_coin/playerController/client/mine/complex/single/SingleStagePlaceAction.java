@@ -1,16 +1,17 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.item.component.SwingAnimation;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.rotate.RotateManager;
@@ -22,7 +23,7 @@ import org.six_coin.playerController.client.util.PlayerUtils;
  *
  * <p><b>做法：直接点目标格自己</b>，面随便挑一个。原因是 {@code ItemPlacementContext}：
  * <pre>
- * canReplaceExisting = world.getBlockState(点的那一格).canReplace(...)
+ * canReplaceExisting = level.getBlockState(点的那一格).canReplace(...)
  * getBlockPos()      = canReplaceExisting ? 点的那一格 : 点的那一格.offset(面)
  * </pre>
  * 目标格是空气（或水 / 熔岩 / 草这类可替换的），{@code canReplaceExisting} 就是 {@code true}，
@@ -56,7 +57,7 @@ class SingleStagePlaceAction extends SingleStageStep {
 
     SingleStagePlaceAction(SingleStageCtx ctx, BlockPos spot, int hotbarIndex) {
         super(ctx);
-        this.spot = spot.toImmutable();
+        this.spot = spot.immutable();
         this.hotbarIndex = hotbarIndex;
     }
 
@@ -67,21 +68,21 @@ class SingleStagePlaceAction extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null || mc.interactionManager == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null || mc.gameMode == null) {
             fail("玩家或世界不存在");
             return;
         }
 
-        BlockState state = mc.world.getBlockState(spot);
+        BlockState state = mc.level.getBlockState(spot);
         if (!replaceable(state)) {
-            fail("位置 " + spot.toShortString() + " 已经有 " + Registries.BLOCK.getId(state.getBlock())
+            fail("位置 " + spot.toShortString() + " 已经有 " + BuiltInRegistries.BLOCK.getKey(state.getBlock())
                 + " 了");
             return;
         }
 
-        ItemStack held = player.getInventory().getStack(hotbarIndex);
+        ItemStack held = player.getInventory().getItem(hotbarIndex);
         if (!(held.getItem() instanceof BlockItem)) {
             fail("快捷栏第 " + (hotbarIndex + 1) + " 格里不是方块（是 " + SingleStageData.idOf(held) + "）");
             return;
@@ -96,14 +97,14 @@ class SingleStagePlaceAction extends SingleStageStep {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
 
-        if (!replaceable(mc.world.getBlockState(spot))) {
+        if (!replaceable(mc.level.getBlockState(spot))) {
             ChatUtils.debug("放好了：" + spot.toShortString());
             finish();
             return;
@@ -116,7 +117,7 @@ class SingleStagePlaceAction extends SingleStageStep {
         if (attempt >= MAX_ATTEMPTS) {
             fail("在 " + spot.toShortString() + " 放不上去（点了 " + attempt + " 次；离眼睛 "
                 + String.format("%.2f", PlayerUtils.eyeDistanceTo(spot)) + " 格，手上是 "
-                + SingleStageData.idOf(player.getInventory().getStack(hotbarIndex)) + "）");
+                + SingleStageData.idOf(player.getInventory().getItem(hotbarIndex)) + "）");
             return;
         }
         tryPlace(mc, player);
@@ -132,22 +133,22 @@ class SingleStagePlaceAction extends SingleStageStep {
 
     /** 这一格现在能不能放方块（空气 / 水 / 熔岩 / 草这类可替换的方块都算）。 */
     static boolean replaceable(BlockState state) {
-        return state.isAir() || state.isReplaceable();
+        return state.isAir() || state.canBeReplaced();
     }
 
-    private void tryPlace(MinecraftClient mc, ClientPlayerEntity player) {
+    private void tryPlace(Minecraft mc, LocalPlayer player) {
         Direction side = FACES[attempt % FACES.length];
 
         // 命中点取目标格的这一面（面本身不影响落点，只影响服务端那边的「点在哪」）
-        Vec3d hitPos = Vec3d.ofCenter(spot).add(
-            side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5);
+        Vec3 hitPos = Vec3.atCenterOf(spot).add(
+            side.getStepX() * 0.5, side.getStepY() * 0.5, side.getStepZ() * 0.5);
         BlockHitResult hit = new BlockHitResult(hitPos, side, spot, false);
 
         RotateManager.get().rotateTo(Owner.MINE, hitPos);
 
         ChatUtils.debug("凭空放方块：%s（点它自己的 %s 面，手上 %s）", spot.toShortString(),
-            side.asString(), SingleStageData.idOf(player.getInventory().getStack(hotbarIndex)));
-        mc.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
-        player.swingHand(Hand.MAIN_HAND);
+            side.getName(), SingleStageData.idOf(player.getInventory().getItem(hotbarIndex)));
+        mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit);
+        player.swing(InteractionHand.MAIN_HAND, SwingAnimation.DEFAULT, false);
     }
 }

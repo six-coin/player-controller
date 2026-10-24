@@ -1,8 +1,8 @@
 package org.six_coin.playerController.client.util;
 
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.item.ItemStack;
-import net.minecraft.text.Text;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.network.chat.Component;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -30,13 +30,13 @@ public final class ItemRules {
 
     /** 堆叠上限是 1（工具、盔甲、潜影盒这种）。 */
     public static boolean isUnstackable(ItemStack stack) {
-        return stack.getMaxCount() <= 1;
+        return stack.getMaxStackSize() <= 1;
     }
 
     /** 这个物品被改过名字的话，返回改的名字；没改过返回 null。 */
     @Nullable
     public static String customNameOf(ItemStack stack) {
-        Text custom = stack.get(DataComponentTypes.CUSTOM_NAME);
+        Component custom = stack.get(DataComponents.CUSTOM_NAME);
         return custom == null ? null : custom.getString();
     }
 

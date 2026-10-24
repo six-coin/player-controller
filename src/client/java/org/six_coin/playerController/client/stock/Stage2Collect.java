@@ -3,10 +3,10 @@ package org.six_coin.playerController.client.stock;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.ContainerGetAction;
@@ -128,13 +128,13 @@ abstract class Stage2Collect extends StockStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("没有玩家或世界");
             return;
         }
 
-        int world = PlayerControllerConfig.getWorld();
+        int level = PlayerControllerConfig.getWorld();
         try {
             // 1. station_data（只放在内存里，见 StockRun）
             if (inheritState) {
@@ -145,12 +145,12 @@ abstract class Stage2Collect extends StockStep {
                 }
                 ChatUtils.debug(phase + "：接着用前面交过来的 station_data");
             } else {
-                state = StationState.load(world);
+                state = StationState.load(level);
                 run.state(state);
             }
 
             // 2. all_items.json
-            loadAllItems(world);
+            loadAllItems(level);
 
             // 3. 完整的需求清单（空表就是「这个阶段没东西要取」，直接跳过）
             Path file = needFile != null ? needFile : StockManager.get().currentFinalFinalFile(task);
@@ -217,8 +217,8 @@ abstract class Stage2Collect extends StockStep {
     // 准备
     // ------------------------------------------------------------------
 
-    private void loadAllItems(int world) throws Exception {
-        Path file = ContainerCacheManager.itemsFile(world);
+    private void loadAllItems(int level) throws Exception {
+        Path file = ContainerCacheManager.itemsFile(level);
         if (!Files.exists(file)) throw new IllegalStateException("找不到 " + file + "（先跑 get_all_items？）");
 
         JsonElement root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
@@ -567,23 +567,23 @@ abstract class Stage2Collect extends StockStep {
     // ------------------------------------------------------------------
 
     private int freeMainSlots() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return 0;
 
         int free = 0;
         for (int i = 9; i < 36; i++) {
-            if (mc.player.getInventory().getStack(i).isEmpty()) free++;
+            if (mc.player.getInventory().getItem(i).isEmpty()) free++;
         }
         return free;
     }
 
     /** 物品栏 27 格里有没有要放的这类东西。 */
     private boolean inventoryHas(ContainerPutAction.Mode mode) {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return false;
 
         for (int i = 9; i < 36; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (stack.isEmpty()) continue;
             if (mode == ContainerPutAction.Mode.EVERYTHING) return true;
 

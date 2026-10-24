@@ -2,8 +2,8 @@ package org.six_coin.playerController.client.waypoint;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 路径点管理器：负责当前 world 编号的读写、显示开关、编辑模式、各种边的记录。
+ * 路径点管理器：负责当前 level 编号的读写、显示开关、编辑模式、各种边的记录。
  *
  * <p>数据文件：{@code config/player-controller/world_<num>/waypoints.json}
  */
@@ -103,12 +103,12 @@ public final class WaypointManager {
     // 文件
     // ------------------------------------------------------------------
 
-    public static Path worldDir(int world) {
-        return PlayerControllerConfig.configDir().resolve("world_" + world);
+    public static Path worldDir(int level) {
+        return PlayerControllerConfig.configDir().resolve("world_" + level);
     }
 
-    public static Path worldFile(int world) {
-        return worldDir(world).resolve("waypoints.json");
+    public static Path worldFile(int level) {
+        return worldDir(level).resolve("waypoints.json");
     }
 
     public Path currentFile() {
@@ -119,16 +119,16 @@ public final class WaypointManager {
         load(PlayerControllerConfig.getWorld());
     }
 
-    public void load(int world) {
-        world = Math.max(1, world);
-        loadedWorld = world;
+    public void load(int level) {
+        level = Math.max(1, level);
+        loadedWorld = level;
         loadedOk = false;
-        Path path = worldFile(world);
+        Path path = worldFile(level);
 
         if (!Files.exists(path)) {
             graph = new WaypointGraph();
             loadedOk = true;
-            ChatUtils.debug("世界配置 world_" + world + " 还没有路径点文件，使用空图: " + path);
+            ChatUtils.debug("世界配置 world_" + level + " 还没有路径点文件，使用空图: " + path);
             return;
         }
 
@@ -138,7 +138,7 @@ public final class WaypointManager {
             loadedOk = true;
             graph.rebuildIndex();
 
-            ChatUtils.debug("已加载 world_" + world + " 的路径点: "
+            ChatUtils.debug("已加载 world_" + level + " 的路径点: "
                 + graph.normalCount() + " 个点，" + graph.edgeCount() + " 条边");
         } catch (Exception e) {
             graph = new WaypointGraph();
@@ -149,11 +149,11 @@ public final class WaypointManager {
     }
 
     /** 切换世界配置：先把旧的存起来，再读新的。 */
-    public void switchWorld(int world) {
+    public void switchWorld(int level) {
         save();
-        PlayerControllerConfig.setWorld(world);
-        load(world);
-        ChatUtils.info("已切换到世界配置 world_" + world
+        PlayerControllerConfig.setWorld(level);
+        load(level);
+        ChatUtils.info("已切换到世界配置 world_" + level
             + "（" + graph.normalCount() + " 个路径点，" + graph.edgeCount() + " 条边）");
     }
 
@@ -197,8 +197,8 @@ public final class WaypointManager {
      */
     @Nullable
     public Waypoint playerStartWaypoint() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) return null;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return null;
 
         BlockPos here = PlayerUtils.currentBlockPos();
         if (here == null) return null;
@@ -252,7 +252,7 @@ public final class WaypointManager {
      */
     public boolean recordEndPortalLink(String dimension, BlockPos endPos) {
         if (!editMode) return false;
-        if (MinecraftClient.getInstance().world == null) return false;
+        if (Minecraft.getInstance().level == null) return false;
 
         // 只看自己那一格和下面一格
         if (!PortalUtils.endPortalNear(endPos)) return false;
@@ -403,16 +403,16 @@ public final class WaypointManager {
     }
 
     /**
-     * 把当前 world 的 waypoints.json 备份到同目录下的 {@code waypoints_bak_<n>.json}（n 从 1 开始，
+     * 把当前 level 的 waypoints.json 备份到同目录下的 {@code waypoints_bak_<n>.json}（n 从 1 开始，
      * 挑第一个还没被占用的编号）。
      *
      * @return 备份文件路径；源文件不存在或者备份失败返回 null
      */
     @Nullable
     public Path backupFile() {
-        int world = loadedWorld >= 0 ? loadedWorld : PlayerControllerConfig.getWorld();
-        Path dir = worldDir(world);
-        Path source = worldFile(world);
+        int level = loadedWorld >= 0 ? loadedWorld : PlayerControllerConfig.getWorld();
+        Path dir = worldDir(level);
+        Path source = worldFile(level);
         if (!Files.exists(source)) {
             ChatUtils.debug("没有可备份的路径点文件：" + source);
             return null;

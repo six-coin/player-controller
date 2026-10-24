@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.mine;
 
-import net.minecraft.block.Block;
-import net.minecraft.registry.Registries;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -91,7 +91,7 @@ public final class MineFilter {
 
         String list = blocks.stream()
             .limit(limit)
-            .map(block -> Registries.BLOCK.getId(block).toString())
+            .map(block -> BuiltInRegistries.BLOCK.getKey(block).toString())
             .collect(Collectors.joining(", "));
         if (blocks.size() > limit) list = list + ", …（还有 " + (blocks.size() - limit) + " 种）";
         return "（" + list + "）";

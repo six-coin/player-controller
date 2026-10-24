@@ -3,10 +3,10 @@ package org.six_coin.playerController.client.util;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -99,10 +99,10 @@ public final class ItemList {
     private static Item resolve(String key) throws ParseException {
         String idText = key.contains(":") ? key : "minecraft:" + key;
         Identifier id = Identifier.tryParse(idText);
-        if (id == null || !Registries.ITEM.containsId(id)) {
+        if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) {
             throw new ParseException("未知物品 id: " + key);
         }
-        Item item = Registries.ITEM.get(id);
+        Item item = BuiltInRegistries.ITEM.getValue(id);
         if (item == Items.AIR) {
             throw new ParseException("物品 id 无效: " + key);
         }

@@ -1,8 +1,8 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.ItemStack;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.rotate.RotateManager;
@@ -50,8 +50,8 @@ class SingleStageThrowAction extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -59,7 +59,7 @@ class SingleStageThrowAction extends SingleStageStep {
 
         List<Integer> nonEmpty = new ArrayList<>();
         for (int slot : slots) {
-            ItemStack stack = player.getInventory().getStack(slot);
+            ItemStack stack = player.getInventory().getItem(slot);
             if (!stack.isEmpty()) nonEmpty.add(slot);
         }
         if (nonEmpty.isEmpty()) {
@@ -68,7 +68,7 @@ class SingleStageThrowAction extends SingleStageStep {
             return;
         }
 
-        if (!RotateManager.get().rotateTo(Owner.MINE, player.getYaw(), 90.0f)) {
+        if (!RotateManager.get().rotateTo(Owner.MINE, player.getYRot(), 90.0f)) {
             fail("现在不让转头（别的功能在用），没法低头扔东西");
             return;
         }
@@ -78,8 +78,8 @@ class SingleStageThrowAction extends SingleStageStep {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -96,7 +96,7 @@ class SingleStageThrowAction extends SingleStageStep {
 
             List<SingleStageInventoryAction.Op> ops = new ArrayList<>();
             for (int slot : slots) {
-                if (!player.getInventory().getStack(slot).isEmpty()) {
+                if (!player.getInventory().getItem(slot).isEmpty()) {
                     ops.add(SingleStageInventoryAction.throwStack(slot));
                 }
             }

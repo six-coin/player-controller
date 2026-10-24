@@ -1,17 +1,18 @@
 package org.six_coin.playerController.client.mine;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.FluidBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
-import net.minecraft.registry.tag.FluidTags;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.item.component.SwingAnimation;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
@@ -263,8 +264,8 @@ public final class MineManager {
     // ------------------------------------------------------------------
 
     public void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
 
         if (region == null) {
             release();
@@ -272,7 +273,7 @@ public final class MineManager {
             return;
         }
 
-        if (player == null || mc.world == null || mc.interactionManager == null) {
+        if (player == null || mc.level == null || mc.gameMode == null) {
             clearTarget();
             release();
             setState(State.NO_WORLD);
@@ -325,14 +326,14 @@ public final class MineManager {
         }
 
         double reach = PlayerControllerConfig.getReach();
-        Vec3d eye = player.getEyePos();
+        Vec3 eye = player.getEyePosition();
 
         MineTools.Kind held = heldTool(player);
 
         // 手上这件工具附近还挖得动东西吗？挖得动就**不换**：切得越少，服务端那边越不容易对不上
         boolean somethingMineable = false;
         for (BlockPos pos : candidates) {
-            if (suitable(mc.world.getBlockState(pos), held)) {
+            if (suitable(mc.level.getBlockState(pos), held)) {
                 somethingMineable = true;
                 break;
             }
@@ -341,7 +342,7 @@ public final class MineManager {
         if (!somethingMineable) {
             // 一个都挖不动了才换：换成最近那个方块要的工具
             BlockPos nearest = candidates.get(0);
-            MineTools.Kind desired = MineTools.required(mc.world.getBlockState(nearest));
+            MineTools.Kind desired = MineTools.required(mc.level.getBlockState(nearest));
 
             if (desired != null && desired != held) {
                 int slot = MineTools.hotbarSlot(player.getInventory(), desired);
@@ -380,14 +381,14 @@ public final class MineManager {
         target = null;
         targetTool = held;
         for (BlockPos pos : candidates) {
-            if (suitable(mc.world.getBlockState(pos), held)) {
+            if (suitable(mc.level.getBlockState(pos), held)) {
                 target = pos;
                 break;
             }
         }
         if (target == null) {
             target = candidates.get(0);
-            targetTool = MineTools.required(mc.world.getBlockState(target));
+            targetTool = MineTools.required(mc.level.getBlockState(target));
         }
 
         int limit = PlayerControllerConfig.getMineMaxBlocksPerTick();
@@ -398,7 +399,7 @@ public final class MineManager {
             // 挖着挖着工具坏了：这一 tick 就停，下一 tick 重新判断
             if (mined > 0 && heldTool(player) != held) break;
 
-            BlockState state = mc.world.getBlockState(pos);
+            BlockState state = mc.level.getBlockState(pos);
             // 只对手上这件工具挖得动的方块发包
             if (!suitable(state, held)) continue;
             // 再怎么也不能超出触及范围
@@ -437,8 +438,8 @@ public final class MineManager {
      * <p>站着不动的时候原版算出来就是 (0, 0, 0)，所以默认值下照常挖；
      * 某一个上限配成 0 就要求那个方向的速度正好是 0。
      */
-    private static boolean isStill(ClientPlayerEntity player) {
-        Vec3d velocity = player.getVelocity();
+    private static boolean isStill(LocalPlayer player) {
+        Vec3 velocity = player.getDeltaMovement();
 
         double horizontalLimit = PlayerControllerConfig.getMineMaxHorizontalSpeedPerTick();
         if (Math.abs(velocity.x) > horizontalLimit) return false;
@@ -451,29 +452,29 @@ public final class MineManager {
     /**
      * 玩家身上有没有水。
      *
-     * <p>不看 {@code player.isTouchingWater()} 那一个标志：开了飞行之后它在水里也会是 false，
+     * <p>不看 {@code player.isInWater()} 那一个标志：开了飞行之后它在水里也会是 false，
      * 结果「水里飞着」照样挖。这里直接查世界：玩家包围盒覆盖到的方块，只要流体状态是水就算沾水。
      * 原版的标志也一并认（谁说是水都算），多拦一点没有坏处。
      */
-    private static boolean touchingWater(MinecraftClient mc, ClientPlayerEntity player) {
-        if (player.isTouchingWater()) return true;
-        if (mc.world == null) return false;
+    private static boolean touchingWater(Minecraft mc, LocalPlayer player) {
+        if (player.isInWater()) return true;
+        if (mc.level == null) return false;
 
         // 稍微缩一点，免得贴着水面的时候因为浮点误差把旁边那格水算进来
-        Box box = player.getBoundingBox().contract(1.0E-4);
-        BlockPos min = BlockPos.ofFloored(box.minX, box.minY, box.minZ);
-        BlockPos max = BlockPos.ofFloored(box.maxX, box.maxY, box.maxZ);
+        AABB box = player.getBoundingBox().deflate(1.0E-4);
+        BlockPos min = BlockPos.containing(box.minX, box.minY, box.minZ);
+        BlockPos max = BlockPos.containing(box.maxX, box.maxY, box.maxZ);
 
-        for (BlockPos pos : BlockPos.iterate(min, max)) {
-            if (mc.world.getFluidState(pos).isIn(FluidTags.WATER)) return true;
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            if (mc.level.getFluidState(pos).is(FluidTags.WATER)) return true;
         }
         return false;
     }
 
     /** 现在手上这件东西算哪一类工具。 */
     @Nullable
-    private static MineTools.Kind heldTool(ClientPlayerEntity player) {
-        return MineTools.held(player.getInventory().getSelectedStack());
+    private static MineTools.Kind heldTool(LocalPlayer player) {
+        return MineTools.held(player.getInventory().getSelectedItem());
     }
 
     private void clearTarget() {
@@ -501,13 +502,13 @@ public final class MineManager {
     // ------------------------------------------------------------------
 
     /** 周边区域里这一 tick 能挖的方块，按离眼睛的距离从近到远排。 */
-    private List<BlockPos> collect(MinecraftClient mc, ClientPlayerEntity player) {
+    private List<BlockPos> collect(Minecraft mc, LocalPlayer player) {
         double reach = PlayerControllerConfig.getReach();
         int radius = (int) Math.ceil(reach) + 1;
 
-        BlockPos center = BlockPos.ofFloored(player.getEntityPos());
-        Vec3d eye = player.getEyePos();
-        BlockPos.Mutable mutable = new BlockPos.Mutable();
+        BlockPos center = BlockPos.containing(player.position());
+        Vec3 eye = player.getEyePosition();
+        BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
         List<BlockPos> found = new ArrayList<>();
 
         for (int dx = -radius; dx <= radius; dx++) {
@@ -516,25 +517,25 @@ public final class MineManager {
                     mutable.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
                     if (!region.contains(mutable)) continue;
 
-                    BlockState state = mc.world.getBlockState(mutable);
-                    if (!breakable(mc.world, mutable, state)) continue;
+                    BlockState state = mc.level.getBlockState(mutable);
+                    if (!breakable(mc.level, mutable, state)) continue;
                     if (!region.filter().allows(state.getBlock())) continue;
                     if (!inRange(eye, mutable, reach)) continue;
 
-                    found.add(mutable.toImmutable());
+                    found.add(mutable.immutable());
                 }
             }
         }
 
-        found.sort(Comparator.comparingDouble(pos -> eye.squaredDistanceTo(Vec3d.ofCenter(pos))));
+        found.sort(Comparator.comparingDouble(pos -> eye.distanceToSqr(Vec3.atCenterOf(pos))));
         return found;
     }
 
     /** 不是空气、不是水 / 岩浆、也不是基岩那种挖不动的。 */
-    private static boolean breakable(ClientWorld world, BlockPos pos, BlockState state) {
+    private static boolean breakable(ClientLevel level, BlockPos pos, BlockState state) {
         if (state.isAir()) return false;
-        if (state.getBlock() instanceof FluidBlock) return false;
-        return state.getHardness(world, pos) >= 0.0F;
+        if (state.getBlock() instanceof LiquidBlock) return false;
+        return state.getDestroySpeed(level, pos) >= 0.0F;
     }
 
     /**
@@ -542,8 +543,8 @@ public final class MineManager {
      *
      * <p>不再区分看不看得见 / 隔不隔墙（原来那套 range + wall_range 已经合并成 reach 了）。
      */
-    private static boolean inRange(Vec3d eye, BlockPos pos, double reach) {
-        return eye.squaredDistanceTo(Vec3d.ofCenter(pos)) <= reach * reach;
+    private static boolean inRange(Vec3 eye, BlockPos pos, double reach) {
+        return eye.distanceToSqr(Vec3.atCenterOf(pos)) <= reach * reach;
     }
 
     // ------------------------------------------------------------------
@@ -556,16 +557,16 @@ public final class MineManager {
      * <p>用原版的 {@code sendSequencedPacket} 带 sequence 号（见
      * {@link ClientPlayerInteractionManagerAccessor}）。
      */
-    private static void mine(MinecraftClient mc, ClientPlayerEntity player, BlockPos pos) {
+    private static void mine(Minecraft mc, LocalPlayer player, BlockPos pos) {
         Direction side = PlayerUtils.facingSide(pos);
-        ClientWorld world = mc.world;
+        ClientLevel level = mc.level;
         ClientPlayerInteractionManagerAccessor accessor =
-            (ClientPlayerInteractionManagerAccessor) mc.interactionManager;
+            (ClientPlayerInteractionManagerAccessor) mc.gameMode;
 
-        accessor.playerController$sendSequencedPacket(world, sequence ->
-            new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, side, sequence));
-        player.swingHand(Hand.MAIN_HAND);
-        accessor.playerController$sendSequencedPacket(world, sequence ->
-            new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, side, sequence));
+        accessor.playerController$startPrediction(level, sequence ->
+            new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, pos, side, sequence));
+        player.swing(InteractionHand.MAIN_HAND, SwingAnimation.DEFAULT, false);
+        accessor.playerController$startPrediction(level, sequence ->
+            new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, side, sequence));
     }
 }

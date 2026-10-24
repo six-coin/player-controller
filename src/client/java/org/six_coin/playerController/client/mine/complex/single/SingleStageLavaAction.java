@@ -1,13 +1,14 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.component.SwingAnimation;
 import org.six_coin.playerController.client.mixin.ClientPlayerInteractionManagerAccessor;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
-import net.minecraft.util.Hand;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
+import net.minecraft.world.InteractionHand;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.rotate.RotateManager;
@@ -57,15 +58,15 @@ class SingleStageLavaAction extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null || mc.interactionManager == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null || mc.gameMode == null) {
             fail("玩家或世界不存在");
             return;
         }
 
-        ItemStack bucket = player.getInventory().getStack(SingleStageCtx.LAVA_BUCKET);
-        if (!bucket.isOf(Items.LAVA_BUCKET)) {
+        ItemStack bucket = player.getInventory().getItem(SingleStageCtx.LAVA_BUCKET);
+        if (!bucket.is(Items.LAVA_BUCKET)) {
             fail("背包 12 不是熔岩桶（是 " + SingleStageData.idOf(bucket) + "），没法倒岩浆");
             return;
         }
@@ -100,7 +101,7 @@ class SingleStageLavaAction extends SingleStageStep {
 
     @Override
     protected void tick() {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -141,23 +142,23 @@ class SingleStageLavaAction extends SingleStageStep {
 
     /** 用一次手上的桶（包里的 yaw / pitch 写死成假朝向）。 */
     private void useBucket() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null || mc.interactionManager == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null || mc.gameMode == null) return;
 
-        ItemStack held = player.getInventory().getSelectedStack();
+        ItemStack held = player.getInventory().getSelectedItem();
         if (held.isEmpty()) return;
 
         ChatUtils.debug("倒岩浆：右键一次（手上 " + SingleStageData.idOf(held) + "）");
-        ((ClientPlayerInteractionManagerAccessor) mc.interactionManager)
-            .playerController$sendSequencedPacket((ClientWorld) mc.world, sequence ->
-                new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, sequence,
+        ((ClientPlayerInteractionManagerAccessor) mc.gameMode)
+            .playerController$startPrediction((ClientLevel) mc.level, sequence ->
+                new ServerboundUseItemPacket(InteractionHand.MAIN_HAND, sequence,
                     SingleStageCtx.LAVA_YAW, SingleStageCtx.LAVA_PITCH));
-        player.swingHand(Hand.MAIN_HAND);
+        player.swing(InteractionHand.MAIN_HAND, SwingAnimation.DEFAULT, false);
     }
 
     /** 把桶放回背包 12（放完岩浆它是空桶，收回来就还是熔岩桶）。 */
-    private void restore(ClientPlayerEntity player) {
+    private void restore(LocalPlayer player) {
         if (hotbar < 0) return;
         if (!SingleStageInventoryAction.swapNow(player, SingleStageCtx.LAVA_BUCKET, hotbar)) {
             ChatUtils.error("熔岩桶没能放回背包 12，记得自己收一下");
@@ -165,9 +166,9 @@ class SingleStageLavaAction extends SingleStageStep {
         hotbar = -1;
     }
 
-    private static int firstFreeHotbar(ClientPlayerEntity player) {
+    private static int firstFreeHotbar(LocalPlayer player) {
         for (int slot = SingleStageCtx.HOTBAR_FREE_1; slot <= SingleStageCtx.HOTBAR_FREE_3; slot++) {
-            if (player.getInventory().getStack(slot).isEmpty()) return slot;
+            if (player.getInventory().getItem(slot).isEmpty()) return slot;
         }
         return -1;
     }

@@ -1,19 +1,19 @@
 package org.six_coin.playerController.client.feature;
 
 import com.mojang.authlib.minecraft.UserApiService;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.TitleScreen;
-import net.minecraft.client.gui.screen.multiplayer.ConnectScreen;
-import net.minecraft.client.network.ServerAddress;
-import net.minecraft.client.network.ServerInfo;
-import net.minecraft.client.network.SocialInteractionsManager;
-import net.minecraft.client.session.ProfileKeys;
-import net.minecraft.client.session.Session;
-import net.minecraft.server.integrated.IntegratedServer;
-import net.minecraft.text.Text;
-import net.minecraft.util.Uuids;
-import net.minecraft.util.WorldSavePath;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.ConnectScreen;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.gui.screens.social.PlayerSocialManager;
+import net.minecraft.client.multiplayer.ProfileKeyPairManager;
+import net.minecraft.client.User;
+import net.minecraft.client.server.IntegratedServer;
+import net.minecraft.network.chat.Component;
+import net.minecraft.core.UUIDUtil;
+import net.minecraft.world.level.storage.LevelResource;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.mixin.MinecraftClientAccessor;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -67,7 +67,7 @@ public final class AccountSwitcher {
     }
 
     /** 下线之前记下来的「要回到哪里」。 */
-    private record Target(String levelName, ServerInfo server) {
+    private record Target(String levelName, ServerData server) {
 
         boolean isServer() {
             return server != null;
@@ -100,12 +100,12 @@ public final class AccountSwitcher {
         String error = validateName(playerName);
         if (error != null) return error;
 
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         if (client == null) return "客户端还没启动";
 
-        Session session = client.getSession();
+        User session = client.getUser();
         if (session != null
-            && playerName.equals(session.getUsername())
+            && playerName.equals(session.getName())
             && session.getAccessToken().isEmpty()) {
             return "当前已经是以离线账户 " + playerName + " 的身份登录了";
         }
@@ -125,7 +125,7 @@ public final class AccountSwitcher {
     public static String requestRelogin() {
         if (stage != Stage.IDLE) return "上一次账户操作还没结束，请稍等";
 
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         if (client == null) return "客户端还没启动";
 
         pendingName = null;
@@ -148,19 +148,19 @@ public final class AccountSwitcher {
     }
 
     /** 当前身份的一行描述，给 {@code /pc account} 不带参数时看。 */
-    public static String describeCurrent(MinecraftClient client) {
-        Session session = client.getSession();
+    public static String describeCurrent(Minecraft client) {
+        User session = client.getUser();
         if (session == null) return "拿不到当前登录信息";
 
         String type = session.getAccessToken().isEmpty() ? "离线（没有登录令牌）" : "有登录令牌";
-        return session.getUsername() + "（UUID " + session.getUuidOrNull() + "，" + type + "）";
+        return session.getName() + "（UUID " + session.getProfileId() + "，" + type + "）";
     }
 
     // ------------------------------------------------------------------
     // tick
     // ------------------------------------------------------------------
 
-    public static void tick(MinecraftClient client) {
+    public static void tick(Minecraft client) {
         if (client == null || stage == Stage.IDLE) return;
 
         if (stage == Stage.START) {
@@ -175,7 +175,7 @@ public final class AccountSwitcher {
     }
 
     /** 换身份（只换账户时）+ 下线。 */
-    private static void start(MinecraftClient client) {
+    private static void start(Minecraft client) {
         boolean switchAccount = switchingAccount;
         String name = pendingName;
         target = captureTarget(client);
@@ -183,7 +183,7 @@ public final class AccountSwitcher {
         ActionManager.get().cancelAll();
 
         if (target == null) {
-            boolean wasInWorld = client.world != null || client.getServer() != null;
+            boolean wasInWorld = client.level != null || client.getSingleplayerServer() != null;
             if (!wasInWorld) {
                 ChatUtils.info(switchAccount
                     ? "已切换到离线账户 " + name + "（当前不在世界里，没有重新加入）"
@@ -204,12 +204,12 @@ public final class AccountSwitcher {
             : "正在退出到主界面，然后重新登录……");
         LOG.info("{}，下线后重连目标：{}",
             switchAccount ? "切换到离线账户 " + name : "重新登录（账户不变）",
-            target.isServer() ? "服务器 " + target.server().address : "存档 " + target.levelName());
+            target.isServer() ? "服务器 " + target.server().ip : "存档 " + target.levelName());
         stage = Stage.WAIT;
         waitTicks = WAIT_TICKS;
         try {
             // 和「保存并退出」按钮同一个方法：单人游戏里它会等存档写完、服务端线程退出再返回
-            client.disconnect(Text.literal(switchAccount
+            client.disconnectFromWorld(Component.literal(switchAccount
                 ? "正在切换到离线账户 " + name
                 : "正在重新登录"));
         } catch (Throwable t) {
@@ -220,33 +220,33 @@ public final class AccountSwitcher {
     }
 
     /** 重新加入下线前所在的世界。 */
-    private static void reconnect(MinecraftClient client) {
+    private static void reconnect(Minecraft client) {
         Target where = target;
         reset();
 
-        if (client.world != null || client.player != null || client.getServer() != null) {
+        if (client.level != null || client.player != null || client.getSingleplayerServer() != null) {
             ChatUtils.error("已经重新进世界了，放弃自动重连（记得检查一下当前身份）");
             LOG.warn("放弃自动重连：已经在世界里了");
             return;
         }
 
-        Screen parent = client.currentScreen != null ? client.currentScreen : new TitleScreen();
+        Screen parent = client.gui.screen() != null ? client.gui.screen() : new TitleScreen();
 
         if (where.isServer()) {
-            ServerInfo info = where.server();
-            if (!ServerAddress.isValid(info.address)) {
-                ChatUtils.error("服务器地址看起来不对，没法自动重连：" + info.address);
-                LOG.warn("服务器地址无效，没法自动重连：{}", info.address);
+            ServerData info = where.server();
+            if (!ServerAddress.isValidAddress(info.ip)) {
+                ChatUtils.error("服务器地址看起来不对，没法自动重连：" + info.ip);
+                LOG.warn("服务器地址无效，没法自动重连：{}", info.ip);
                 return;
             }
-            ChatUtils.info("正在重新加入服务器 " + info.address + " ……");
-            LOG.info("重新加入服务器 {}", info.address);
-            ConnectScreen.connect(parent, client, ServerAddress.parse(info.address), info, false, null);
+            ChatUtils.info("正在重新加入服务器 " + info.ip + " ……");
+            LOG.info("重新加入服务器 {}", info.ip);
+            ConnectScreen.startConnecting(parent, client, ServerAddress.parseString(info.ip), info, false, null);
         } else {
             ChatUtils.info("正在重新加入存档 " + where.levelName() + " ……");
             LOG.info("重新加入存档 {}", where.levelName());
             cancelReported = false;
-            client.createIntegratedServerLoader().start(where.levelName(),
+            client.createWorldOpenFlows().openWorld(where.levelName(),
                 () -> reportCancel(where.levelName()));
         }
     }
@@ -264,11 +264,11 @@ public final class AccountSwitcher {
     }
 
     /** 进世界之后补一条「用的是哪个账户」。 */
-    public static void onJoin(MinecraftClient client) {
+    public static void onJoin(Minecraft client) {
         if (announceName == null) return;
         ChatUtils.info("已用离线账户 " + announceName + " 进入世界（UUID "
-            + client.getSession().getUuidOrNull() + "）");
-        LOG.info("已用离线账户 {} 进入世界（UUID {}）", announceName, client.getSession().getUuidOrNull());
+            + client.getUser().getProfileId() + "）");
+        LOG.info("已用离线账户 {} 进入世界（UUID {}）", announceName, client.getUser().getProfileId());
         announceName = null;
     }
 
@@ -283,33 +283,33 @@ public final class AccountSwitcher {
      * 留着的话 {@code getGameProfile()} 会一直返回旧账户，所以这里直接换成「没有档案」，
      * 让 {@code getGameProfile()} 按新 session 现拼一个离线档案。
      */
-    private static void applyOffline(MinecraftClient client, String name) {
-        Session offline = new Session(name, Uuids.getOfflinePlayerUuid(name), "",
+    private static void applyOffline(Minecraft client, String name) {
+        User offline = new User(name, UUIDUtil.createOfflinePlayerUUID(name), "",
             Optional.empty(), Optional.empty());
 
         MinecraftClientAccessor accessor = (MinecraftClientAccessor) client;
-        accessor.playerController$setSession(offline);
-        accessor.playerController$setGameProfileFuture(CompletableFuture.completedFuture(null));
+        accessor.playerController$setUser(offline);
         accessor.playerController$setUserApiService(UserApiService.OFFLINE);
         // 离线账户没有聊天签名密钥，用原版给「没有密钥」准备的那个实现
-        accessor.playerController$setProfileKeys(ProfileKeys.MISSING);
-        accessor.playerController$setSocialInteractionsManager(
-            new SocialInteractionsManager(client, UserApiService.OFFLINE));
+        accessor.playerController$setProfileKeyPairManager(ProfileKeyPairManager.EMPTY_KEY_MANAGER);
+        // 26.3 的 PlayerSocialManager 要 FriendsService / RemoteFriendListUpdateHandler 才能构造，
+        // 这里不再重建：离线账户本来就连不上好友服务，留着旧的实例不影响游戏
+        // （1.21.11 里是 new PlayerSocialManager(client, UserApiService.OFFLINE)）
 
         announceName = name;
     }
 
     /** 记下要回到哪里：单人存档优先（大厅主机的世界也算），其次是服务器。 */
-    private static Target captureTarget(MinecraftClient client) {
-        IntegratedServer server = client.getServer();
+    private static Target captureTarget(Minecraft client) {
+        IntegratedServer server = client.getSingleplayerServer();
         if (server != null) {
             String dir = worldDirectoryName(server);
             return dir == null ? null : new Target(dir, null);
         }
 
-        ServerInfo info = client.getCurrentServerEntry();
+        ServerData info = client.getCurrentServer();
         if (info == null) return null;
-        if (info.address == null || info.address.isEmpty()) {
+        if (info.ip == null || info.ip.isEmpty()) {
             ChatUtils.error("拿不到服务器地址，没法自动重连");
             return null;
         }
@@ -319,13 +319,13 @@ public final class AccountSwitcher {
     /**
      * 单人存档的目录名（就是存档文件夹的名字，中文名也没问题）。
      *
-     * <p>注意 {@code WorldSavePath.ROOT} 的相对路径是 {@code "."}，所以
+     * <p>注意 {@code LevelResource.ROOT} 的相对路径是 {@code "."}，所以
      * {@code getSavePath(ROOT)} 拿到的是 {@code saves/<存档>/.}，它的 {@code getFileName()} 是
      * {@code "."}，不能当存档名用（拿它去开会去找 {@code saves/level.dat}）。
      * 这里从 {@code level.dat} 往上推一层拿目录名，中文名原样返回。
      */
     private static String worldDirectoryName(IntegratedServer server) {
-        Path levelDat = server.getSavePath(WorldSavePath.LEVEL_DAT).toAbsolutePath().normalize();
+        Path levelDat = server.getWorldPath(LevelResource.LEVEL_DATA_FILE).toAbsolutePath().normalize();
         Path dir = levelDat.getParent();
         if (dir == null || dir.getFileName() == null) {
             ChatUtils.error("拿不到单人存档的目录名，没法自动重连");

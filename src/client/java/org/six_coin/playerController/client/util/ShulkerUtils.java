@@ -1,12 +1,12 @@
 package org.six_coin.playerController.client.util;
 
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ContainerComponent;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,7 +16,7 @@ import java.util.List;
  *
  * <p>潜影盒物品本身没有专门的类，原版（{@code ShulkerBoxSlot}）也是用
  * 「BlockItem + ShulkerBoxBlock」判断的；盒子里装的东西在
- * {@link DataComponentTypes#CONTAINER} 这个数据组件里。
+ * {@link DataComponents#CONTAINER} 这个数据组件里。
  */
 public final class ShulkerUtils {
 
@@ -35,10 +35,10 @@ public final class ShulkerUtils {
         List<ItemStack> result = new ArrayList<>();
         if (!isShulkerBox(stack)) return result;
 
-        ContainerComponent container = stack.get(DataComponentTypes.CONTAINER);
+        ItemContainerContents container = stack.get(DataComponents.CONTAINER);
         if (container == null) return result;
 
-        for (ItemStack inner : container.iterateNonEmpty()) {
+        for (ItemStack inner : container.nonEmptyItemCopyStream().toList()) {
             if (!inner.isEmpty()) result.add(inner.copy());
         }
         return result;
@@ -80,10 +80,10 @@ public final class ShulkerUtils {
 
         int total = 0;
         for (ItemStack inner : contents) {
-            if (!inner.isOf(first)) return false;
+            if (!inner.is(first)) return false;
             total += inner.getCount();
         }
-        return total >= 27 * Math.max(1, contents.get(0).getMaxCount());
+        return total >= 27 * Math.max(1, contents.get(0).getMaxStackSize());
     }
 
     /** 盒子内容的一行描述，给日志用（被无视的会标出来）。 */
@@ -94,7 +94,7 @@ public final class ShulkerUtils {
         StringBuilder sb = new StringBuilder();
         for (ItemStack inner : contents) {
             if (sb.length() > 0) sb.append(", ");
-            sb.append(Registries.ITEM.getId(inner.getItem())).append(" x").append(inner.getCount());
+            sb.append(BuiltInRegistries.ITEM.getKey(inner.getItem())).append(" x").append(inner.getCount());
             if (ItemRules.isIgnored(inner)) {
                 sb.append("（无视：").append(ItemRules.ignoreReason(inner)).append("）");
             }

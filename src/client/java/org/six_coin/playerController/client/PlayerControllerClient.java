@@ -14,6 +14,8 @@ import org.six_coin.playerController.client.container.ContainerCacheTracker;
 import org.six_coin.playerController.client.feature.AccountSwitcher;
 import org.six_coin.playerController.client.feature.AntiKick;
 import org.six_coin.playerController.client.feature.DimensionWait;
+import org.six_coin.playerController.client.feature.HoverJitter;
+import org.six_coin.playerController.client.feature.MovePackets;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.feature.ServerTickRate;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
@@ -54,6 +56,11 @@ public class PlayerControllerClient implements ClientModInitializer {
         StationRenderer.register();
         MineStationRenderer.register();
 
+        // 26.3 服务端一个 tick 只接受一个带位置的移动包，第二个直接断开；
+        // 而「一个 tick」的边界是 ClientTickEnd 包（见 MovePackets.endWindow / ClientPacketSendMixin）。
+        // 这里只做兜底：ClientTickEnd 一直没发出去（暂停 / 卡住）时强行换窗口。
+        ClientTickEvents.START_CLIENT_TICK.register(client -> MovePackets.beginTick());
+
         // 在原版 tick 世界之前驱动动作队列，移动类动作写入的速度才能在当 tick 生效
         ClientTickEvents.START_CLIENT_TICK.register(ActionManager.get()::tick);
 
@@ -62,6 +69,10 @@ public class PlayerControllerClient implements ClientModInitializer {
         // 放在 tick 末尾（和 Meteor 的 post-tick 一致）：这时候 player.getY() 正好是
         // 客户端这一 tick 报给服务端的高度，往下补的量最准。
         ClientTickEvents.END_CLIENT_TICK.register(client -> AntiKick.tick());
+
+        // 悬停时把 fallDistance 压回 0：不然 Meteor 的 Flight（velocity 模式）反检测会每 tick
+        // 把朝向 ±1 度地改一下再改回来，yRotO 记到的是改过的值，视角就会一直左右摆。见 HoverJitter。
+        ClientTickEvents.END_CLIENT_TICK.register(client -> HoverJitter.tick());
 
         // 换维度（传送门）之后先等一会儿再动：服务端还没把落点同步好，马上走容易被拉回去
         ClientTickEvents.END_CLIENT_TICK.register(client -> DimensionWait.tick());
@@ -98,6 +109,7 @@ public class PlayerControllerClient implements ClientModInitializer {
             AttackManager.get().reset();
             MendingManager.get().reset();
             MineManager.get().reset();
+            HoverJitter.reset();
             ServerTickRate.onJoin();
 
             // 挖掘的过滤列表是可以手改的 json，进世界时重新读一遍

@@ -1,15 +1,13 @@
 package org.six_coin.playerController.client.stock.station;
 
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.RenderLayers;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.VertexRendering;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.shape.VoxelShapes;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
+import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.Shapes;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
@@ -29,24 +27,23 @@ public final class StationRenderer {
     }
 
     public static void register() {
-        WorldRenderEvents.END_MAIN.register(StationRenderer::render);
+        LevelRenderEvents.COLLECT_SUBMITS.register(StationRenderer::render);
     }
 
-    private static void render(WorldRenderContext context) {
+    private static void render(LevelRenderContext context) {
         StationManager manager = StationManager.get();
         if (!manager.isShowing()) return;
         if (manager.totalCount() == 0) return;
-        if (context.worldState() == null || context.worldState().cameraRenderState == null) return;
+        if (context.levelState() == null || context.levelState().cameraRenderState == null) return;
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
 
         try {
-            Vec3d camera = context.worldState().cameraRenderState.pos;
+            Vec3 camera = context.levelState().cameraRenderState.pos;
             if (camera == null) return;
 
-            MatrixStack matrices = context.matrices();
-            VertexConsumer buffer = context.consumers().getBuffer(RenderLayers.lines());
+            PoseStack matrices = context.poseStack();
             String dimension = DimensionUtils.current();
 
             for (StationPart part : StationPart.values()) {
@@ -59,15 +56,7 @@ public final class StationRenderer {
                     double dz = pos.getZ() + 0.5 - camera.z;
                     if (dx * dx + dy * dy + dz * dz > MAX_DISTANCE * MAX_DISTANCE) continue;
 
-                    VertexRendering.drawOutline(
-                        matrices,
-                        buffer,
-                        VoxelShapes.fullCube(),
-                        pos.getX() - camera.x,
-                        pos.getY() - camera.y,
-                        pos.getZ() - camera.z,
-                        part.color(),
-                        LINE_WIDTH);
+                    drawOutline(context, matrices, pos, camera, part.color());
                 }
             }
         } catch (Exception e) {
@@ -75,5 +64,13 @@ public final class StationRenderer {
             manager.setShow(false);
             ChatUtils.error("工作站高亮渲染出错，已自动关闭: " + e);
         }
+    }
+
+    /** 画一个方块描边：把矩阵挪到方块位置，交给提交收集器画（26.x 的渲染管线不再直接写顶点缓冲）。 */
+    private static void drawOutline(LevelRenderContext context, PoseStack matrices, BlockPos pos, Vec3 camera, int color) {
+        matrices.pushPose();
+        matrices.translate(pos.getX() - camera.x, pos.getY() - camera.y, pos.getZ() - camera.z);
+        context.submitNodeCollector().submitShapeOutline(matrices, Shapes.block(), RenderTypes.lines(), color, LINE_WIDTH, false);
+        matrices.popPose();
     }
 }

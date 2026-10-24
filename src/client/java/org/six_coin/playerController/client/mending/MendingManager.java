@@ -1,18 +1,18 @@
 package org.six_coin.playerController.client.mending;
 
-import net.minecraft.block.EnderChestBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.ExperienceOrbEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.tag.ItemTags;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.level.block.EnderChestBlock;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.ExperienceOrb;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.ActionManager;
@@ -222,9 +222,9 @@ public final class MendingManager {
 
     /** 站立点周围现在有几个经验球（没设站立点 / 没世界 / 不在那个维度就是 -1）。 */
     public int orbCount() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         MendingPos stand = MendingConfig.get().standPoint();
-        if (stand == null || mc.world == null) return -1;
+        if (stand == null || mc.level == null) return -1;
         if (!DimensionUtils.current().equals(stand.dimension())) return -1;
         return countOrbs(mc, stand);
     }
@@ -235,12 +235,12 @@ public final class MendingManager {
      * @return null = 没问题；否则是一句为什么不行
      */
     @Nullable
-    public static String firstSlotProblem(ClientPlayerEntity player) {
-        ItemStack sword = player.getInventory().getStack(FIRST_SLOT);
+    public static String firstSlotProblem(LocalPlayer player) {
+        ItemStack sword = player.getInventory().getItem(FIRST_SLOT);
         if (sword.isEmpty()) {
             return "快捷栏第一位是空的，要放一把带经验修补的剑";
         }
-        if (!sword.isIn(ItemTags.SWORDS)) {
+        if (!sword.is(ItemTags.SWORDS)) {
             return "快捷栏第一位不是剑（现在是 " + InventoryUtils.describe(sword) + "）";
         }
         if (!MendingItems.hasMending(sword)) {
@@ -270,9 +270,9 @@ public final class MendingManager {
             return "mending 已经在跑了（现在：" + stage.text() + "）";
         }
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) return "没有玩家";
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) return "没有玩家";
 
         // 1) attack 里必须有 mending 这份 profile
         if (!AttackProfiles.exists(PROFILE)) {
@@ -362,15 +362,15 @@ public final class MendingManager {
         if (stage == Stage.IDLE) return;
 
         ChatUtils.error("mending 中止：" + reason);
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
 
         // 还活着、界面还在的话，把副手先换回去
-        if (tempSlot != null && player != null && player.isAlive() && player.currentScreenHandler != null) {
-            ScreenHandler handler = player.currentScreenHandler;
+        if (tempSlot != null && player != null && player.isAlive() && player.containerMenu != null) {
+            AbstractContainerMenu handler = player.containerMenu;
             Slot slot = resolve(handler, player, tempSlot);
             if (slot != null) {
-                ContainerClicks.click(handler, slot, SWAP_OFFHAND_BUTTON, SlotActionType.SWAP,
+                ContainerClicks.click(handler, slot, SWAP_OFFHAND_BUTTON, ContainerInput.SWAP,
                     "中止前把副手换回来");
             }
         }
@@ -388,9 +388,9 @@ public final class MendingManager {
         tickCount++;
         if (stage == Stage.IDLE) return;
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) return;
         if (!player.isAlive()) {
             fail("你死了");
             return;
@@ -428,7 +428,7 @@ public final class MendingManager {
         ChatUtils.info("mending：到站立点了");
     }
 
-    private void tickLoop(MinecraftClient mc, ClientPlayerEntity player) {
+    private void tickLoop(Minecraft mc, LocalPlayer player) {
         MendingPos stand = MendingConfig.get().standPoint();
         if (stand == null) {
             exitLoop("站立点被删掉了");
@@ -449,7 +449,7 @@ public final class MendingManager {
     }
 
     /** 一趟交换跑完了没有。 */
-    private void tickSwap(MinecraftClient mc, ClientPlayerEntity player) {
+    private void tickSwap(Minecraft mc, LocalPlayer player) {
         if (swapAction == null) {
             stage = Stage.LOOP;
             return;
@@ -487,7 +487,7 @@ public final class MendingManager {
      * 副手里要是坏了一把**没有经验修补**的剑，它永远修不满，但也修不了 ——
      * 那种也算「让出来了」（换出去），不然整轮会卡在它身上。
      */
-    private void detect(MinecraftClient mc, ClientPlayerEntity player, MendingPos stand) {
+    private void detect(Minecraft mc, LocalPlayer player, MendingPos stand) {
         // 1) 经验球太多就先别打了，等捡起来一些再继续
         int orbs = countOrbs(mc, stand);
         setAttack(orbs <= ORB_LIMIT, "站立点周围 " + orbs + " 个经验球");
@@ -496,7 +496,7 @@ public final class MendingManager {
         Scan scan = scan(player, null);
         ChatUtils.debug("mending：还要修 %d 件，合计缺口 %d，经验球 %d 个，副手 %s",
             scan.repairable(), scan.damageSum(), orbs,
-            InventoryUtils.describe(player.getOffHandStack()));
+            InventoryUtils.describe(player.getOffhandItem()));
 
         // 「有进展」= 所有要修的东西加起来，耐久缺口变小了
         if (lastDamageSum >= 0 && scan.damageSum() < lastDamageSum) {
@@ -511,7 +511,7 @@ public final class MendingManager {
         }
 
         // 3) 副手还在修就等（末影箱保持关着，副手的耐久才准）
-        if (MendingItems.needsRepair(player.getOffHandStack())) return;
+        if (MendingItems.needsRepair(player.getOffhandItem())) return;
 
         // 末影箱被删掉 / 改成没设了：里面当然没东西要修
         if (MendingConfig.get().enderChest() == null) chestKnownEmpty = true;
@@ -532,18 +532,18 @@ public final class MendingManager {
     }
 
     /** 数站立点周围（半径 {@value #ORB_RADIUS} 的球）里的经验球。 */
-    private static int countOrbs(MinecraftClient mc, MendingPos stand) {
-        if (mc.world == null) return 0;
+    private static int countOrbs(Minecraft mc, MendingPos stand) {
+        if (mc.level == null) return 0;
 
-        Vec3d center = PlayerUtils.blockCenter(stand.pos());
+        Vec3 center = PlayerUtils.blockCenter(stand.pos());
         double r = ORB_RADIUS;
-        Box box = new Box(center.x - r, center.y - r, center.z - r,
+        AABB box = new AABB(center.x - r, center.y - r, center.z - r,
             center.x + r, center.y + r, center.z + r);
 
         int count = 0;
-        for (ExperienceOrbEntity orb : mc.world.getEntitiesByClass(ExperienceOrbEntity.class, box, orb -> true)) {
+        for (ExperienceOrb orb : mc.level.getEntitiesOfClass(ExperienceOrb.class, box, orb -> true)) {
             if (orb.isRemoved()) continue;
-            if (orb.squaredDistanceTo(center) <= r * r) count++;
+            if (orb.distanceToSqr(center) <= r * r) count++;
         }
         return count;
     }
@@ -551,7 +551,7 @@ public final class MendingManager {
     /**
      * 扫一遍物品栏（快捷栏、背包、盔甲、副手），界面开着的时候带上那个界面里容器的格子。
      *
-     * <p>物品栏直接读 {@link PlayerInventory}：开没开容器界面、开的是哪个界面都不影响
+     * <p>物品栏直接读 {@link Inventory}：开没开容器界面、开的是哪个界面都不影响
      * （末影箱界面里是没有盔甲格和副手格的，按界面上的格子扫会漏掉它们）。
      *
      * <p>「能换到副手的」只有快捷栏第 2 格起的 8 格和背包 27 格
@@ -560,8 +560,8 @@ public final class MendingManager {
      *
      * @param chestHandler 界面开着的时候传那个界面（末影箱的格子从里面读）；关着传 null
      */
-    private Scan scan(ClientPlayerEntity player, @Nullable ScreenHandler chestHandler) {
-        PlayerInventory inventory = player.getInventory();
+    private Scan scan(LocalPlayer player, @Nullable AbstractContainerMenu chestHandler) {
+        Inventory inventory = player.getInventory();
 
         boolean needsRepair = false;
         int damageSum = 0;
@@ -569,8 +569,8 @@ public final class MendingManager {
         int chestRepairable = 0;
         SlotKey candidate = null;
 
-        for (int index = 0; index <= PlayerInventory.OFF_HAND_SLOT; index++) {
-            ItemStack stack = inventory.getStack(index);
+        for (int index = 0; index <= Inventory.SLOT_OFFHAND; index++) {
+            ItemStack stack = inventory.getItem(index);
             if (!MendingItems.needsRepair(stack)) continue;
 
             needsRepair = true;
@@ -583,10 +583,10 @@ public final class MendingManager {
             if (candidate == null) candidate = new SlotKey(Side.PLAYER, index);
         }
 
-        if (chestHandler != null && player.currentScreenHandler == chestHandler) {
+        if (chestHandler != null && player.containerMenu == chestHandler) {
             List<Slot> slots = InventoryUtils.containerSlots(chestHandler);
             for (int index = 0; index < slots.size(); index++) {
-                ItemStack stack = slots.get(index).getStack();
+                ItemStack stack = slots.get(index).getItem();
                 if (!MendingItems.needsRepair(stack)) continue;
 
                 needsRepair = true;
@@ -611,7 +611,7 @@ public final class MendingManager {
         return !chestKnownEmpty;
     }
 
-    private void startSwap(MinecraftClient mc, boolean openChest) {
+    private void startSwap(Minecraft mc, boolean openChest) {
         MendingPos chest = MendingConfig.get().enderChest();
         BlockPos pos = openChest && chest != null ? chest.pos() : null;
 
@@ -635,7 +635,7 @@ public final class MendingManager {
      * @param chestOpen 这一趟是不是开着末影箱（开着才能看箱子里的东西）
      * @return {@code true} = 这一趟还没跑完；{@code false} = 可以关界面了
      */
-    boolean swapStep(ClientPlayerEntity player, ScreenHandler handler, boolean chestOpen) {
+    boolean swapStep(LocalPlayer player, AbstractContainerMenu handler, boolean chestOpen) {
         // mending 已经被中止 / 重置了：别再点了，让动作自己收尾关界面
         if (stage == Stage.IDLE) return false;
 
@@ -675,7 +675,7 @@ public final class MendingManager {
     }
 
     /** 点一下「和副手交换」。 */
-    private void performSwap(ClientPlayerEntity player, ScreenHandler handler) {
+    private void performSwap(LocalPlayer player, AbstractContainerMenu handler) {
         Swap swap = swaps.poll();
         if (swap == null) return;
 
@@ -685,17 +685,17 @@ public final class MendingManager {
             return;
         }
 
-        ItemStack before = player.getOffHandStack().copy();
+        ItemStack before = player.getOffhandItem().copy();
         String action = swap.restore()
             ? "把 " + slotName(swap.slot()) + " 换回副手"
             : "把 " + slotName(swap.slot()) + " 换到副手";
-        ContainerClicks.click(handler, slot, SWAP_OFFHAND_BUTTON, SlotActionType.SWAP, action);
+        ContainerClicks.click(handler, slot, SWAP_OFFHAND_BUTTON, ContainerInput.SWAP, action);
 
         // 换进来的那一格从现在起就是临时物品格（下次修满了换回去）
         if (!swap.restore()) tempSlot = swap.slot();
 
-        ItemStack after = player.getOffHandStack();
-        if (ItemStack.areEqual(before, after)) {
+        ItemStack after = player.getOffhandItem();
+        if (ItemStack.matches(before, after)) {
             ChatUtils.debug("交换好像没生效（副手还是 %s）", InventoryUtils.describe(after));
         }
     }
@@ -711,13 +711,13 @@ public final class MendingManager {
 
         // 副手还是那件东西的话，先把临时格换回来再走
         if (tempSlot != null) {
-            startSwap(MinecraftClient.getInstance(), tempSlot.side() == Side.CONTAINER);
+            startSwap(Minecraft.getInstance(), tempSlot.side() == Side.CONTAINER);
             return;
         }
-        beginMoveBack(MinecraftClient.getInstance());
+        beginMoveBack(Minecraft.getInstance());
     }
 
-    private void beginMoveBack(MinecraftClient mc) {
+    private void beginMoveBack(Minecraft mc) {
         restoreAttack();
 
         BlockPos target = returnPos;
@@ -801,9 +801,9 @@ public final class MendingManager {
     /** 到站立点了：开攻击，（末影箱里有没有东西）等检测那一趟再看。 */
     @Nullable
     private String arriveAtStand() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) return "没有玩家";
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) return "没有玩家";
 
         MendingPos stand = MendingConfig.get().standPoint();
         if (stand == null) return "站立点被删掉了";
@@ -819,9 +819,9 @@ public final class MendingManager {
                     + " > " + String.format("%.2f", PlayerUtils.reach()) + "）";
             }
             if (DimensionUtils.current().equals(chest.dimension())) {
-                if (!(mc.world.getBlockState(chest.pos()).getBlock() instanceof EnderChestBlock)) {
+                if (!(mc.level.getBlockState(chest.pos()).getBlock() instanceof EnderChestBlock)) {
                     return chest.describe() + " 不是末影箱（现在是 "
-                        + ContainerTypes.idOf(mc.world.getBlockState(chest.pos())) + "）";
+                        + ContainerTypes.idOf(mc.level.getBlockState(chest.pos())) + "）";
                 }
             }
         }
@@ -887,7 +887,7 @@ public final class MendingManager {
 
     /** 把「哪边第几格」解析成这个界面里的槽位。 */
     @Nullable
-    private static Slot resolve(ScreenHandler handler, ClientPlayerEntity player, SlotKey key) {
+    private static Slot resolve(AbstractContainerMenu handler, LocalPlayer player, SlotKey key) {
         if (key.side() == Side.PLAYER) {
             return InventoryUtils.inventorySlot(handler, player.getInventory(), key.index());
         }
@@ -898,9 +898,9 @@ public final class MendingManager {
     private static String slotName(SlotKey key) {
         if (key.side() == Side.CONTAINER) return "末影箱第 " + (key.index() + 1) + " 格";
         int index = key.index();
-        if (index < PlayerInventory.getHotbarSize()) return "快捷栏第 " + (index + 1) + " 格";
+        if (index < Inventory.getSelectionSize()) return "快捷栏第 " + (index + 1) + " 格";
         if (index < InventoryUtils.MAIN_END) return "背包第 " + (index - InventoryUtils.MAIN_START + 1) + " 格";
-        if (index < PlayerInventory.OFF_HAND_SLOT) return "盔甲第 " + (index - InventoryUtils.MAIN_END + 1) + " 格";
+        if (index < Inventory.SLOT_OFFHAND) return "盔甲第 " + (index - InventoryUtils.MAIN_END + 1) + " 格";
         return "副手";
     }
 }

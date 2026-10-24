@@ -1,6 +1,6 @@
 package org.six_coin.playerController.client.stock;
 
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.Minecraft;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.container.ContainerCacheTracker;
@@ -69,8 +69,8 @@ public final class StockTask extends Action {
             ChatUtils.info("备货开始，先停下了正在跑的挖掘任务（/pc mine 的范围还留着）");
         }
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("没有玩家或世界");
             return;
         }
@@ -117,8 +117,8 @@ public final class StockTask extends Action {
         // 失败了就把物品栏收拾一下：除了快捷栏第一格的钻石镐，其余全放回 item_storage。
         // 不收拾的话，中途剩下的过程材料会一直占着 27 格，下次一开始就「物品栏满了」。
         if (failureReason() != null) {
-            MinecraftClient mc = MinecraftClient.getInstance();
-            if (mc.player != null && mc.world != null) {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player != null && mc.level != null) {
                 ActionManager.get().submit(new StockCleanupAction(task));
             }
         }

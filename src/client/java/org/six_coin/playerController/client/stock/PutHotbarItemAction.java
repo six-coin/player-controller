@@ -1,13 +1,13 @@
 package org.six_coin.playerController.client.stock;
 
 import com.google.gson.JsonObject;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerSession;
@@ -74,7 +74,7 @@ public class PutHotbarItemAction extends Action {
      * @param hotbarTo   结束格（含）
      */
     public PutHotbarItemAction(BlockPos pos, int hotbarFrom, int hotbarTo, boolean wantDetail) {
-        this.pos = pos.toImmutable();
+        this.pos = pos.immutable();
         this.hotbarFrom = Math.min(hotbarFrom, hotbarTo);
         this.hotbarTo = Math.max(hotbarFrom, hotbarTo);
         this.wantDetail = wantDetail;
@@ -113,13 +113,13 @@ public class PutHotbarItemAction extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
-        if (!(mc.world.getBlockEntity(pos) instanceof Inventory)) {
+        if (!(mc.level.getBlockEntity(pos) instanceof Container)) {
             fail(pos.toShortString() + " 不是容器（没有物品栏）");
             return;
         }
@@ -129,7 +129,7 @@ public class PutHotbarItemAction extends Action {
                 + "，触及范围 " + String.format("%.2f", PlayerUtils.reach()) + "）");
             return;
         }
-        if (!player.currentScreenHandler.getCursorStack().isEmpty()) {
+        if (!player.containerMenu.getCarried().isEmpty()) {
             fail("光标上还有物品，先放下再执行");
             return;
         }
@@ -149,8 +149,8 @@ public class PutHotbarItemAction extends Action {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -175,7 +175,7 @@ public class PutHotbarItemAction extends Action {
 
     @Override
     protected void onEnd() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         if (wantDetail && session.isOpen()) {
             detail = session.breakdown();
             freeSlots = session.freeSlots();
@@ -196,7 +196,7 @@ public class PutHotbarItemAction extends Action {
 
     // ------------------------------------------------------------------
 
-    private void tickOpening(MinecraftClient mc) {
+    private void tickOpening(Minecraft mc) {
         switch (session.awaitOpen(mc)) {
             case READY -> phase = Phase.PUT;
             case TIMEOUT -> fail("等待容器界面超时");
@@ -233,21 +233,21 @@ public class PutHotbarItemAction extends Action {
 
     /** 这一轮可以考虑的源格：快捷栏这几格里有东西的。 */
     private List<Slot> hotbarSlots() {
-        ScreenHandler handler = session.handler();
+        AbstractContainerMenu handler = session.handler();
         List<Slot> result = new ArrayList<>();
 
         for (int i = hotbarFrom; i <= hotbarTo; i++) {
             Slot slot = InventoryUtils.hotbarSlot(handler, i);
-            if (slot == null || slot.getStack().isEmpty()) continue;
+            if (slot == null || slot.getItem().isEmpty()) continue;
             result.add(slot);
         }
         return result;
     }
 
     /** 快捷栏范围内第一叠东西（只给日志用）。 */
-    private ItemStack firstStack(ClientPlayerEntity player) {
+    private ItemStack firstStack(LocalPlayer player) {
         for (int i = hotbarFrom; i <= hotbarTo; i++) {
-            ItemStack stack = player.getInventory().getStack(i);
+            ItemStack stack = player.getInventory().getItem(i);
             if (!stack.isEmpty()) return stack;
         }
         return ItemStack.EMPTY;

@@ -1,6 +1,6 @@
 package org.six_coin.playerController.client.mine.complex;
 
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 
 import java.util.ArrayList;
 import java.util.List;

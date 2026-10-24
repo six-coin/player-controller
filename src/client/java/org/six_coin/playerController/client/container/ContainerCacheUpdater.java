@@ -1,9 +1,9 @@
 package org.six_coin.playerController.client.container;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 import org.six_coin.playerController.client.stock.station.StationManager;
 import org.six_coin.playerController.client.stock.station.StationPos;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -21,7 +21,7 @@ import java.util.Map;
  * </ul>
  *
  * <p>找出对应缓存条目的规则：先看这个位置自己；如果是大箱子，再按方块状态算出另一半在哪一格
- * （{@link ContainerTypes#otherHalf(World, BlockPos)}），那一格在缓存里就一起刷新。
+ * （{@link ContainerTypes#otherHalf(Level, BlockPos)}），那一格在缓存里就一起刷新。
  * 不做「附近有几个候选」这种猜测。
  *
  * <p><b>工作站里的容器永远不记</b>（见 {@link #refresh}）：{@code item_storage}、{@code item_final}、
@@ -37,7 +37,7 @@ public final class ContainerCacheUpdater {
      *
      * @return 可能为空；最多两个（大箱子两半都缓存过）
      */
-    public static List<CachedContainer> findEntries(World world, BlockPos pos) {
+    public static List<CachedContainer> findEntries(Level level, BlockPos pos) {
         ContainerCacheManager cache = ContainerCacheManager.get();
         String dimension = DimensionUtils.current();
         List<CachedContainer> found = new ArrayList<>();
@@ -45,7 +45,7 @@ public final class ContainerCacheUpdater {
         CachedContainer direct = cache.at(dimension, pos);
         if (direct != null) found.add(direct);
 
-        BlockPos other = world == null ? null : ContainerTypes.otherHalf(world, pos);
+        BlockPos other = level == null ? null : ContainerTypes.otherHalf(level, pos);
         if (other != null) {
             CachedContainer half = cache.at(dimension, other);
             if (half != null && !found.contains(half)) {
@@ -66,8 +66,8 @@ public final class ContainerCacheUpdater {
      *
      * @return 刷了几个条目的内容（内容没变的不算）
      */
-    public static int refresh(MinecraftClient client, BlockPos pos, ScreenHandler handler) {
-        if (client == null || client.world == null || pos == null || handler == null) return 0;
+    public static int refresh(Minecraft client, BlockPos pos, AbstractContainerMenu handler) {
+        if (client == null || client.level == null || pos == null || handler == null) return 0;
 
         // 创造模式物品栏不是真容器，别理它
         if (ContainerCacheTracker.isCreativeInventory(client)) {
@@ -76,13 +76,13 @@ public final class ContainerCacheUpdater {
         }
 
         // 工作站里的容器一律不写缓存
-        if (isStationContainer(client.world, pos)) {
+        if (isStationContainer(client.level, pos)) {
             ChatUtils.debug("容器 " + pos.toShortString()
                 + " 是工作站的容器，按约定不进容器缓存，跳过刷新");
             return 0;
         }
 
-        List<CachedContainer> entries = findEntries(client.world, pos);
+        List<CachedContainer> entries = findEntries(client.level, pos);
         if (entries.isEmpty()) {
             ChatUtils.debug("容器的位置 " + pos.toShortString() + "（及大箱子另一半）不在缓存里，不用刷新");
             return 0;
@@ -112,7 +112,7 @@ public final class ContainerCacheUpdater {
      *
      * <p>只看当前维度里配过的坐标；一个都没配就直接 false。
      */
-    private static boolean isStationContainer(World world, BlockPos pos) {
+    private static boolean isStationContainer(Level level, BlockPos pos) {
         String dimension = DimensionUtils.current();
         List<BlockPos> station = new ArrayList<>();
         for (StationPos stationPos : StationManager.get().allPositions()) {
@@ -122,7 +122,7 @@ public final class ContainerCacheUpdater {
         if (station.isEmpty()) return false;
         if (station.contains(pos)) return true;
 
-        BlockPos other = world == null ? null : ContainerTypes.otherHalf(world, pos);
+        BlockPos other = level == null ? null : ContainerTypes.otherHalf(level, pos);
         return other != null && station.contains(other);
     }
 }

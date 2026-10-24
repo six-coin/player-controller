@@ -4,17 +4,17 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.entry.RegistryEntryList;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.HolderSet;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 
 import java.io.IOException;
@@ -60,13 +60,13 @@ public final class DumpCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("dump")
+        return ClientCommands.literal("dump")
             .executes(DumpCommand::status)
-            .then(ClientCommandManager.literal("all_items")
+            .then(ClientCommands.literal("all_items")
                 .executes(DumpCommand::dumpAllItems))
-            .then(ClientCommandManager.literal("inventory")
+            .then(ClientCommands.literal("inventory")
                 .executes(DumpCommand::dumpInventory))
-            .then(ClientCommandManager.literal("all_tags")
+            .then(ClientCommands.literal("all_tags")
                 .executes(DumpCommand::dumpAllTags));
     }
 
@@ -74,17 +74,17 @@ public final class DumpCommand {
 
     private static int status(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7导出清单（都写到 " + dumpDir() + "）："));
-        source.sendFeedback(Text.literal("  §f/pc dump all_items§7 - 所有物品的 id"));
-        source.sendFeedback(Text.literal("  §f/pc dump inventory§7 - 你物品栏 36 格里的物品 id（去重）"));
-        source.sendFeedback(Text.literal("  §f/pc dump all_tags§7 - minecraft 命名空间下的所有物品标签"));
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7导出清单（都写到 " + dumpDir() + "）："));
+        source.sendFeedback(Component.literal("  §f/pc dump all_items§7 - 所有物品的 id"));
+        source.sendFeedback(Component.literal("  §f/pc dump inventory§7 - 你物品栏 36 格里的物品 id（去重）"));
+        source.sendFeedback(Component.literal("  §f/pc dump all_tags§7 - minecraft 命名空间下的所有物品标签"));
         return 1;
     }
 
     /** 所有物品的 id（不含空气）。 */
     private static int dumpAllItems(CommandContext<FabricClientCommandSource> context) {
         Set<String> ids = new LinkedHashSet<>();
-        for (Identifier id : Registries.ITEM.getIds()) {
+        for (Identifier id : BuiltInRegistries.ITEM.keySet()) {
             if (isAir(id)) continue;
             ids.add(id.toString());
         }
@@ -94,17 +94,17 @@ public final class DumpCommand {
     /** 物品栏 36 格（快捷栏 9 + 主背包 27）里的物品 id；盔甲和副手不算。 */
     private static int dumpInventory(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) {
-            source.sendError(Text.literal("没有玩家"));
+            source.sendError(Component.literal("没有玩家"));
             return 0;
         }
 
         Set<String> ids = new LinkedHashSet<>();
-        List<ItemStack> main = player.getInventory().getMainStacks();
+        List<ItemStack> main = player.getInventory().getNonEquipmentItems();
         for (ItemStack stack : main) {
             if (stack.isEmpty()) continue;
-            ids.add(Registries.ITEM.getId(stack.getItem()).toString());
+            ids.add(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
         }
         return write(source, "inventory.json", ids, "物品栏里的物品");
     }
@@ -115,18 +115,18 @@ public final class DumpCommand {
 
         Set<String> ids = new LinkedHashSet<>();
         try {
-            for (RegistryEntryList.Named<Item> named : Registries.ITEM.streamTags().toList()) {
-                Identifier id = named.getTag().id();
+            for (HolderSet.Named<Item> named : BuiltInRegistries.ITEM.getTags().toList()) {
+                Identifier id = named.key().location();
                 if (!"minecraft".equals(id.getNamespace())) continue;
                 ids.add("#" + id);
             }
         } catch (Throwable t) {
-            source.sendError(Text.literal("读标签表失败：" + t));
+            source.sendError(Component.literal("读标签表失败：" + t));
             return 0;
         }
 
         if (ids.isEmpty()) {
-            source.sendError(Text.literal("一个标签都没读到（还没进世界？标签表还没加载？）"));
+            source.sendError(Component.literal("一个标签都没读到（还没进世界？标签表还没加载？）"));
             return 0;
         }
         return write(source, "all_tags.json", ids, "物品标签");
@@ -147,15 +147,15 @@ public final class DumpCommand {
                 GSON.toJson(sorted, writer);
             }
         } catch (IOException e) {
-            source.sendError(Text.literal("写 " + file + " 失败：" + e.getMessage()));
+            source.sendError(Component.literal("写 " + file + " 失败：" + e.getMessage()));
             return 0;
         }
 
-        source.sendFeedback(Text.literal("已导出" + what + "：" + sorted.size() + " 个 -> " + file));
+        source.sendFeedback(Component.literal("已导出" + what + "：" + sorted.size() + " 个 -> " + file));
         return 1;
     }
 
     private static boolean isAir(Identifier id) {
-        return Registries.ITEM.get(id) == Items.AIR;
+        return BuiltInRegistries.ITEM.getValue(id) == Items.AIR;
     }
 }

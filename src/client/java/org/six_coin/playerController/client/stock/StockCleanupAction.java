@@ -1,8 +1,8 @@
 package org.six_coin.playerController.client.stock;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.ContainerPutAction;
@@ -87,9 +87,9 @@ public final class StockCleanupAction extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -207,7 +207,7 @@ public final class StockCleanupAction extends Action {
         }
 
         // 已经没有要倒的东西了（上一个容器就倒干净了）：不用再挨个开下去
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        LocalPlayer player = Minecraft.getInstance().player;
         if (player == null || !hasSomethingToDump(player)) {
             phase = Phase.DONE;
             finish();
@@ -240,10 +240,10 @@ public final class StockCleanupAction extends Action {
     }
 
     /** 物品栏里除了快捷栏第一格（钻石镐）还有没有别的东西。 */
-    private static boolean hasSomethingToDump(ClientPlayerEntity player) {
+    private static boolean hasSomethingToDump(LocalPlayer player) {
         for (int i = 0; i < 36; i++) {
             if (i == StockTask.PICKAXE_HOTBAR) continue;
-            if (!player.getInventory().getStack(i).isEmpty()) return true;
+            if (!player.getInventory().getItem(i).isEmpty()) return true;
         }
         return false;
     }

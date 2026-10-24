@@ -9,16 +9,16 @@ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.block.Block;
-import net.minecraft.command.CommandSource;
-import net.minecraft.command.argument.IdentifierArgumentType;
-import net.minecraft.registry.Registries;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.IdentifierArgument;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.mine.MineFilter;
@@ -80,16 +80,16 @@ public final class MineCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("mine")
+        return ClientCommands.literal("mine")
             .executes(MineCommand::status)
-            .then(ClientCommandManager.literal("cancel")
+            .then(ClientCommands.literal("cancel")
                 .executes(MineCommand::cancel))
             .then(simple())
             .then(lists())
-            .then(ClientCommandManager.literal("debug_chunk_miner")
-                .then(ClientCommandManager.argument("item_collector_list", StringArgumentType.greedyString())
+            .then(ClientCommands.literal("debug_chunk_miner")
+                .then(ClientCommands.argument("item_collector_list", StringArgumentType.greedyString())
                     .executes(MineCommand::debugChunkMiner)))
-            .then(ClientCommandManager.literal("complex")
+            .then(ClientCommands.literal("complex")
                 .executes(MineCommand::complexStatus)
                 .then(addTask())
                 .then(delTask())
@@ -104,41 +104,41 @@ public final class MineCommand {
     private static LiteralArgumentBuilder<FabricClientCommandSource> simple() {
         // brigadier 的 then(builder) 会立刻 build 出节点，所以要从里往外挂
         RequiredArgumentBuilder<FabricClientCommandSource, Identifier> dim =
-            ClientCommandManager.argument("dim", IdentifierArgumentType.identifier())
+            ClientCommands.argument("dim", IdentifierArgument.id())
                 .suggests(DimensionSuggestions::suggest)
                 .executes(MineCommand::start);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> z2 =
-            ClientCommandManager.argument("z2", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
+            ClientCommands.argument("z2", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
         z2.then(dim);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> y2 =
-            ClientCommandManager.argument("y2", IntegerArgumentType.integer()).suggests(LookSuggestions::y);
+            ClientCommands.argument("y2", IntegerArgumentType.integer()).suggests(LookSuggestions::y);
         y2.then(z2);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> x2 =
-            ClientCommandManager.argument("x2", IntegerArgumentType.integer()).suggests(LookSuggestions::x);
+            ClientCommands.argument("x2", IntegerArgumentType.integer()).suggests(LookSuggestions::x);
         x2.then(y2);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> z1 =
-            ClientCommandManager.argument("z1", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
+            ClientCommands.argument("z1", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
         z1.then(x2);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> y1 =
-            ClientCommandManager.argument("y1", IntegerArgumentType.integer()).suggests(LookSuggestions::y);
+            ClientCommands.argument("y1", IntegerArgumentType.integer()).suggests(LookSuggestions::y);
         y1.then(z1);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> x1 =
-            ClientCommandManager.argument("x1", IntegerArgumentType.integer()).suggests(LookSuggestions::x);
+            ClientCommands.argument("x1", IntegerArgumentType.integer()).suggests(LookSuggestions::x);
         x1.then(y1);
 
-        return ClientCommandManager.literal("simple").then(x1);
+        return ClientCommands.literal("simple").then(x1);
     }
 
     private static int start(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        if (source.getPlayer() == null || source.getWorld() == null) {
-            source.sendError(Text.literal("没有玩家或世界"));
+        if (source.getPlayer() == null || source.getLevel() == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
             return 0;
         }
 
@@ -153,7 +153,7 @@ public final class MineCommand {
 
         Identifier dimensionId = context.getArgument("dim", Identifier.class);
         if (dimensionId == null) {
-            source.sendError(Text.literal("没有写维度"));
+            source.sendError(Component.literal("没有写维度"));
             return 0;
         }
         String dimension = dimensionId.toString();
@@ -163,17 +163,17 @@ public final class MineCommand {
         boolean here = region.dimension().equals(DimensionUtils.current());
         MineManager.get().start(region);
 
-        source.sendFeedback(Text.literal("已开始挖掘：simple " + region.describe()
+        source.sendFeedback(Component.literal("已开始挖掘：simple " + region.describe()
             + "，一共 " + region.volume() + " 格"));
-        source.sendFeedback(Text.literal("§7  触及 " + PlayerControllerConfig.getReach()
+        source.sendFeedback(Component.literal("§7  触及 " + PlayerControllerConfig.getReach()
             + " 格内；每 tick 最多 " + PlayerControllerConfig.getMineMaxBlocksPerTick()
             + " 个方块；取消：§f" + ROOT + "cancel"));
         if (filter.mode() == MineFilter.Mode.WHITELIST && filter.blocks().isEmpty()) {
-            source.sendFeedback(Text.literal("§e  白名单现在是空的，什么都不会挖"
+            source.sendFeedback(Component.literal("§e  白名单现在是空的，什么都不会挖"
                 + "（/pc mine list whitelist add <block_id>）"));
         }
         if (!here) {
-            source.sendFeedback(Text.literal("§7  现在不在这个维度（现在是 "
+            source.sendFeedback(Component.literal("§7  现在不在这个维度（现在是 "
                 + DimensionUtils.display(DimensionUtils.current()) + "），进去之后才会开始挖"));
         }
         return 1;
@@ -184,54 +184,54 @@ public final class MineCommand {
     // ------------------------------------------------------------------
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> lists() {
-        return ClientCommandManager.literal("list")
+        return ClientCommands.literal("list")
             .executes(MineCommand::listStatus)
-            .then(ClientCommandManager.literal("mode")
+            .then(ClientCommands.literal("mode")
                 .executes(MineCommand::showMode)
-                .then(ClientCommandManager.literal("whitelist")
+                .then(ClientCommands.literal("whitelist")
                     .executes(context -> setMode(context, MineFilter.Mode.WHITELIST)))
-                .then(ClientCommandManager.literal("blacklist")
+                .then(ClientCommands.literal("blacklist")
                     .executes(context -> setMode(context, MineFilter.Mode.BLACKLIST))))
             .then(blockList(MineFilter.Mode.WHITELIST))
             .then(blockList(MineFilter.Mode.BLACKLIST));
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> blockList(MineFilter.Mode which) {
-        return ClientCommandManager.literal(which.id())
+        return ClientCommands.literal(which.id())
             .executes(context -> showList(context, which))
-            .then(ClientCommandManager.literal("list")
+            .then(ClientCommands.literal("list")
                 .executes(context -> showList(context, which)))
-            .then(ClientCommandManager.literal("add")
-                .then(ClientCommandManager.argument("block_id", IdentifierArgumentType.identifier())
+            .then(ClientCommands.literal("add")
+                .then(ClientCommands.argument("block_id", IdentifierArgument.id())
                     .suggests(MineCommand::suggestBlocks)
                     .executes(context -> addBlock(context, which))))
-            .then(ClientCommandManager.literal("del")
-                .then(ClientCommandManager.argument("block_id", IdentifierArgumentType.identifier())
+            .then(ClientCommands.literal("del")
+                .then(ClientCommands.argument("block_id", IdentifierArgument.id())
                     .suggests(MineCommand::suggestBlocks)
                     .executes(context -> delBlock(context, which))));
     }
 
     private static CompletableFuture<Suggestions> suggestBlocks(
         CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
-        return CommandSource.suggestIdentifiers(Registries.BLOCK.getIds(), builder);
+        return SharedSuggestionProvider.suggestResource(BuiltInRegistries.BLOCK.keySet(), builder);
     }
 
     private static int listStatus(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
         MineFilterConfig config = MineFilterConfig.get();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7挖掘方块列表（" + MineFilterConfig.dir() + "）："));
-        source.sendFeedback(Text.literal("  当前模式：" + config.mode().label()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7挖掘方块列表（" + MineFilterConfig.dir() + "）："));
+        source.sendFeedback(Component.literal("  当前模式：" + config.mode().label()
             + "（生效的是 " + config.mode().id() + ".json）")
             .append(fillButton(" [换成" + other(config.mode()).label() + "]",
                 ROOT + "list mode " + other(config.mode()).id(),
                 "把「换模式」的命令填进聊天栏，回车生效")));
-        source.sendFeedback(Text.literal("  白名单：").append(listSummary(MineFilter.Mode.WHITELIST)));
-        source.sendFeedback(Text.literal("  黑名单：").append(listSummary(MineFilter.Mode.BLACKLIST)));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT + "list mode whitelist|blacklist§7 - 换模式"));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT + "list whitelist|blacklist list§7 - 列出方块（名字 + id）"));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT + "list whitelist|blacklist add|del <block_id>§7 - 加 / 删方块"));
-        source.sendFeedback(Text.literal("§7  文件: mode.json / whitelist.json / blacklist.json（直接改也行，重进世界时重读）"));
+        source.sendFeedback(Component.literal("  白名单：").append(listSummary(MineFilter.Mode.WHITELIST)));
+        source.sendFeedback(Component.literal("  黑名单：").append(listSummary(MineFilter.Mode.BLACKLIST)));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "list mode whitelist|blacklist§7 - 换模式"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "list whitelist|blacklist list§7 - 列出方块（名字 + id）"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "list whitelist|blacklist add|del <block_id>§7 - 加 / 删方块"));
+        source.sendFeedback(Component.literal("§7  文件: mode.json / whitelist.json / blacklist.json（直接改也行，重进世界时重读）"));
         return 1;
     }
 
@@ -239,10 +239,10 @@ public final class MineCommand {
         FabricClientCommandSource source = context.getSource();
         MineFilterConfig config = MineFilterConfig.get();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7挖掘过滤器模式：" + config.mode().label()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7挖掘过滤器模式：" + config.mode().label()
             + "（" + config.mode().id() + "）"));
-        source.sendFeedback(Text.literal("  文件：" + MineFilterConfig.modeFile()));
-        source.sendFeedback(Text.literal("  现在生效的表："
+        source.sendFeedback(Component.literal("  文件：" + MineFilterConfig.modeFile()));
+        source.sendFeedback(Component.literal("  现在生效的表："
             + (config.mode() == MineFilter.Mode.WHITELIST ? "白名单" : "黑名单")
             + "（" + config.blocks(config.mode()).size() + " 种）"));
         return 1;
@@ -253,10 +253,10 @@ public final class MineCommand {
         MineFilter.Mode before = MineFilterConfig.get().mode();
         MineFilterConfig.get().setMode(mode);
 
-        source.sendFeedback(Text.literal("挖掘过滤器模式：" + before.label() + " -> " + mode.label()
+        source.sendFeedback(Component.literal("挖掘过滤器模式：" + before.label() + " -> " + mode.label()
             + "（文件 " + MineFilterConfig.modeFile() + "）"));
         if (mode == MineFilter.Mode.WHITELIST && MineFilterConfig.get().blocks(mode).isEmpty()) {
-            source.sendFeedback(Text.literal("§e  白名单是空的，现在 /pc mine simple 什么都不会挖"
+            source.sendFeedback(Component.literal("§e  白名单是空的，现在 /pc mine simple 什么都不会挖"
                 + "（/pc mine list whitelist add <block_id>）"));
         }
         return 1;
@@ -267,20 +267,20 @@ public final class MineCommand {
         MineFilterConfig config = MineFilterConfig.get();
         List<Block> blocks = new ArrayList<>(config.blocks(which));
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7" + which.label() + "（" + blocks.size()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7" + which.label() + "（" + blocks.size()
             + " 种，文件 " + fileFor(which) + "）："));
         if (blocks.isEmpty()) {
-            source.sendFeedback(Text.literal("  §8（空）"));
+            source.sendFeedback(Component.literal("  §8（空）"));
         } else {
             for (Block block : blocks) {
-                MutableText line = Text.literal(" ");
+                MutableComponent line = Component.literal(" ");
                 line.append(fillButton("[删除]", ROOT + "list " + which.id() + " del "
-                        + Registries.BLOCK.getId(block), "把「从" + which.label() + "删掉这个方块」填进聊天栏"));
-                line.append(Text.literal(" ").append(blockLabel(block)));
+                        + BuiltInRegistries.BLOCK.getKey(block), "把「从" + which.label() + "删掉这个方块」填进聊天栏"));
+                line.append(Component.literal(" ").append(blockLabel(block)));
                 source.sendFeedback(line);
             }
         }
-        source.sendFeedback(Text.literal("§7  §f" + ROOT + "list " + which.id()
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "list " + which.id()
             + " add <block_id>§7 - 加一个方块；§f" + ROOT + "list " + which.id() + " del <block_id>§7 - 删一个"));
         return 1;
     }
@@ -289,16 +289,16 @@ public final class MineCommand {
         FabricClientCommandSource source = context.getSource();
         Block block = readBlock(context);
         if (block == null) {
-            source.sendError(Text.literal("没有这个方块：" + context.getArgument("block_id", Identifier.class)));
+            source.sendError(Component.literal("没有这个方块：" + context.getArgument("block_id", Identifier.class)));
             return 0;
         }
 
         if (!MineFilterConfig.get().add(which, block)) {
-            source.sendFeedback(Text.literal(which.label() + "里本来就有 ").append(blockLabel(block)));
+            source.sendFeedback(Component.literal(which.label() + "里本来就有 ").append(blockLabel(block)));
             return 1;
         }
-        source.sendFeedback(Text.literal("已加入" + which.label() + "：").append(blockLabel(block))
-            .append(Text.literal("（现在 " + MineFilterConfig.get().blocks(which).size() + " 种，文件 "
+        source.sendFeedback(Component.literal("已加入" + which.label() + "：").append(blockLabel(block))
+            .append(Component.literal("（现在 " + MineFilterConfig.get().blocks(which).size() + " 种，文件 "
                 + fileFor(which) + "）")));
         return 1;
     }
@@ -307,37 +307,37 @@ public final class MineCommand {
         FabricClientCommandSource source = context.getSource();
         Block block = readBlock(context);
         if (block == null) {
-            source.sendError(Text.literal("没有这个方块：" + context.getArgument("block_id", Identifier.class)));
+            source.sendError(Component.literal("没有这个方块：" + context.getArgument("block_id", Identifier.class)));
             return 0;
         }
 
         if (!MineFilterConfig.get().remove(which, block)) {
-            source.sendError(Text.literal(which.label() + "里本来就没有 ").append(blockLabel(block)));
+            source.sendError(Component.literal(which.label() + "里本来就没有 ").append(blockLabel(block)));
             return 0;
         }
-        source.sendFeedback(Text.literal("已从" + which.label() + "删掉 ").append(blockLabel(block))
-            .append(Text.literal("（现在 " + MineFilterConfig.get().blocks(which).size() + " 种）")));
+        source.sendFeedback(Component.literal("已从" + which.label() + "删掉 ").append(blockLabel(block))
+            .append(Component.literal("（现在 " + MineFilterConfig.get().blocks(which).size() + " 种）")));
         return 1;
     }
 
     private static Block readBlock(CommandContext<FabricClientCommandSource> context) {
         Identifier id = context.getArgument("block_id", Identifier.class);
-        return id == null ? null : Registries.BLOCK.getOptionalValue(id).orElse(null);
+        return id == null ? null : BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
     }
 
     /** 「石头 (minecraft:stone)」：名字 + 灰色可复制的 id。 */
-    private static MutableText blockLabel(Block block) {
-        Identifier id = Registries.BLOCK.getId(block);
-        return Text.literal(block.getName().getString() + " ")
+    private static MutableComponent blockLabel(Block block) {
+        Identifier id = BuiltInRegistries.BLOCK.getKey(block);
+        return Component.literal(block.getName().getString() + " ")
             .append(gray("(" + id + ")", id.toString()));
     }
 
-    private static MutableText listSummary(MineFilter.Mode which) {
+    private static MutableComponent listSummary(MineFilter.Mode which) {
         MineFilterConfig config = MineFilterConfig.get();
         int count = config.blocks(which).size();
-        MutableText text = Text.literal(which.label() + " " + count + " 种"
+        MutableComponent text = Component.literal(which.label() + " " + count + " 种"
             + (count == 0 ? "（空）" : ""));
-        if (config.mode() == which) text.append(Text.literal(" §a（生效中）"));
+        if (config.mode() == which) text.append(Component.literal(" §a（生效中）"));
         return text;
     }
 
@@ -361,53 +361,53 @@ public final class MineCommand {
         MineRegion region = manager.region();
         MineFilterConfig config = MineFilterConfig.get();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7挖掘（一直挖到 /pc mine cancel 为止）："));
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7挖掘（一直挖到 /pc mine cancel 为止）："));
         if (region == null) {
-            source.sendFeedback(Text.literal("  当前没有任务"));
+            source.sendFeedback(Component.literal("  当前没有任务"));
         } else {
-            source.sendFeedback(Text.literal("  任务：simple " + region.describe()));
-            source.sendFeedback(Text.literal("  一共 " + region.volume() + " 格"));
-            source.sendFeedback(Text.literal("  状态：" + manager.state().text()
+            source.sendFeedback(Component.literal("  任务：simple " + region.describe()));
+            source.sendFeedback(Component.literal("  一共 " + region.volume() + " 格"));
+            source.sendFeedback(Component.literal("  状态：" + manager.state().text()
                 + (manager.target() == null ? "" : "（目标 " + manager.target().toShortString()
                     + (manager.targetTool() == null ? "，什么工具都行" : "，用" + manager.targetTool().label())
                     + "）")));
             if (manager.lastTickCount() > 0) {
-                source.sendFeedback(Text.literal("  上一 tick 挖了 " + manager.lastTickCount() + " 个"));
+                source.sendFeedback(Component.literal("  上一 tick 挖了 " + manager.lastTickCount() + " 个"));
             }
 
-            MutableText line = Text.literal("  ");
+            MutableComponent line = Component.literal("  ");
             line.append(runButton("[取消]", ROOT + "cancel", "直接取消所有挖掘任务"));
             source.sendFeedback(line);
         }
 
-        source.sendFeedback(Text.literal("  过滤器：模式 " + config.mode().label()
+        source.sendFeedback(Component.literal("  过滤器：模式 " + config.mode().label()
             + "，白名单 " + config.blocks(MineFilter.Mode.WHITELIST).size() + " 种，黑名单 "
             + config.blocks(MineFilter.Mode.BLACKLIST).size() + " 种（/pc mine list）"));
-        source.sendFeedback(Text.literal("  范围：触及 " + PlayerControllerConfig.getReach()
+        source.sendFeedback(Component.literal("  范围：触及 " + PlayerControllerConfig.getReach()
             + " 格；每 tick 最多 "
             + PlayerControllerConfig.getMineMaxBlocksPerTick() + " 个方块；换工具后等 "
             + PlayerControllerConfig.getMineToolSwitchIntervalTicks() + " tick"));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "simple <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 在框里挖方块"));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT + "cancel§7 - 取消所有挖掘任务"));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT + "list ...§7 - 白名单 / 黑名单（mode、add、del、list）"));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "cancel§7 - 取消所有挖掘任务"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "list ...§7 - 白名单 / 黑名单（mode、add、del、list）"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "complex add_task|del_task <task_name>§7 - 建 / 删复杂挖掘任务"));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "complex task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区 + 算信标"));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT + "complex station ...§7 - 挖掘站（list / check / show / 各处坐标）"));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "complex station ...§7 - 挖掘站（list / check / show / 各处坐标）"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "debug_chunk_miner [\"minecraft:dirt\", ...]§7 - §c【临时调试】§7挖掉下面那个子区块"));
-        source.sendFeedback(Text.literal("§7  范围记在 mine.json 里，重新进世界会接着挖（/pc mine cancel 才会清掉）"));
+        source.sendFeedback(Component.literal("§7  范围记在 mine.json 里，重新进世界会接着挖（/pc mine cancel 才会清掉）"));
         return 1;
     }
 
     private static int cancel(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
         if (MineManager.get().cancel()) {
-            source.sendFeedback(Text.literal("已取消所有挖掘任务"));
+            source.sendFeedback(Component.literal("已取消所有挖掘任务"));
         } else {
-            source.sendFeedback(Text.literal("当前没有挖掘任务"));
+            source.sendFeedback(Component.literal("当前没有挖掘任务"));
         }
         return 1;
     }
@@ -426,9 +426,9 @@ public final class MineCommand {
      */
     private static int debugChunkMiner(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
-            source.sendError(Text.literal("没有玩家或世界"));
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
             return 0;
         }
 
@@ -437,28 +437,28 @@ public final class MineCommand {
         try {
             ids = parseItemIds(raw);
         } catch (Exception e) {
-            source.sendError(Text.literal("item_collector_list 解析失败：" + e.getMessage()));
+            source.sendError(Component.literal("item_collector_list 解析失败：" + e.getMessage()));
             return 0;
         }
         if (ids.isEmpty()) {
-            source.sendError(Text.literal("item_collector_list 是空的"));
+            source.sendError(Component.literal("item_collector_list 是空的"));
             return 0;
         }
 
         List<String> unknown = new ArrayList<>();
         for (String id : ids) {
             Identifier identifier = Identifier.tryParse(id);
-            if (identifier == null || Registries.ITEM.getOptionalValue(identifier).isEmpty()) {
+            if (identifier == null || BuiltInRegistries.ITEM.getOptional(identifier).isEmpty()) {
                 unknown.add(id);
             }
         }
         if (!unknown.isEmpty()) {
-            source.sendError(Text.literal("没有这些物品：" + String.join("、", unknown)));
+            source.sendError(Component.literal("没有这些物品：" + String.join("、", unknown)));
             return 0;
         }
 
         ActionManager.get().submit(new MineComplexSingleStageN(ids));
-        source.sendFeedback(Text.literal("已提交单段挖掘：挖掉下面那个子区块（收集 "
+        source.sendFeedback(Component.literal("已提交单段挖掘：挖掉下面那个子区块（收集 "
             + ids.size() + " 种物品）"));
         return 1;
     }
@@ -499,18 +499,18 @@ public final class MineCommand {
         MineComplexManager manager = MineComplexManager.get();
         List<String> tasks = manager.tasks();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7复杂挖掘任务（" + tasks.size() + " 个）："
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7复杂挖掘任务（" + tasks.size() + " 个）："
             + (tasks.isEmpty() ? "§8（空）" : String.join("、", tasks))));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "complex add_task|del_task <task_name>§7 - 建 / 删任务"));
-        source.sendFeedback(Text.literal("§7  §f" + ROOT
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "complex task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区"));
-        source.sendFeedback(Text.literal("  文件: " + manager.currentFile()));
+        source.sendFeedback(Component.literal("  文件: " + manager.currentFile()));
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> addTask() {
-        return ClientCommandManager.literal("add_task")
-            .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
+        return ClientCommands.literal("add_task")
+            .then(ClientCommands.argument("task_name", StringArgumentType.word())
                 .executes(MineCommand::addTask));
     }
 
@@ -521,22 +521,22 @@ public final class MineCommand {
         MineComplexManager manager = MineComplexManager.get();
         String error = manager.addTask(name);
         if (error != null) {
-            source.sendError(Text.literal(error));
+            source.sendError(Component.literal(error));
             return 0;
         }
 
-        source.sendFeedback(Text.literal("已创建挖掘任务 §f" + name + "§r（现在一共 "
+        source.sendFeedback(Component.literal("已创建挖掘任务 §f" + name + "§r（现在一共 "
             + manager.taskCount() + " 个）"));
-        source.sendFeedback(Text.literal("  目录: " + manager.currentTaskDir(name)
+        source.sendFeedback(Component.literal("  目录: " + manager.currentTaskDir(name)
             + "（region.json 现在是空的 {}）"));
-        source.sendFeedback(Text.literal("§7  下一步：§f" + ROOT + "complex task " + name
+        source.sendFeedback(Component.literal("§7  下一步：§f" + ROOT + "complex task " + name
             + " a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>"));
         return 1;
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> delTask() {
-        return ClientCommandManager.literal("del_task")
-            .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
+        return ClientCommands.literal("del_task")
+            .then(ClientCommands.argument("task_name", StringArgumentType.word())
                 .suggests(MineCommand::suggestTasks)
                 .executes(MineCommand::delTask));
     }
@@ -549,11 +549,11 @@ public final class MineCommand {
         Path dir = manager.currentTaskDir(name);
         String error = manager.delTask(name);
         if (error != null) {
-            source.sendError(Text.literal(error));
+            source.sendError(Component.literal(error));
             return 0;
         }
 
-        source.sendFeedback(Text.literal("已删除挖掘任务 §f" + name + "§r（目录整个删掉了："
+        source.sendFeedback(Component.literal("已删除挖掘任务 §f" + name + "§r（目录整个删掉了："
             + dir + "），现在还剩 " + manager.taskCount() + " 个"));
         return 1;
     }
@@ -565,45 +565,45 @@ public final class MineCommand {
     private static LiteralArgumentBuilder<FabricClientCommandSource> taskCommand() {
         // brigadier 的 then(builder) 会立刻 build 出节点，所以要从里往外挂
         RequiredArgumentBuilder<FabricClientCommandSource, Identifier> dim =
-            ClientCommandManager.argument("dim", IdentifierArgumentType.identifier())
+            ClientCommands.argument("dim", IdentifierArgument.id())
                 .suggests(DimensionSuggestions::suggest)
                 .executes(MineCommand::setRegion);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> z2 =
-            ClientCommandManager.argument("z2", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
+            ClientCommands.argument("z2", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
         z2.then(dim);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> y2 =
-            ClientCommandManager.argument("y2", IntegerArgumentType.integer()).suggests(LookSuggestions::y);
+            ClientCommands.argument("y2", IntegerArgumentType.integer()).suggests(LookSuggestions::y);
         y2.then(z2);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> x2 =
-            ClientCommandManager.argument("x2", IntegerArgumentType.integer()).suggests(LookSuggestions::x);
+            ClientCommands.argument("x2", IntegerArgumentType.integer()).suggests(LookSuggestions::x);
         x2.then(y2);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> z1 =
-            ClientCommandManager.argument("z1", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
+            ClientCommands.argument("z1", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
         z1.then(x2);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> y1 =
-            ClientCommandManager.argument("y1", IntegerArgumentType.integer()).suggests(LookSuggestions::y);
+            ClientCommands.argument("y1", IntegerArgumentType.integer()).suggests(LookSuggestions::y);
         y1.then(z1);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> x1 =
-            ClientCommandManager.argument("x1", IntegerArgumentType.integer()).suggests(LookSuggestions::x);
+            ClientCommands.argument("x1", IntegerArgumentType.integer()).suggests(LookSuggestions::x);
         x1.then(y1);
 
-        return ClientCommandManager.literal("task")
-            .then(ClientCommandManager.argument("task_name", StringArgumentType.word())
+        return ClientCommands.literal("task")
+            .then(ClientCommands.argument("task_name", StringArgumentType.word())
                 .suggests(MineCommand::suggestTasks)
                 .executes(MineCommand::taskStatus)
-                .then(ClientCommandManager.literal("a_set_region").then(x1)));
+                .then(ClientCommands.literal("a_set_region").then(x1)));
     }
 
     /** 补全 mine.json 里现有的任务名。 */
     private static CompletableFuture<Suggestions> suggestTasks(
         CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
-        return CommandSource.suggestMatching(MineComplexManager.get().tasks(), builder);
+        return SharedSuggestionProvider.suggest(MineComplexManager.get().tasks(), builder);
     }
 
     private static int taskStatus(CommandContext<FabricClientCommandSource> context) {
@@ -612,22 +612,22 @@ public final class MineCommand {
 
         MineComplexManager manager = MineComplexManager.get();
         if (!manager.has(name)) {
-            source.sendError(Text.literal("没有这个挖掘任务：" + name
+            source.sendError(Component.literal("没有这个挖掘任务：" + name
                 + "（先 " + ROOT + "complex add_task " + name + "）"));
             return 0;
         }
 
         MineTaskRegion region = manager.region(name);
         if (region == null) {
-            source.sendFeedback(Text.literal("挖掘任务 " + name + " 还没设区域（"
+            source.sendFeedback(Component.literal("挖掘任务 " + name + " 还没设区域（"
                 + ROOT + "complex task " + name + " a_set_region …）"));
-            source.sendFeedback(Text.literal("  文件: " + manager.currentRegionFile(name)));
+            source.sendFeedback(Component.literal("  文件: " + manager.currentRegionFile(name)));
             return 1;
         }
 
-        source.sendFeedback(Text.literal("挖掘任务 " + name + "：" + region.describe()));
+        source.sendFeedback(Component.literal("挖掘任务 " + name + "：" + region.describe()));
         printBeacons(source, region.beacons());
-        source.sendFeedback(Text.literal("  文件: " + manager.currentRegionFile(name)));
+        source.sendFeedback(Component.literal("  文件: " + manager.currentRegionFile(name)));
         return 1;
     }
 
@@ -637,14 +637,14 @@ public final class MineCommand {
 
         MineComplexManager manager = MineComplexManager.get();
         if (!manager.has(name)) {
-            source.sendError(Text.literal("没有这个挖掘任务：" + name
+            source.sendError(Component.literal("没有这个挖掘任务：" + name
                 + "（先 " + ROOT + "complex add_task " + name + "）"));
             return 0;
         }
 
         Identifier dimension = context.getArgument("dim", Identifier.class);
         if (dimension == null) {
-            source.sendError(Text.literal("没有写维度"));
+            source.sendError(Component.literal("没有写维度"));
             return 0;
         }
 
@@ -660,7 +660,7 @@ public final class MineCommand {
         int spanZ = Math.abs(z2 - z1);
         if (spanX < MineTaskRegion.MIN_XZ_SPAN || spanZ < MineTaskRegion.MIN_XZ_SPAN
             || spanY < MineTaskRegion.MIN_Y_SPAN) {
-            source.sendError(Text.literal("区域太小：要求 |x1-x2| >= "
+            source.sendError(Component.literal("区域太小：要求 |x1-x2| >= "
                 + MineTaskRegion.MIN_XZ_SPAN + "、|z1-z2| >= " + MineTaskRegion.MIN_XZ_SPAN
                 + "、|y1-y2| >= " + MineTaskRegion.MIN_Y_SPAN
                 + "（你现在是 " + spanX + " / " + spanZ + " / " + spanY + "）"));
@@ -678,14 +678,14 @@ public final class MineCommand {
         try {
             region.save(file);
         } catch (IOException e) {
-            source.sendError(Text.literal("写 region.json 失败：" + e.getMessage()));
+            source.sendError(Component.literal("写 region.json 失败：" + e.getMessage()));
             return 0;
         }
 
-        source.sendFeedback(Text.literal("已更新任务 §f" + name + "§r 的挖掘区：" + region.describe()));
+        source.sendFeedback(Component.literal("已更新任务 §f" + name + "§r 的挖掘区：" + region.describe()));
         printBeacons(source, beacons);
-        source.sendFeedback(Text.literal("§e支持钻石工具 / 下界合金工具，但这两个效率几乎一致。"));
-        source.sendFeedback(Text.literal("§7  信标记的是塔底（9x9 那层）的坐标，信标方块本身在 y+"
+        source.sendFeedback(Component.literal("§e支持钻石工具 / 下界合金工具，但这两个效率几乎一致。"));
+        source.sendFeedback(Component.literal("§7  信标记的是塔底（9x9 那层）的坐标，信标方块本身在 y+"
             + MineBeaconPlanner.TOWER_HEIGHT + "；文件：" + file));
         return 1;
     }
@@ -701,10 +701,10 @@ public final class MineCommand {
                 line.append('(').append(pos.getX()).append(',').append(pos.getY()).append(',')
                     .append(pos.getZ()).append(')');
             }
-            source.sendFeedback(Text.literal(line.toString()));
+            source.sendFeedback(Component.literal(line.toString()));
         }
         if (beacons.size() > shown) {
-            source.sendFeedback(Text.literal("  §8…… 还有 " + (beacons.size() - shown)
+            source.sendFeedback(Component.literal("  §8…… 还有 " + (beacons.size() - shown)
                 + " 个，全部写在 region.json 的 beacon 里"));
         }
     }

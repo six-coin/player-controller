@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.recipe;
 
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
+import net.minecraft.world.item.Item;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -59,7 +59,7 @@ public final class MaxCraft {
             StringBuilder sb = new StringBuilder();
             for (Map.Entry<Item, Integer> entry : materials.entrySet()) {
                 if (sb.length() > 0) sb.append("、");
-                sb.append(Registries.ITEM.getId(entry.getKey())).append(" x").append(entry.getValue());
+                sb.append(BuiltInRegistries.ITEM.getKey(entry.getKey())).append(" x").append(entry.getValue());
             }
             return sb.toString();
         }
@@ -180,10 +180,10 @@ public final class MaxCraft {
         return materialSlots <= MAX_MATERIAL_SLOTS;
     }
 
-    /** {@code amount} 个 {@code item} 要占几格（每格最多 {@code item.getMaxCount()} 个）。 */
+    /** {@code amount} 个 {@code item} 要占几格（每格最多 {@code item.getDefaultMaxStackSize()} 个）。 */
     private static int slotsFor(int amount, Item item) {
         if (amount <= 0) return 0;
-        int perSlot = Math.max(1, item.getMaxCount());
+        int perSlot = Math.max(1, item.getDefaultMaxStackSize());
         return (amount + perSlot - 1) / perSlot;
     }
 
@@ -191,8 +191,8 @@ public final class MaxCraft {
      * 日志用：把结果说成一句话。
      */
     public static String describe(Item result, @Nullable Result found) {
-        if (found == null) return "合不出 " + Registries.ITEM.getId(result);
-        return Registries.ITEM.getId(result) + " x" + found.resultCount()
+        if (found == null) return "合不出 " + BuiltInRegistries.ITEM.getKey(result);
+        return BuiltInRegistries.ITEM.getKey(result) + " x" + found.resultCount()
             + "（合 " + found.crafts() + " 次，每次 " + found.perCraft() + " 个；材料 "
             + found.describeMaterials() + "）";
     }

@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.ItemStack;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.ItemStack;
 import org.six_coin.playerController.client.util.ChatUtils;
 
 import java.util.List;
@@ -60,7 +60,7 @@ class SingleStageWaitItemAction extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) {
             fail("玩家不存在");
             return;
@@ -74,7 +74,7 @@ class SingleStageWaitItemAction extends SingleStageStep {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) {
             fail("玩家不存在");
             return;

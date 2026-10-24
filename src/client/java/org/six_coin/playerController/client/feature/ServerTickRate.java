@@ -1,6 +1,6 @@
 package org.six_coin.playerController.client.feature;
 
-import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.Mth;
 
 import java.util.Arrays;
 
@@ -45,7 +45,7 @@ public final class ServerTickRate {
             float elapsedSeconds = (now - lastTimeUpdate) / 1000.0F;
             TICK_RATES[next] = elapsedSeconds <= 0.0F
                 ? 20.0F
-                : MathHelper.clamp(20.0F / elapsedSeconds, 0.0F, 20.0F);
+                : Mth.clamp(20.0F / elapsedSeconds, 0.0F, 20.0F);
             next = (next + 1) % SAMPLES;
         }
         lastTimeUpdate = now;

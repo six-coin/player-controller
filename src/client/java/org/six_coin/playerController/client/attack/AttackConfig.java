@@ -22,8 +22,8 @@ import java.nio.file.Path;
  * {"profile": "test", "enable": true}
  * </pre>
  *
- * <p>为什么放在 world 目录下：不同存档 / 服务器用的 profile 和开关不一样，
- * 换世界（{@code /pc config world <n>}）会自动换成那一份。
+ * <p>为什么放在 level 目录下：不同存档 / 服务器用的 profile 和开关不一样，
+ * 换世界（{@code /pc config level <n>}）会自动换成那一份。
  *
  * <p>profile 本身是全局的，放在 {@code config/player-controller/attack/<名字>.json}
  * （见 {@link AttackProfiles} / {@link AttackProfile}）。
@@ -67,8 +67,8 @@ public final class AttackConfig {
         return INSTANCE;
     }
 
-    public static Path file(int world) {
-        return WaypointManager.worldDir(world).resolve(FILE_NAME);
+    public static Path file(int level) {
+        return WaypointManager.worldDir(level).resolve(FILE_NAME);
     }
 
     // ------------------------------------------------------------------
@@ -79,14 +79,14 @@ public final class AttackConfig {
         load(PlayerControllerConfig.getWorld());
     }
 
-    public void load(int world) {
-        world = Math.max(1, world);
-        loadedWorld = world;
+    public void load(int level) {
+        level = Math.max(1, level);
+        loadedWorld = level;
         loadedOk = false;
         data = new Data();
         releaseProfile();
 
-        Path path = file(world);
+        Path path = file(level);
         if (!Files.exists(path)) {
             loadedOk = true;
             save();
@@ -112,10 +112,10 @@ public final class AttackConfig {
         }
     }
 
-    public void switchWorld(int world) {
+    public void switchWorld(int level) {
         save();
-        load(world);
-        ChatUtils.info("攻击配置已切到 world_" + world + "（profile=" + profileName()
+        load(level);
+        ChatUtils.info("攻击配置已切到 world_" + level + "（profile=" + profileName()
             + ", " + (enable() ? "开" : "关") + "）");
     }
 

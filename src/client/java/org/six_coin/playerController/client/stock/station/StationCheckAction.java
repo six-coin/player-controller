@@ -4,13 +4,13 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
@@ -109,8 +109,8 @@ public class StationCheckAction extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) {
             fail("没有世界");
             return;
         }
@@ -121,7 +121,7 @@ public class StationCheckAction extends Action {
         if (stand == null) {
             ChatUtils.debug("没有设置站立点，跳过「对齐到站立点中心」这一步");
         } else if (PlayerUtils.isAtBlockCenter()
-            && stand.pos().equals(BlockPos.ofFloored(mc.player.getEntityPos()))) {
+            && stand.pos().equals(BlockPos.containing(mc.player.position()))) {
             ChatUtils.debug("已经站在站立点 " + stand.coordString() + " 的中心了");
         } else {
             ChatUtils.debug("先把玩家对齐到站立点 " + stand.coordString() + " 的中心（原来在 "
@@ -129,11 +129,11 @@ public class StationCheckAction extends Action {
             PlayerUtils.snapToBlockCenter(stand.pos());
         }
 
-        collectTargets(mc.world, StationPart.ITEM_TEMP);
-        collectTargets(mc.world, StationPart.SHULKER_BOX_PROVIDER);
-        collectTargets(mc.world, StationPart.ITEM_STORAGE);
-        collectTargets(mc.world, StationPart.ITEM_FINAL);
-        collectPlacementTargets(mc.world);
+        collectTargets(mc.level, StationPart.ITEM_TEMP);
+        collectTargets(mc.level, StationPart.SHULKER_BOX_PROVIDER);
+        collectTargets(mc.level, StationPart.ITEM_STORAGE);
+        collectTargets(mc.level, StationPart.ITEM_FINAL);
+        collectPlacementTargets(mc.level);
 
         ChatUtils.debug("工作站检查：要开 " + targets.size() + " 个容器（大箱子两半只算一个），"
             + "不显示界面");
@@ -146,8 +146,8 @@ public class StationCheckAction extends Action {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -202,7 +202,7 @@ public class StationCheckAction extends Action {
 
     @Override
     protected void onEnd() {
-        if (session != null) session.close(MinecraftClient.getInstance());
+        if (session != null) session.close(Minecraft.getInstance());
 
         if (failureReason() != null) {
             // 原因由 Action#cleanup 报一行；这里只把已经查出来的问题列出来
@@ -238,7 +238,7 @@ public class StationCheckAction extends Action {
     // 收集要开的容器
     // ------------------------------------------------------------------
 
-    private void collectTargets(World world, StationPart part) {
+    private void collectTargets(Level level, StationPart part) {
         String dimension = DimensionUtils.current();
         Set<BlockPos> seen = new HashSet<>();
 
@@ -250,7 +250,7 @@ public class StationCheckAction extends Action {
             }
 
             BlockPos configured = stationPos.pos();
-            BlockPos other = ContainerTypes.otherHalf(world, configured);
+            BlockPos other = ContainerTypes.otherHalf(level, configured);
             BlockPos canonical = other == null || configured.compareTo(other) <= 0 ? configured : other;
             if (!seen.add(canonical)) continue;
             targets.add(new Target(part, configured, stationPos.id()));
@@ -263,19 +263,19 @@ public class StationCheckAction extends Action {
      * <p>摆放处不再要求是空气了（盒子里装着的东西也算库存），空着的位置没什么可数的，直接跳过；
      * 摆着别的方块由预检查报错，这里不管。
      */
-    private void collectPlacementTargets(World world) {
+    private void collectPlacementTargets(Level level) {
         String dimension = DimensionUtils.current();
         for (StationPos stationPos : StationManager.get().positions(StationPart.SHULKER_BOX_PLACEMENT)) {
             if (!stationPos.dimension().equals(dimension)) continue;
-            if (!(world.getBlockState(stationPos.pos()).getBlock() instanceof ShulkerBoxBlock)) continue;
+            if (!(level.getBlockState(stationPos.pos()).getBlock() instanceof ShulkerBoxBlock)) continue;
             targets.add(new Target(StationPart.SHULKER_BOX_PLACEMENT, stationPos.pos(), stationPos.id()));
         }
     }
 
     private void openNext() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -309,7 +309,7 @@ public class StationCheckAction extends Action {
         boolean allEmptyShulkerBoxes = true;
 
         for (Slot slot : InventoryUtils.containerSlots(session.handler())) {
-            ItemStack stack = slot.getStack();
+            ItemStack stack = slot.getItem();
             totalSlots++;
             if (stack.isEmpty()) {
                 emptySlots++;

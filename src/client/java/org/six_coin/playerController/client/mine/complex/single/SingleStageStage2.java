@@ -1,12 +1,12 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.FluidBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
@@ -97,8 +97,8 @@ class SingleStageStage2 extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -111,8 +111,8 @@ class SingleStageStage2 extends SingleStageStep {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -170,7 +170,7 @@ class SingleStageStage2 extends SingleStageStep {
 
     // ------------------------------------------------------------------
 
-    private void tickMine(MinecraftClient mc) {
+    private void tickMine(Minecraft mc) {
         // 正在等沙砾落下来：什么都不做，等时间到（mine simple 会把落下来的挖掉）
         if (gravelWait > 0) {
             gravelWait--;
@@ -227,9 +227,9 @@ class SingleStageStage2 extends SingleStageStep {
     }
 
     /** **目标区域里**还有没有沙砾（沙砾会往下掉，掉进区域就得再挖一次）。 */
-    private boolean regionHasGravel(MinecraftClient mc) {
+    private boolean regionHasGravel(Minecraft mc) {
         for (BlockPos pos : ctx.regionCells(iteration)) {
-            if (mc.world.getBlockState(pos).isOf(Blocks.GRAVEL)) return true;
+            if (mc.level.getBlockState(pos).is(Blocks.GRAVEL)) return true;
         }
         return false;
     }
@@ -240,31 +240,31 @@ class SingleStageStage2 extends SingleStageStep {
     }
 
     /** 区域里还没挖掉的方块（mine simple 眼里的「有东西」：非空气、非流体）。 */
-    private List<BlockPos> remainingBlocks(MinecraftClient mc) {
+    private List<BlockPos> remainingBlocks(Minecraft mc) {
         List<BlockPos> left = new ArrayList<>();
         for (BlockPos pos : ctx.regionCells(iteration)) {
-            if (breakable(mc.world.getBlockState(pos))) left.add(pos);
+            if (breakable(mc.level.getBlockState(pos))) left.add(pos);
         }
         return left;
     }
 
-    private boolean regionCleared(MinecraftClient mc) {
+    private boolean regionCleared(Minecraft mc) {
         for (BlockPos pos : ctx.regionCells(iteration)) {
-            if (breakable(mc.world.getBlockState(pos))) return false;
+            if (breakable(mc.level.getBlockState(pos))) return false;
         }
         return true;
     }
 
     /** mine simple 眼里的「有东西可挖」：不是空气、不是流体。 */
     private static boolean breakable(BlockState state) {
-        return !state.isAir() && !(state.getBlock() instanceof FluidBlock);
+        return !state.isAir() && !(state.getBlock() instanceof LiquidBlock);
     }
 
     // ------------------------------------------------------------------
     // 工具耐久
     // ------------------------------------------------------------------
 
-    private void watchDurability(ClientPlayerEntity player) {
+    private void watchDurability(LocalPlayer player) {
         int interval = Math.max(1,
             PlayerControllerConfig.getMineComplexToolDurabilityCheckIntervalTicks());
         if (++sinceDurabilityCheck < interval) return;
@@ -273,14 +273,14 @@ class SingleStageStage2 extends SingleStageStep {
         int selected = player.getInventory().getSelectedSlot();
         if (selected < 0 || selected > 4) return;          // 只管剑镐斧铲锄这五格
 
-        ItemStack held = player.getInventory().getStack(selected);
-        if (held.isEmpty() || !held.isDamageable()) return;
+        ItemStack held = player.getInventory().getItem(selected);
+        if (held.isEmpty() || !held.isDamageableItem()) return;
 
-        int remaining = held.getMaxDamage() - held.getDamage();
+        int remaining = held.getMaxDamage() - held.getDamageValue();
         if (remaining >= LOW_DURABILITY) return;
 
         int spare = SingleStageCtx.SPARE_START + selected;
-        ItemStack spareStack = player.getInventory().getStack(spare);
+        ItemStack spareStack = player.getInventory().getItem(spare);
         if (spareStack.isEmpty()) {
             ChatUtils.error("快捷栏第 " + (selected + 1) + " 格的工具只剩 " + remaining
                 + " 耐久，但背包 " + (selected + 1) + " 格没有备用工具了");

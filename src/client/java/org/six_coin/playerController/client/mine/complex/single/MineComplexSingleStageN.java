@@ -1,9 +1,9 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.mine.MineFilterConfig;
@@ -57,9 +57,9 @@ public class MineComplexSingleStageN extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -73,7 +73,7 @@ public class MineComplexSingleStageN extends Action {
         ctx = new SingleStageCtx(DimensionUtils.current(), initialMin,
             MineFilterConfig.get().filter(), collectorItems, data);
 
-        List<String> problems = new ArrayList<>(SingleStageCheck.checkSubChunks(mc.world, ctx));
+        List<String> problems = new ArrayList<>(SingleStageCheck.checkSubChunks(mc.level, ctx));
         problems.addAll(SingleStageCheck.checkReach());
         problems.addAll(SingleStageCheck.checkInventory(ctx));
         if (!problems.isEmpty()) {
@@ -107,7 +107,7 @@ public class MineComplexSingleStageN extends Action {
         }
 
         // 先清零再让子动作跑：移动类子动作会在同一 tick 里把速度写成它要的值
-        FlightVelocity.apply(Vec3d.ZERO);
+        FlightVelocity.apply(Vec3.ZERO);
 
         child.update();
         if (!child.isFinished()) return;
@@ -153,8 +153,8 @@ public class MineComplexSingleStageN extends Action {
             return;
         }
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) {
             fail("世界不存在");
             return;
         }
@@ -206,9 +206,9 @@ public class MineComplexSingleStageN extends Action {
     }
 
     /** 这一轮的目标区域是不是全是空气。 */
-    private boolean regionEmpty(MinecraftClient mc, int round) {
+    private boolean regionEmpty(Minecraft mc, int round) {
         for (BlockPos pos : ctx.regionCells(round)) {
-            if (!mc.world.getBlockState(pos).isAir()) return false;
+            if (!mc.level.getBlockState(pos).isAir()) return false;
         }
         return true;
     }

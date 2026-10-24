@@ -7,13 +7,13 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.entry.RegistryEntryList;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.Item;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.HolderSet;
+import net.minecraft.tags.TagKey;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import org.six_coin.playerController.client.stock.materials.MaterialsConfig;
 import org.six_coin.playerController.client.stock.materials.MaterialsRecipes;
 
@@ -53,7 +53,7 @@ public final class MaterialsArguments {
     public static final class Recipe implements ArgumentType<Identifier> {
 
         private static final SimpleCommandExceptionType UNKNOWN =
-            new SimpleCommandExceptionType(Text.literal("配方名要写成 minecraft:配方名 这样"));
+            new SimpleCommandExceptionType(Component.literal("配方名要写成 minecraft:配方名 这样"));
 
         private static final Recipe INSTANCE = new Recipe();
 
@@ -91,8 +91,8 @@ public final class MaterialsArguments {
             Item result = argument(context, "result_item");
             if (result == null) return List.of();
 
-            MinecraftClient mc = MinecraftClient.getInstance();
-            if (mc.world == null) return List.of();
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.level == null) return List.of();
 
             return MaterialsRecipes.build(mc).candidates(result).stream()
                 .map(MaterialsRecipes.Recipe::id)
@@ -108,7 +108,7 @@ public final class MaterialsArguments {
     public static final class Tag implements ArgumentType<TagKey<Item>> {
 
         private static final SimpleCommandExceptionType UNKNOWN =
-            new SimpleCommandExceptionType(Text.literal("标签要写成 #minecraft:planks 这样"));
+            new SimpleCommandExceptionType(Component.literal("标签要写成 #minecraft:planks 这样"));
 
         private static final Tag INSTANCE = new Tag();
 
@@ -134,8 +134,8 @@ public final class MaterialsArguments {
                                                                   SuggestionsBuilder builder) {
             String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
             try {
-                for (RegistryEntryList.Named<Item> named : Registries.ITEM.streamTags().toList()) {
-                    String full = MaterialsConfig.tagId(named.getTag());
+                for (HolderSet.Named<Item> named : BuiltInRegistries.ITEM.getTags().toList()) {
+                    String full = MaterialsConfig.tagId(named.key());
                     if (full.toLowerCase(Locale.ROOT).startsWith(remaining)) builder.suggest(full);
                 }
             } catch (Throwable ignored) {
@@ -153,7 +153,7 @@ public final class MaterialsArguments {
     public static final class SlotKey implements ArgumentType<String> {
 
         private static final SimpleCommandExceptionType UNKNOWN =
-            new SimpleCommandExceptionType(Text.literal("要写成 minecraft:torch#0 这样"));
+            new SimpleCommandExceptionType(Component.literal("要写成 minecraft:torch#0 这样"));
 
         private static final SlotKey INSTANCE = new SlotKey();
 
@@ -177,8 +177,8 @@ public final class MaterialsArguments {
         public <S> CompletableFuture<Suggestions> listSuggestions(CommandContext<S> context,
                                                                   SuggestionsBuilder builder) {
             String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
-            MinecraftClient mc = MinecraftClient.getInstance();
-            if (mc.world == null) return builder.buildFuture();
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.level == null) return builder.buildFuture();
 
             MaterialsRecipes index = MaterialsRecipes.build(mc);
             java.util.Set<String> suggested = new java.util.LinkedHashSet<>();

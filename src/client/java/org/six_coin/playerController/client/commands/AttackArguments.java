@@ -7,10 +7,10 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import net.minecraft.entity.EntityType;
-import net.minecraft.registry.Registries;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.attack.EntityGroups;
 
@@ -60,7 +60,7 @@ public final class AttackArguments {
     public static final class EntityId implements ArgumentType<Identifier> {
 
         private static final SimpleCommandExceptionType UNKNOWN =
-            new SimpleCommandExceptionType(Text.literal("实体 id 要写成 minecraft:zombie 这样"));
+            new SimpleCommandExceptionType(Component.literal("实体 id 要写成 minecraft:zombie 这样"));
 
         private static final EntityId INSTANCE = new EntityId();
 
@@ -84,7 +84,7 @@ public final class AttackArguments {
                                                                   SuggestionsBuilder builder) {
             String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
             for (EntityType<?> type : EntityGroups.allMobs()) {
-                String full = Registries.ENTITY_TYPE.getId(type).toString();
+                String full = BuiltInRegistries.ENTITY_TYPE.getKey(type).toString();
                 boolean match = full.startsWith(remaining)
                     || (!remaining.contains(":") && idPath(full).startsWith(remaining));
                 if (match) builder.suggest(full);
@@ -106,7 +106,7 @@ public final class AttackArguments {
     public static final class GroupId implements ArgumentType<EntityGroups.Group> {
 
         private static final SimpleCommandExceptionType UNKNOWN =
-            new SimpleCommandExceptionType(Text.literal("没有这个组（敌对生物是 hostile_mobs 这种）"));
+            new SimpleCommandExceptionType(Component.literal("没有这个组（敌对生物是 hostile_mobs 这种）"));
 
         private static final GroupId INSTANCE = new GroupId();
 

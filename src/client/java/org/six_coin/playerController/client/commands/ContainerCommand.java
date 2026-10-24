@@ -7,12 +7,12 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.context.ParsedCommandNode;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.Container;
+import net.minecraft.network.chat.Component;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.action.ContainerGetAction;
@@ -55,16 +55,16 @@ public final class ContainerCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("container")
-            .then(ClientCommandManager.literal("get")
+        return ClientCommands.literal("container")
+            .then(ClientCommands.literal("get")
                 .then(getNode("from_target", null, false))
                 .then(getNode("from_position", "position", false))
                 .then(getNode("from_id", "id", false)))
-            .then(ClientCommandManager.literal("special_get")
+            .then(ClientCommands.literal("special_get")
                 .then(getNode("from_target", null, true))
                 .then(getNode("from_position", "position", true))
                 .then(getNode("from_id", "id", true)))
-            .then(ClientCommandManager.literal("put")
+            .then(ClientCommands.literal("put")
                 .then(putToTargetNode())
                 .then(putToIdNode())
                 .then(putToPositionNode()))
@@ -73,7 +73,7 @@ public final class ContainerCommand {
 
     /** {@code put to_target <模式>}：准星指着的容器。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> putToTargetNode() {
-        LiteralArgumentBuilder<FabricClientCommandSource> node = ClientCommandManager.literal("to_target");
+        LiteralArgumentBuilder<FabricClientCommandSource> node = ClientCommands.literal("to_target");
         attachModes(node, (context, mode) -> putToTarget(context, mode));
         return node;
     }
@@ -81,24 +81,24 @@ public final class ContainerCommand {
     /** {@code put to_id <id> <模式>}：容器缓存编号。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> putToIdNode() {
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> id =
-            ClientCommandManager.argument("id", IntegerArgumentType.integer());
+            ClientCommands.argument("id", IntegerArgumentType.integer());
         attachModes(id, (context, mode) -> putToId(context, mode));
-        return ClientCommandManager.literal("to_id").then(id);
+        return ClientCommands.literal("to_id").then(id);
     }
 
     /** {@code put to_position <x> <y> <z> <模式>}：当前维度的坐标。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> putToPositionNode() {
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> z =
-            ClientCommandManager.argument("z", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
+            ClientCommands.argument("z", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
         attachModes(z, (context, mode) -> putToPosition(context, mode));
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> y =
-            ClientCommandManager.argument("y", IntegerArgumentType.integer()).suggests(LookSuggestions::y).then(z);
+            ClientCommands.argument("y", IntegerArgumentType.integer()).suggests(LookSuggestions::y).then(z);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> x =
-            ClientCommandManager.argument("x", IntegerArgumentType.integer()).suggests(LookSuggestions::x).then(y);
+            ClientCommands.argument("x", IntegerArgumentType.integer()).suggests(LookSuggestions::x).then(y);
 
-        return ClientCommandManager.literal("to_position").then(x);
+        return ClientCommands.literal("to_position").then(x);
     }
 
     /**
@@ -110,13 +110,13 @@ public final class ContainerCommand {
     private static void attachModes(ArgumentBuilder<FabricClientCommandSource, ?> parent,
                                     BiFunction<CommandContext<FabricClientCommandSource>,
                                         ContainerPutAction.Mode, Integer> runner) {
-        parent.then(ClientCommandManager.literal("all_items")
+        parent.then(ClientCommands.literal("all_items")
             .executes(context -> runner.apply(context, ContainerPutAction.Mode.ALL_ITEMS)));
-        parent.then(ClientCommandManager.literal("all_shulker_boxes")
+        parent.then(ClientCommands.literal("all_shulker_boxes")
             .executes(context -> runner.apply(context, ContainerPutAction.Mode.ALL_SHULKER_BOXES)));
-        parent.then(ClientCommandManager.literal("everything")
+        parent.then(ClientCommands.literal("everything")
             .executes(context -> runner.apply(context, ContainerPutAction.Mode.EVERYTHING)));
-        parent.then(ClientCommandManager.literal("everything_include_hotbar")
+        parent.then(ClientCommands.literal("everything_include_hotbar")
             .executes(context -> runner.apply(context, ContainerPutAction.Mode.EVERYTHING_INCLUDE_HOTBAR)));
     }
 
@@ -141,15 +141,15 @@ public final class ContainerCommand {
             });
         }
         return fromNode(name, arg, leaf -> leaf.then(
-            ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
+            ClientCommands.argument("item_list", StringArgumentType.greedyString())
                 .executes(context -> runGet(context, ContainerGetAction.Mode.NORMAL))));
     }
 
     /** {@code only_item <item_list>} / {@code only_one_shulker <item_list>}。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> modeNode(String modeName,
                                                                              ContainerGetAction.Mode mode) {
-        return ClientCommandManager.literal(modeName).then(
-            ClientCommandManager.argument("item_list", StringArgumentType.greedyString())
+        return ClientCommands.literal(modeName).then(
+            ClientCommands.argument("item_list", StringArgumentType.greedyString())
                 .executes(context -> runGet(context, mode)));
     }
 
@@ -161,14 +161,14 @@ public final class ContainerCommand {
         String name, @Nullable String arg,
         Consumer<ArgumentBuilder<FabricClientCommandSource, ?>> attach) {
 
-        LiteralArgumentBuilder<FabricClientCommandSource> node = ClientCommandManager.literal(name);
+        LiteralArgumentBuilder<FabricClientCommandSource> node = ClientCommands.literal(name);
         if (arg == null) {
             attach.accept(node);
             return node;
         }
         if (arg.equals("id")) {
             RequiredArgumentBuilder<FabricClientCommandSource, Integer> id =
-                ClientCommandManager.argument("id", IntegerArgumentType.integer());
+                ClientCommands.argument("id", IntegerArgumentType.integer());
             attach.accept(id);
             return node.then(id);
         }
@@ -176,13 +176,13 @@ public final class ContainerCommand {
         // 注意顺序：必须先把东西挂到 z 上，再把 z 挂到 y 上。
         // brigadier 的 then(builder) 会**立刻 build 出一个 CommandNode**，之后再往那个 builder 上加子节点是没用的。
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> z =
-            ClientCommandManager.argument("z", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
+            ClientCommands.argument("z", IntegerArgumentType.integer()).suggests(LookSuggestions::z);
         attach.accept(z);
 
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> y =
-            ClientCommandManager.argument("y", IntegerArgumentType.integer()).suggests(LookSuggestions::y).then(z);
+            ClientCommands.argument("y", IntegerArgumentType.integer()).suggests(LookSuggestions::y).then(z);
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> x =
-            ClientCommandManager.argument("x", IntegerArgumentType.integer()).suggests(LookSuggestions::x).then(y);
+            ClientCommands.argument("x", IntegerArgumentType.integer()).suggests(LookSuggestions::x).then(y);
         return node.then(x);
     }
 
@@ -201,12 +201,12 @@ public final class ContainerCommand {
             int id = IntegerArgumentType.getInteger(context, "id");
             CachedContainer cached = ContainerCacheManager.get().byId(id);
             if (cached == null) {
-                source.sendError(Text.literal("容器缓存里没有 #" + id));
+                source.sendError(Component.literal("容器缓存里没有 #" + id));
                 return 0;
             }
             String dimension = DimensionUtils.current();
             if (!cached.dimension().equals(dimension)) {
-                source.sendError(Text.literal("缓存 #" + id + " 在 " + DimensionUtils.display(cached.dimension())
+                source.sendError(Component.literal("缓存 #" + id + " 在 " + DimensionUtils.display(cached.dimension())
                     + "，你现在在 " + DimensionUtils.display(dimension) + "，够不着"));
                 return 0;
             }
@@ -220,7 +220,7 @@ public final class ContainerCommand {
         } else {
             pos = PlayerUtils.lookedAtBlock();
             if (pos == null) {
-                source.sendError(Text.literal("你没有看向任何方块"));
+                source.sendError(Component.literal("你没有看向任何方块"));
                 return 0;
             }
         }
@@ -238,7 +238,7 @@ public final class ContainerCommand {
 
         BlockPos pos = PlayerUtils.lookedAtBlock();
         if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
+            source.sendError(Component.literal("你没有看向任何方块"));
             return 0;
         }
         return startPut(source, pos, mode);
@@ -251,13 +251,13 @@ public final class ContainerCommand {
         int id = IntegerArgumentType.getInteger(context, "id");
         CachedContainer cached = ContainerCacheManager.get().byId(id);
         if (cached == null) {
-            source.sendError(Text.literal("容器缓存里没有 #" + id));
+            source.sendError(Component.literal("容器缓存里没有 #" + id));
             return 0;
         }
 
         String dimension = DimensionUtils.current();
         if (!cached.dimension().equals(dimension)) {
-            source.sendError(Text.literal("缓存 #" + id + " 在 " + DimensionUtils.display(cached.dimension())
+            source.sendError(Component.literal("缓存 #" + id + " 在 " + DimensionUtils.display(cached.dimension())
                 + "，你现在在 " + DimensionUtils.display(dimension) + "，够不着"));
             return 0;
         }
@@ -280,28 +280,28 @@ public final class ContainerCommand {
     /** {@code put} 共用的部分：校验触及范围和容器，然后提交任务。 */
     private static int startPut(FabricClientCommandSource source, BlockPos pos, ContainerPutAction.Mode mode) {
         if (!PlayerUtils.isWithinReach(pos)) {
-            source.sendError(Text.literal("方块 " + pos.toShortString() + " 超出触及范围（距离 "
+            source.sendError(Component.literal("方块 " + pos.toShortString() + " 超出触及范围（距离 "
                 + String.format("%.2f", PlayerUtils.eyeDistanceTo(pos))
                 + "，触及范围 " + String.format("%.2f", PlayerUtils.reach()) + "）"));
             return 0;
         }
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) {
-            source.sendError(Text.literal("没有世界"));
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) {
+            source.sendError(Component.literal("没有世界"));
             return 0;
         }
-        if (mc.world.getBlockState(pos).isAir()) {
-            source.sendError(Text.literal(pos.toShortString() + " 是空气，不是容器"));
+        if (mc.level.getBlockState(pos).isAir()) {
+            source.sendError(Component.literal(pos.toShortString() + " 是空气，不是容器"));
             return 0;
         }
-        if (!(mc.world.getBlockEntity(pos) instanceof Inventory)) {
-            source.sendError(Text.literal(pos.toShortString() + " 不是容器（没有物品栏）"));
+        if (!(mc.level.getBlockEntity(pos) instanceof Container)) {
+            source.sendError(Component.literal(pos.toShortString() + " 不是容器（没有物品栏）"));
             return 0;
         }
 
         ActionManager.get().submit(new ContainerPutAction(pos, mode));
-        source.sendFeedback(Text.literal("已提交任务：" + putDescription(mode) + " 放进 "
+        source.sendFeedback(Component.literal("已提交任务：" + putDescription(mode) + " 放进 "
             + pos.toShortString() + "（结束后输出 all_cleared）"));
         return 1;
     }
@@ -333,8 +333,8 @@ public final class ContainerCommand {
     }
 
     private static boolean hasPlayer(FabricClientCommandSource source) {
-        if (source.getPlayer() != null && source.getWorld() != null) return true;
-        source.sendError(Text.literal("没有玩家或世界"));
+        if (source.getPlayer() != null && source.getLevel() != null) return true;
+        source.sendError(Component.literal("没有玩家或世界"));
         return false;
     }
 
@@ -348,7 +348,7 @@ public final class ContainerCommand {
             ChatUtils.debug("解析 item_list: " + itemList.describe());
             return itemList;
         } catch (ItemList.ParseException e) {
-            source.sendError(Text.literal("item_list 解析失败: " + e.getMessage()));
+            source.sendError(Component.literal("item_list 解析失败: " + e.getMessage()));
             ChatUtils.debug("item_list 原文: " + raw);
             return null;
         }
@@ -358,28 +358,28 @@ public final class ContainerCommand {
     private static int startGet(FabricClientCommandSource source, BlockPos pos, ItemList itemList,
                                 ContainerGetAction.Mode mode) {
         if (!PlayerUtils.isWithinReach(pos)) {
-            source.sendError(Text.literal("方块 " + pos.toShortString() + " 超出触及范围（距离 "
+            source.sendError(Component.literal("方块 " + pos.toShortString() + " 超出触及范围（距离 "
                 + String.format("%.2f", PlayerUtils.eyeDistanceTo(pos))
                 + "，触及范围 " + String.format("%.2f", PlayerUtils.reach()) + "）"));
             return 0;
         }
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) {
-            source.sendError(Text.literal("没有世界"));
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) {
+            source.sendError(Component.literal("没有世界"));
             return 0;
         }
-        if (mc.world.getBlockState(pos).isAir()) {
-            source.sendError(Text.literal(pos.toShortString() + " 是空气，不是容器"));
+        if (mc.level.getBlockState(pos).isAir()) {
+            source.sendError(Component.literal(pos.toShortString() + " 是空气，不是容器"));
             return 0;
         }
-        if (!(mc.world.getBlockEntity(pos) instanceof Inventory)) {
-            source.sendError(Text.literal(pos.toShortString() + " 不是容器（没有物品栏）"));
+        if (!(mc.level.getBlockEntity(pos) instanceof Container)) {
+            source.sendError(Component.literal(pos.toShortString() + " 不是容器（没有物品栏）"));
             return 0;
         }
 
         ActionManager.get().submit(new ContainerGetAction(pos, itemList, false, mode));
-        source.sendFeedback(Text.literal("已提交任务：从 " + pos.toShortString() + " 取 " + itemList.describe()
+        source.sendFeedback(Component.literal("已提交任务：从 " + pos.toShortString() + " 取 " + itemList.describe()
             + "（模式 " + modeName(mode) + "）"));
         return 1;
     }

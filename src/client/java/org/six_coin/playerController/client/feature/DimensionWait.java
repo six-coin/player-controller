@@ -1,6 +1,6 @@
 package org.six_coin.playerController.client.feature;
 
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.Minecraft;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
@@ -28,8 +28,8 @@ public final class DimensionWait {
 
     /** 每个客户端 tick 调一次（END_CLIENT_TICK）。 */
     public static void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) {
             // 退出世界 / 还在加载：清干净，免得下次进世界被算成「换维度」
             lastDimension = null;
             waitTicksLeft = 0;

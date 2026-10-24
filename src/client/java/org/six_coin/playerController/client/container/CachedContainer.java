@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.container;
 
 import com.google.gson.JsonObject;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 
 import java.util.Map;
 import java.util.TreeMap;

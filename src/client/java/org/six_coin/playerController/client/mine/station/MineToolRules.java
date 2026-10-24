@@ -1,17 +1,17 @@
 package org.six_coin.playerController.client.mine.station;
 
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ItemEnchantmentsComponent;
-import net.minecraft.enchantment.Enchantment;
-import net.minecraft.enchantment.Enchantments;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.registry.tag.ItemTags;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.util.Identifier;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.core.Holder;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.tags.TagKey;
+import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.mine.MineTools;
 
@@ -67,24 +67,24 @@ public final class MineToolRules {
     public static Kind kindOf(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return null;
         for (Kind kind : Kind.values()) {
-            if (stack.isIn(kind.tag)) return kind;
+            if (stack.is(kind.tag)) return kind;
         }
         return null;
     }
 
     /** 某个附魔的等级；没有是 0。 */
-    public static int level(ItemStack stack, RegistryKey<Enchantment> enchantment) {
-        ItemEnchantmentsComponent component =
-            stack.getOrDefault(DataComponentTypes.ENCHANTMENTS, ItemEnchantmentsComponent.DEFAULT);
-        for (RegistryEntry<Enchantment> entry : component.getEnchantments()) {
-            if (entry.matchesKey(enchantment)) return component.getLevel(entry);
+    public static int level(ItemStack stack, ResourceKey<Enchantment> enchantment) {
+        ItemEnchantments component =
+            stack.getOrDefault(DataComponents.ENCHANTMENTS, ItemEnchantments.EMPTY);
+        for (Holder<Enchantment> entry : component.keySet()) {
+            if (entry.is(enchantment)) return component.getLevel(entry);
         }
         return 0;
     }
 
     /** 材质是不是钻石 / 下界合金。 */
     public static boolean hasRequiredMaterial(ItemStack stack, Kind kind) {
-        Identifier id = Registries.ITEM.getId(stack.getItem());
+        Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (!"minecraft".equals(id.getNamespace())) return false;
         String path = id.getPath();
         return path.equals("diamond_" + kind.suffix) || path.equals("netherite_" + kind.suffix);

@@ -1,8 +1,8 @@
 package org.six_coin.playerController.client.util;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.resources.Identifier;
+import net.minecraft.core.BlockPos;
 
 /** 维度相关的常量与换算。 */
 public final class DimensionUtils {
@@ -24,9 +24,9 @@ public final class DimensionUtils {
 
     /** 玩家当前所在维度的 id。 */
     public static String current() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return OVERWORLD;
-        Identifier id = mc.world.getRegistryKey().getValue();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return OVERWORLD;
+        Identifier id = mc.level.dimension().identifier();
         return id == null ? OVERWORLD : id.toString();
     }
 

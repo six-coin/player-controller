@@ -1,15 +1,15 @@
 package org.six_coin.playerController.client.stock.station;
 
-import net.minecraft.block.BarrelBlock;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.ChestBlock;
-import net.minecraft.block.CraftingTableBlock;
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.block.StonecutterBlock;
-import net.minecraft.block.enums.ChestType;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.level.block.BarrelBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.CraftingTableBlock;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.level.block.StonecutterBlock;
+import net.minecraft.world.level.block.state.properties.ChestType;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.Container;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
@@ -44,11 +44,11 @@ public final class StationPrecheck {
     private StationPrecheck() {
     }
 
-    public static Result run(MinecraftClient mc) {
+    public static Result run(Minecraft mc) {
         List<String> problems = new ArrayList<>();
         List<String> hints = new ArrayList<>();
 
-        if (mc.world == null || mc.player == null) {
+        if (mc.level == null || mc.player == null) {
             problems.add("没有玩家或世界");
             return new Result(problems, hints);
         }
@@ -103,11 +103,11 @@ public final class StationPrecheck {
         if (temp == null) {
             problems.add("还没有设置任务前物品暂存处（item_temp）");
         } else {
-            BlockState state = mc.world.getBlockState(temp.pos());
+            BlockState state = mc.level.getBlockState(temp.pos());
             if (!(state.getBlock() instanceof ChestBlock)) {
                 problems.add("任务前物品暂存处 " + temp.coordString() + " 不是箱子（现在是 "
                     + ContainerTypes.idOf(state) + "）");
-            } else if (state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) {
+            } else if (state.getValue(ChestBlock.TYPE) == ChestType.SINGLE) {
                 problems.add("任务前物品暂存处 " + temp.coordString() + " 是单格箱子，必须是大箱子");
             }
         }
@@ -116,25 +116,25 @@ public final class StationPrecheck {
         StationPos provider = manager.single(StationPart.SHULKER_BOX_PROVIDER);
         if (provider == null) {
             problems.add("还没有设置空潜影盒提供处（shulker_box_provider）");
-        } else if (!(mc.world.getBlockState(provider.pos()).getBlock() instanceof BarrelBlock)) {
+        } else if (!(mc.level.getBlockState(provider.pos()).getBlock() instanceof BarrelBlock)) {
             problems.add("空潜影盒提供处 " + provider.coordString() + " 不是木桶（现在是 "
-                + ContainerTypes.idOf(mc.world.getBlockState(provider.pos())) + "）");
+                + ContainerTypes.idOf(mc.level.getBlockState(provider.pos())) + "）");
         }
 
         // 工作台
         StationPos table = manager.single(StationPart.CRAFTING_TABLE);
         if (table == null) {
             problems.add("还没有设置工作台（crafting_table）");
-        } else if (!(mc.world.getBlockState(table.pos()).getBlock() instanceof CraftingTableBlock)) {
+        } else if (!(mc.level.getBlockState(table.pos()).getBlock() instanceof CraftingTableBlock)) {
             problems.add("工作台 " + table.coordString() + " 那里不是工作台方块（现在是 "
-                + ContainerTypes.idOf(mc.world.getBlockState(table.pos())) + "）");
+                + ContainerTypes.idOf(mc.level.getBlockState(table.pos())) + "）");
         }
 
         // 切石机：设了就顺便看一眼（需求里的清单没有它，所以只提示不报错）
         StationPos cutter = manager.single(StationPart.STONECUTTER);
-        if (cutter != null && !(mc.world.getBlockState(cutter.pos()).getBlock() instanceof StonecutterBlock)) {
+        if (cutter != null && !(mc.level.getBlockState(cutter.pos()).getBlock() instanceof StonecutterBlock)) {
             hints.add("切石机 " + cutter.coordString() + " 那里不是切石机方块（现在是 "
-                + ContainerTypes.idOf(mc.world.getBlockState(cutter.pos())) + "）");
+                + ContainerTypes.idOf(mc.level.getBlockState(cutter.pos())) + "）");
         }
 
         // 潜影盒摆放处：数量、上下方块、路径点在上面那一格
@@ -144,26 +144,26 @@ public final class StationPrecheck {
         }
         for (StationPos stationPos : placements) {
             BlockPos pos = stationPos.pos();
-            BlockState state = mc.world.getBlockState(pos);
+            BlockState state = mc.level.getBlockState(pos);
             // 摆放处可以空着，也可以已经放着一个潜影盒（盒子里的东西 check 会数进 check.json）
             if (!state.isAir() && !(state.getBlock() instanceof ShulkerBoxBlock)) {
                 problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上是别的方块（现在是 "
                     + ContainerTypes.idOf(state) + "），只能空着或者放一个潜影盒");
             }
-            if (!mc.world.getBlockState(pos.up()).isAir()) {
+            if (!mc.level.getBlockState(pos.above()).isAir()) {
                 problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面不是空气（那里应该是能站人的地方）");
             }
-            if (mc.world.getBlockState(pos.down()).isAir()) {
+            if (mc.level.getBlockState(pos.below()).isAir()) {
                 problems.add("潜影盒摆放处 " + stationPos.coordString() + " 下面一格是空气（潜影盒没地方放）");
             }
 
             if (graph.at(stationPos.dimension(), pos) != null) {
                 problems.add("潜影盒摆放处 " + stationPos.coordString() + " 本身不该是路径点（路径点应该在它上面那一格）");
             }
-            Waypoint above = graph.at(stationPos.dimension(), pos.up());
+            Waypoint above = graph.at(stationPos.dimension(), pos.above());
             if (above == null) {
                 problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面那一格 "
-                    + pos.up().toShortString() + " 还不是路径点");
+                    + pos.above().toShortString() + " 还不是路径点");
             } else if (standNode != null && graph.shortestPath(standNode.id(), above.id()) == null) {
                 problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面那一格从站立点走不到");
             }
@@ -176,7 +176,7 @@ public final class StationPrecheck {
         return new Result(problems, hints);
     }
 
-    private static void checkContainerList(MinecraftClient mc, StationManager manager,
+    private static void checkContainerList(Minecraft mc, StationManager manager,
                                            StationPart part, List<String> problems) {
         List<StationPos> positions = manager.list(part);
         if (positions.isEmpty()) {
@@ -185,9 +185,9 @@ public final class StationPrecheck {
         }
         for (StationPos stationPos : positions) {
             BlockPos pos = stationPos.pos();
-            if (!(mc.world.getBlockEntity(pos) instanceof Inventory)) {
+            if (!(mc.level.getBlockEntity(pos) instanceof Container)) {
                 problems.add(part.display() + " " + stationPos.coordString() + " 不是容器（现在是 "
-                    + ContainerTypes.idOf(mc.world.getBlockState(pos)) + "）");
+                    + ContainerTypes.idOf(mc.level.getBlockState(pos)) + "）");
             }
         }
     }

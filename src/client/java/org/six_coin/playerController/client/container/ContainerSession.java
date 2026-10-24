@@ -1,11 +1,11 @@
 package org.six_coin.playerController.client.container;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.owner.Owner;
@@ -44,9 +44,9 @@ public final class ContainerSession {
     private final BlockPos pos;
     /** 等的是哪种界面；null = 只要是容器界面（不是玩家自己的那个）就行。 */
     @Nullable
-    private final Class<? extends ScreenHandler> expected;
+    private final Class<? extends AbstractContainerMenu> expected;
 
-    private ScreenHandler handler;
+    private AbstractContainerMenu handler;
     private int openWaitTicks;
     /** 兜底：状态号一直没动静时，最多再等这么多 tick（界面出来的时候按配置充满）。 */
     private int settleLeft;
@@ -60,8 +60,8 @@ public final class ContainerSession {
     /**
      * @param expected 只认这种界面（合成用：工作台 / 切石机各是一种）；null = 什么都行
      */
-    public ContainerSession(BlockPos pos, @Nullable Class<? extends ScreenHandler> expected) {
-        this.pos = pos.toImmutable();
+    public ContainerSession(BlockPos pos, @Nullable Class<? extends AbstractContainerMenu> expected) {
+        this.pos = pos.immutable();
         this.expected = expected;
     }
 
@@ -72,7 +72,7 @@ public final class ContainerSession {
     // ------------------------------------------------------------------
 
     /** 开始：挡住客户端界面，然后看向容器右键打开。 */
-    public void open(MinecraftClient mc, ClientPlayerEntity player) {
+    public void open(Minecraft mc, LocalPlayer player) {
         if (!holding) {
             ScreenSuppressor.acquire();
             holding = true;
@@ -87,15 +87,15 @@ public final class ContainerSession {
      * 跟在一个内容包里发过来的。所以这里要等到内容真的到了才算 READY（见 {@link #settled()}），
      * 不然会读到一箱子空气。
      */
-    public OpenState awaitOpen(MinecraftClient mc) {
+    public OpenState awaitOpen(Minecraft mc) {
         if (handler != null) {
             if (settled()) return OpenState.READY;
             return ++openWaitTicks > MAX_OPEN_WAIT_TICKS ? OpenState.TIMEOUT : OpenState.WAITING;
         }
 
         openWaitTicks++;
-        ScreenHandler current = mc.player == null ? null : mc.player.currentScreenHandler;
-        if (current != null && current != mc.player.playerScreenHandler
+        AbstractContainerMenu current = mc.player == null ? null : mc.player.containerMenu;
+        if (current != null && current != mc.player.inventoryMenu
             && !ContainerCacheTracker.isCreativeInventory(mc)
             && (expected == null || expected.isInstance(current))) {
             handler = current;
@@ -120,33 +120,33 @@ public final class ContainerSession {
      * 万一哪个界面不走这一套（状态号一直是 0），也不至于一直卡在这儿。
      */
     public boolean settled() {
-        if (handler != null && handler.getRevision() != 0) return true;
+        if (handler != null && handler.getStateId() != 0) return true;
         settleLeft--;
         return settleLeft <= 0;
     }
 
     /** 界面还在不在（被服务端关掉了就是 false）。 */
-    public boolean stillOpen(MinecraftClient mc) {
-        return handler != null && mc.player != null && mc.player.currentScreenHandler == handler;
+    public boolean stillOpen(Minecraft mc) {
+        return handler != null && mc.player != null && mc.player.containerMenu == handler;
     }
 
     public boolean isOpen() {
         return handler != null;
     }
 
-    public ScreenHandler handler() {
+    public AbstractContainerMenu handler() {
         return handler;
     }
 
     // ------------------------------------------------------------------
 
     /** 点一下这个格子（拿 / 放）。 */
-    public boolean click(Slot slot, int button, SlotActionType type, String action) {
+    public boolean click(Slot slot, int button, ContainerInput type, String action) {
         return ContainerClicks.click(handler, slot, button, type, action);
     }
 
     /** 点一下这个格子，但不打日志（一次任务里会点很多下时用）。 */
-    public boolean clickQuiet(Slot slot, int button, SlotActionType type) {
+    public boolean clickQuiet(Slot slot, int button, ContainerInput type) {
         return ContainerClicks.clickQuiet(handler, slot, button, type);
     }
 
@@ -166,7 +166,7 @@ public final class ContainerSession {
 
         int free = 0;
         for (Slot slot : InventoryUtils.containerSlots(handler)) {
-            if (slot.getStack().isEmpty()) free++;
+            if (slot.getItem().isEmpty()) free++;
         }
         return free;
     }
@@ -184,7 +184,7 @@ public final class ContainerSession {
      * 取货的动作（{@code ContainerGetAction} / {@code TakeItemAction} …）收尾都会走 {@link #close}，
      * 所以每取一次就刷新一次，不会攒到最后。
      */
-    public void refreshCache(MinecraftClient mc) {
+    public void refreshCache(Minecraft mc) {
         if (handler == null) return;
         int changed = ContainerCacheUpdater.refresh(mc, pos, handler);
         if (changed > 0) {
@@ -193,10 +193,10 @@ public final class ContainerSession {
     }
 
     /** 收尾：刷新容器缓存 → 关掉界面 → 解除「不显示界面」→ 把朝向还回去。 */
-    public void close(MinecraftClient mc) {
+    public void close(Minecraft mc) {
         refreshCache(mc);
-        if (mc.player != null && handler != null && mc.player.currentScreenHandler == handler) {
-            mc.player.closeHandledScreen();
+        if (mc.player != null && handler != null && mc.player.containerMenu == handler) {
+            mc.player.closeContainer();
         }
         if (holding) {
             ScreenSuppressor.release();

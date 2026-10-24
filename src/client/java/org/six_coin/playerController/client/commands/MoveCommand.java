@@ -4,14 +4,14 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.command.CommandSource;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.network.chat.Component;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.action.MoveAction;
 import org.six_coin.playerController.client.action.PathMoveAction;
@@ -52,7 +52,7 @@ public final class MoveCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        LiteralArgumentBuilder<FabricClientCommandSource> node = ClientCommandManager.literal("move");
+        LiteralArgumentBuilder<FabricClientCommandSource> node = ClientCommands.literal("move");
         node.then(axis("x", Direction.Axis.X));
         node.then(axis("y", Direction.Axis.Y));
         node.then(axis("z", Direction.Axis.Z));
@@ -60,11 +60,11 @@ public final class MoveCommand {
         node.then(moveToNameNode());
         node.then(moveToIdNode());
         node.then(moveToPositionNode());
-        node.then(ClientCommandManager.literal("face")
-            .then(ClientCommandManager.argument("blocks", IntegerArgumentType.integer(1))
+        node.then(ClientCommands.literal("face")
+            .then(ClientCommands.argument("blocks", IntegerArgumentType.integer(1))
                 .executes(context -> face(context.getSource(),
                     IntegerArgumentType.getInteger(context, "blocks")))));
-        node.then(ClientCommandManager.literal("cancel")
+        node.then(ClientCommands.literal("cancel")
             .executes(context -> cancel(context.getSource())));
         return node;
     }
@@ -76,15 +76,15 @@ public final class MoveCommand {
      * 平视就是东西南北。
      */
     private static int face(FabricClientCommandSource source, int blocks) {
-        ClientPlayerEntity player = source.getPlayer();
+        LocalPlayer player = source.getPlayer();
         if (player == null) {
-            source.sendError(Text.literal("没有玩家"));
+            source.sendError(Component.literal("没有玩家"));
             return 0;
         }
 
-        Vec3d look = player.getRotationVec(1.0f);
-        Direction direction = Direction.getFacing(look);
-        int sign = direction.getDirection().offset();
+        Vec3 look = player.getViewVector(1.0f);
+        Direction direction = Direction.getApproximateNearest(look);
+        int sign = direction.getAxisDirection().getStep();
 
         ActionManager.get().submit(new MoveAction(direction.getAxis(), blocks * sign));
 
@@ -105,18 +105,18 @@ public final class MoveCommand {
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> axis(String name, Direction.Axis axis) {
-        return ClientCommandManager.literal(name).then(
-            ClientCommandManager.argument("blocks", IntegerArgumentType.integer())
+        return ClientCommands.literal(name).then(
+            ClientCommands.argument("blocks", IntegerArgumentType.integer())
                 .executes(context -> {
                     int blocks = IntegerArgumentType.getInteger(context, "blocks");
                     FabricClientCommandSource source = context.getSource();
 
                     if (blocks == 0) {
-                        source.sendError(Text.literal("移动距离不能为 0"));
+                        source.sendError(Component.literal("移动距离不能为 0"));
                         return 0;
                     }
                     if (source.getPlayer() == null) {
-                        source.sendError(Text.literal("没有玩家"));
+                        source.sendError(Component.literal("没有玩家"));
                         return 0;
                     }
 
@@ -128,33 +128,33 @@ public final class MoveCommand {
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> moveTo() {
-        return ClientCommandManager.literal("to")
-            .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
-                .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
-                    .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+        return ClientCommands.literal("to")
+            .then(ClientCommands.argument("x", IntegerArgumentType.integer())
+                .then(ClientCommands.argument("y", IntegerArgumentType.integer())
+                    .then(ClientCommands.argument("z", IntegerArgumentType.integer())
                         .executes(context -> moveToBlock(context.getSource(), new BlockPos(
                             IntegerArgumentType.getInteger(context, "x"),
                             IntegerArgumentType.getInteger(context, "y"),
                             IntegerArgumentType.getInteger(context, "z")))))))
-            .then(ClientCommandManager.argument("name", StringArgumentType.word())
-                .suggests((context, builder) -> CommandSource.suggestMatching(names(), builder))
+            .then(ClientCommands.argument("name", StringArgumentType.word())
+                .suggests((context, builder) -> SharedSuggestionProvider.suggest(names(), builder))
                 .executes(context -> moveToName(context.getSource(),
                     StringArgumentType.getString(context, "name"))));
     }
 
     /** {@code to_name <name>}：跟 {@code to <name>} 一样。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> moveToNameNode() {
-        return ClientCommandManager.literal("to_name")
-            .then(ClientCommandManager.argument("name", StringArgumentType.word())
-                .suggests((context, builder) -> CommandSource.suggestMatching(names(), builder))
+        return ClientCommands.literal("to_name")
+            .then(ClientCommands.argument("name", StringArgumentType.word())
+                .suggests((context, builder) -> SharedSuggestionProvider.suggest(names(), builder))
                 .executes(context -> moveToName(context.getSource(),
                     StringArgumentType.getString(context, "name"))));
     }
 
     /** {@code to_id <id>}：只能用路径点编号。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> moveToIdNode() {
-        return ClientCommandManager.literal("to_id")
-            .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
+        return ClientCommands.literal("to_id")
+            .then(ClientCommands.argument("id", IntegerArgumentType.integer())
                 .executes(context -> moveToId(context.getSource(),
                     IntegerArgumentType.getInteger(context, "id"))));
     }
@@ -165,16 +165,16 @@ public final class MoveCommand {
      * <p>不写 {@code [dim]} 就是当前维度（补全会给维度）。
      */
     private static LiteralArgumentBuilder<FabricClientCommandSource> moveToPositionNode() {
-        return ClientCommandManager.literal("to_position")
-            .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
+        return ClientCommands.literal("to_position")
+            .then(ClientCommands.argument("x", IntegerArgumentType.integer())
                 .suggests(LookSuggestions::x)
-                .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+                .then(ClientCommands.argument("y", IntegerArgumentType.integer())
                     .suggests(LookSuggestions::y)
-                    .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                    .then(ClientCommands.argument("z", IntegerArgumentType.integer())
                         .suggests(LookSuggestions::z)
                         .executes(context -> moveToPosition(context.getSource(), readPos(context),
                             DimensionUtils.current()))
-                        .then(ClientCommandManager.argument("dim", StringArgumentType.greedyString())
+                        .then(ClientCommands.argument("dim", StringArgumentType.greedyString())
                             .suggests(DimensionSuggestions::suggest)
                             .executes(context -> moveToPosition(context.getSource(), readPos(context),
                                 readDimension(context)))))));
@@ -203,7 +203,7 @@ public final class MoveCommand {
         WaypointGraph graph = WaypointManager.get().graph();
         Waypoint to = graph.at(DimensionUtils.current(), target);
         if (to == null) {
-            source.sendError(Text.literal("当前维度（" + DimensionUtils.display(DimensionUtils.current())
+            source.sendError(Component.literal("当前维度（" + DimensionUtils.display(DimensionUtils.current())
                 + "）的 " + target.toShortString() + " 不是路径点"
                 + "（坐标在边上的情况请用 /pc move to_position）"));
             return 0;
@@ -214,7 +214,7 @@ public final class MoveCommand {
     private static int moveToName(FabricClientCommandSource source, String name) {
         Waypoint to = WaypointManager.get().graph().byName(name);
         if (to == null) {
-            source.sendError(Text.literal("没有叫 " + name + " 的路径点"));
+            source.sendError(Component.literal("没有叫 " + name + " 的路径点"));
             return 0;
         }
         return startPath(source, to);
@@ -223,7 +223,7 @@ public final class MoveCommand {
     private static int moveToId(FabricClientCommandSource source, int id) {
         Waypoint to = WaypointManager.get().graph().get(id);
         if (to == null) {
-            source.sendError(Text.literal("没有 #" + id + " 这个路径点"));
+            source.sendError(Component.literal("没有 #" + id + " 这个路径点"));
             return 0;
         }
         return startPath(source, to);
@@ -254,14 +254,14 @@ public final class MoveCommand {
     /** 把算好的路交出去（出错就报错、已经在那儿就说一声、否则提交任务）。 */
     private static int start(FabricClientCommandSource source, PathPlanner.Plan plan) {
         if (!plan.ok()) {
-            source.sendError(Text.literal(plan.error()));
+            source.sendError(Component.literal(plan.error()));
             return 0;
         }
         if (plan.info() != null) {
-            source.sendFeedback(Text.literal(plan.info()));
+            source.sendFeedback(Component.literal(plan.info()));
         }
         if (plan.alreadyThere()) {
-            source.sendFeedback(Text.literal("你已经站在 " + plan.target().pos().toShortString() + " 了"));
+            source.sendFeedback(Component.literal("你已经站在 " + plan.target().pos().toShortString() + " 了"));
             return 1;
         }
 
@@ -270,7 +270,7 @@ public final class MoveCommand {
         Waypoint last = path.get(path.size() - 1);
 
         ActionManager.get().submit(new PathMoveAction(path));
-        source.sendFeedback(Text.literal("已提交任务：从 " + DimensionUtils.display(DimensionUtils.current())
+        source.sendFeedback(Component.literal("已提交任务：从 " + DimensionUtils.display(DimensionUtils.current())
             + " " + (here == null ? "?" : here.toShortString()) + " 走到 "
             + DimensionUtils.display(last.dimension()) + " " + last.pos().toShortString()
             + "（" + (path.size() - 1) + " 段）"));
@@ -280,9 +280,9 @@ public final class MoveCommand {
     private static int cancel(FabricClientCommandSource source) {
         int cancelled = ActionManager.get().cancelMoves();
         if (cancelled == 0) {
-            source.sendFeedback(Text.literal("当前没有移动任务"));
+            source.sendFeedback(Component.literal("当前没有移动任务"));
         } else {
-            source.sendFeedback(Text.literal("已取消 " + cancelled + " 个移动任务"));
+            source.sendFeedback(Component.literal("已取消 " + cancelled + " 个移动任务"));
         }
         return 1;
     }

@@ -6,8 +6,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
+import net.minecraft.world.item.Item;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.stock.station.StationManager;
@@ -110,13 +110,13 @@ public final class StockProcessMaterials {
     /** 一个备货任务对应的那些文件。 */
     public static StockFiles filesFor(String task) {
         StockManager manager = StockManager.get();
-        int world = manager.loadedWorld() >= 0 ? manager.loadedWorld()
+        int level = manager.loadedWorld() >= 0 ? manager.loadedWorld()
             : org.six_coin.playerController.client.config.PlayerControllerConfig.getWorld();
 
         return new StockFiles(
             manager.currentMaterialFile(task),
             manager.currentFinalPackFile(task),
-            ContainerCacheManager.itemsFile(world),
+            ContainerCacheManager.itemsFile(level),
             manager.currentProcessRawFile(task),
             manager.currentMaterialRawFile(task),
             manager.currentMaterialCleanFile(task),
@@ -554,7 +554,7 @@ public final class StockProcessMaterials {
 
         try {
             Item parsed = StockMaterials.parseItem(id);
-            if (parsed != null) return Registries.ITEM.getId(parsed).toString();
+            if (parsed != null) return BuiltInRegistries.ITEM.getKey(parsed).toString();
         } catch (Throwable ignored) {
             // 注册表没 bootstrap（离线测这套逻辑）就只按字符串规范化
         }

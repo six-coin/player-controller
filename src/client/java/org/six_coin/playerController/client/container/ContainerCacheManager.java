@@ -3,11 +3,11 @@ package org.six_coin.playerController.client.container;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -86,13 +86,13 @@ public final class ContainerCacheManager {
     // 文件
     // ------------------------------------------------------------------
 
-    public static Path cacheFile(int world) {
-        return WaypointManager.worldDir(world).resolve(FILE_NAME);
+    public static Path cacheFile(int level) {
+        return WaypointManager.worldDir(level).resolve(FILE_NAME);
     }
 
     /** get_all_items 生成的文件：{@code world_<n>/container/all_items.json}。 */
-    public static Path itemsFile(int world) {
-        return WaypointManager.worldDir(world).resolve("container").resolve("all_items.json");
+    public static Path itemsFile(int level) {
+        return WaypointManager.worldDir(level).resolve("container").resolve("all_items.json");
     }
 
     public Path currentItemsFile() {
@@ -111,16 +111,16 @@ public final class ContainerCacheManager {
         load(PlayerControllerConfig.getWorld());
     }
 
-    public void load(int world) {
-        world = Math.max(1, world);
-        loadedWorld = world;
+    public void load(int level) {
+        level = Math.max(1, level);
+        loadedWorld = level;
         loadedOk = false;
         containers.clear();
 
-        Path path = cacheFile(world);
+        Path path = cacheFile(level);
         if (!Files.exists(path)) {
             loadedOk = true;
-            ChatUtils.debug("world_" + world + " 还没有容器缓存文件，用空的: " + path);
+            ChatUtils.debug("world_" + level + " 还没有容器缓存文件，用空的: " + path);
             return;
         }
 
@@ -128,7 +128,7 @@ public final class ContainerCacheManager {
             TreeMap<Integer, CachedContainer> loaded = GSON.fromJson(reader, FILE_TYPE);
             if (loaded != null) containers.putAll(loaded);
             loadedOk = true;
-            ChatUtils.debug("已加载 world_" + world + " 的容器缓存: " + containers.size() + " 个容器");
+            ChatUtils.debug("已加载 world_" + level + " 的容器缓存: " + containers.size() + " 个容器");
         } catch (Exception e) {
             containers.clear();
             loadedOk = false;
@@ -138,10 +138,10 @@ public final class ContainerCacheManager {
     }
 
     /** 切换世界配置：先把旧的存起来，再读新的。 */
-    public void switchWorld(int world) {
+    public void switchWorld(int level) {
         save();
-        load(world);
-        ChatUtils.info("容器缓存已切到 world_" + world + "（" + containers.size() + " 个容器）");
+        load(level);
+        ChatUtils.info("容器缓存已切到 world_" + level + "（" + containers.size() + " 个容器）");
     }
 
     public void save() {
@@ -324,25 +324,25 @@ public final class ContainerCacheManager {
      *
      * <p>规则：堆叠上限 1 的、改过名字的物品不算；<b>潜影盒本身永远不记</b>，只记里面的东西。
      */
-    public static Breakdown breakdown(ScreenHandler handler) {
+    public static Breakdown breakdown(AbstractContainerMenu handler) {
         Map<String, Integer> items = new TreeMap<>();
         List<Map<String, Integer>> boxes = new ArrayList<>();
 
         for (Slot slot : InventoryUtils.containerSlots(handler)) {
-            ItemStack stack = slot.getStack();
+            ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
 
             if (ShulkerUtils.isShulkerBox(stack)) {
                 Map<String, Integer> contents = new TreeMap<>();
                 for (ItemStack inner : ShulkerUtils.consideredContents(stack)) {
-                    add(contents, Registries.ITEM.getId(inner.getItem()).toString(), inner.getCount());
+                    add(contents, BuiltInRegistries.ITEM.getKey(inner.getItem()).toString(), inner.getCount());
                 }
                 boxes.add(contents);
                 continue;
             }
 
             if (ItemRules.isIgnored(stack)) continue;
-            add(items, Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount());
+            add(items, BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount());
         }
 
         return new Breakdown(items, boxes);
@@ -354,7 +354,7 @@ public final class ContainerCacheManager {
      * <p>规则：箱子里的物品和潜影盒里的物品都算；<b>潜影盒本身永远不记</b>
      * （不管空的还是装着东西的）；堆叠上限 1 的、改过名字的物品不算。
      */
-    public static Map<String, Integer> snapshot(ScreenHandler handler) {
+    public static Map<String, Integer> snapshot(AbstractContainerMenu handler) {
         return breakdown(handler).all();
     }
 

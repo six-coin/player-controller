@@ -1,9 +1,9 @@
 package org.six_coin.playerController.client.container;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.ContainerInput;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -36,8 +36,8 @@ public final class ContainerClicks {
      * @param action 日志里这一下在干什么（「拿起源格整叠」这种）
      * @return 点出去了返回 true；格子不存在 / 没有交互管理器返回 false（调用方自己决定怎么办）
      */
-    public static boolean click(@Nullable ScreenHandler handler, @Nullable Slot slot, int button,
-                                SlotActionType type, String action) {
+    public static boolean click(@Nullable AbstractContainerMenu handler, @Nullable Slot slot, int button,
+                                ContainerInput type, String action) {
         return doClick(handler, slot, button, type, action);
     }
 
@@ -46,8 +46,8 @@ public final class ContainerClicks {
      *
      * <p>「一个一个往目标格放」那种循环会点几十上百次，每次都刷一行日志没有意义（放完会有汇总）。
      */
-    public static boolean clickQuiet(@Nullable ScreenHandler handler, @Nullable Slot slot, int button,
-                                     SlotActionType type) {
+    public static boolean clickQuiet(@Nullable AbstractContainerMenu handler, @Nullable Slot slot, int button,
+                                     ContainerInput type) {
         return doClick(handler, slot, button, type, null);
     }
 
@@ -56,19 +56,19 @@ public final class ContainerClicks {
      *
      * <p>容器满没满、能收下多少，只有这一下点出去才知道 —— 别自己先猜（服务端才知道真实结果）。
      */
-    public static boolean quickMove(@Nullable ScreenHandler handler, @Nullable Slot slot, String action) {
-        return doClick(handler, slot, 0, SlotActionType.QUICK_MOVE, action);
+    public static boolean quickMove(@Nullable AbstractContainerMenu handler, @Nullable Slot slot, String action) {
+        return doClick(handler, slot, 0, ContainerInput.QUICK_MOVE, action);
     }
 
     /** 跟 {@link #quickMove} 一样，但**不打日志**（一轮点很多下时用，点完有汇总）。 */
-    public static boolean quickMoveQuiet(@Nullable ScreenHandler handler, @Nullable Slot slot) {
-        return doClick(handler, slot, 0, SlotActionType.QUICK_MOVE, null);
+    public static boolean quickMoveQuiet(@Nullable AbstractContainerMenu handler, @Nullable Slot slot) {
+        return doClick(handler, slot, 0, ContainerInput.QUICK_MOVE, null);
     }
 
-    private static boolean doClick(@Nullable ScreenHandler handler, @Nullable Slot slot, int button,
-                                   SlotActionType type, @Nullable String action) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (handler == null || slot == null || mc.player == null || mc.interactionManager == null) {
+    private static boolean doClick(@Nullable AbstractContainerMenu handler, @Nullable Slot slot, int button,
+                                   ContainerInput type, @Nullable String action) {
+        Minecraft mc = Minecraft.getInstance();
+        if (handler == null || slot == null || mc.player == null || mc.gameMode == null) {
             String why = handler == null ? "现在没有打开的界面"
                 : slot == null ? "找不到要点的格子" : "拿不到玩家或 interactionManager";
             // 点不出去是异常情况（跟「一格一格点很多下」不一样），不打日志的话调用方会把它当成「搬不动」
@@ -77,42 +77,42 @@ public final class ContainerClicks {
         }
 
         if (action != null) {
-            ChatUtils.debug("点击：%s（slot=%d，%s，光标=%s）", action, slot.id, type,
-                InventoryUtils.describe(handler.getCursorStack()));
+            ChatUtils.debug("点击：%s（slot=%d，%s，光标=%s）", action, slot.index, type,
+                InventoryUtils.describe(handler.getCarried()));
         }
-        mc.interactionManager.clickSlot(handler.syncId, slot.id, button, type, mc.player);
+        mc.gameMode.handleContainerInput(handler.containerId, slot.index, button, type, mc.player);
         return true;
     }
 
     /**
-     * 用**槽位号**点（{@code ScreenHandler.slots} 的下标就是槽位号）。
+     * 用**槽位号**点（{@code AbstractContainerMenu.slots} 的下标就是槽位号）。
      *
      * <p>有些地方本来就是拿着槽位号在算（比如合成：格子在界面里的位置是按编号算出来的）。
      */
-    public static boolean click(@Nullable ScreenHandler handler, int slotId, int button,
-                                SlotActionType type, @Nullable String action) {
+    public static boolean click(@Nullable AbstractContainerMenu handler, int slotId, int button,
+                                ContainerInput type, @Nullable String action) {
         return doClick(handler, slot(handler, slotId), button, type, action);
     }
 
     /** 用槽位号点，但不打日志。 */
-    public static boolean clickQuiet(@Nullable ScreenHandler handler, int slotId, int button,
-                                     SlotActionType type) {
+    public static boolean clickQuiet(@Nullable AbstractContainerMenu handler, int slotId, int button,
+                                     ContainerInput type) {
         return doClick(handler, slot(handler, slotId), button, type, null);
     }
 
     /** 点界面上的按钮（切石机那一排配方）。 */
-    public static boolean clickButton(@Nullable ScreenHandler handler, int buttonId) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (handler == null || mc.interactionManager == null) {
+    public static boolean clickButton(@Nullable AbstractContainerMenu handler, int buttonId) {
+        Minecraft mc = Minecraft.getInstance();
+        if (handler == null || mc.gameMode == null) {
             ChatUtils.debug("点不了按钮 #%d：没有打开的界面或拿不到 interactionManager", buttonId);
             return false;
         }
-        mc.interactionManager.clickButton(handler.syncId, buttonId);
+        mc.gameMode.handleInventoryButtonClick(handler.containerId, buttonId);
         return true;
     }
 
     @Nullable
-    private static Slot slot(@Nullable ScreenHandler handler, int slotId) {
+    private static Slot slot(@Nullable AbstractContainerMenu handler, int slotId) {
         if (handler == null || slotId < 0 || slotId >= handler.slots.size()) return null;
         return handler.slots.get(slotId);
     }

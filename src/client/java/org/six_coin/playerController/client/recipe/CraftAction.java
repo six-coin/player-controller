@@ -1,20 +1,21 @@
 package org.six_coin.playerController.client.recipe;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.recipe.StonecuttingRecipe;
-import net.minecraft.recipe.display.CuttingRecipeDisplay;
-import net.minecraft.recipe.display.SlotDisplayContexts;
-import net.minecraft.registry.Registries;
-import net.minecraft.screen.CraftingScreenHandler;
-import net.minecraft.screen.StonecutterScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.context.ContextParameterMap;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.SelectableRecipe;
+import net.minecraft.world.item.crafting.StonecutterRecipe;
+import net.minecraft.world.item.crafting.display.StonecutterRecipeDisplay;
+import net.minecraft.world.item.crafting.display.SlotDisplayContext;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.inventory.CraftingMenu;
+import net.minecraft.world.inventory.StonecutterMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.util.context.ContextMap;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
@@ -154,7 +155,7 @@ public class CraftAction extends Action {
         // 只认自己那一种界面（工作台 / 切石机）；界面打开之后等同步的事由 session 管
         this.session = new ContainerSession(stationPos,
             plan.station() == CraftPlan.Station.CRAFTING_TABLE
-                ? CraftingScreenHandler.class : StonecutterScreenHandler.class);
+                ? CraftingMenu.class : StonecutterMenu.class);
     }
 
     @Override
@@ -166,9 +167,9 @@ public class CraftAction extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("没有玩家或世界");
             return;
         }
@@ -179,8 +180,8 @@ public class CraftAction extends Action {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -212,7 +213,7 @@ public class CraftAction extends Action {
 
     @Override
     protected void onEnd() {
-        session.close(MinecraftClient.getInstance());
+        session.close(Minecraft.getInstance());
 
         if (failureReason() != null) {
             return;   // 原因由 Action#cleanup 报一行
@@ -227,12 +228,12 @@ public class CraftAction extends Action {
     // 各阶段
     // ------------------------------------------------------------------
 
-    private void tickOpening(MinecraftClient mc) {
+    private void tickOpening(Minecraft mc) {
         switch (session.awaitOpen(mc)) {
             case READY -> {
                 // 界面的内容到了，但上一步的点击可能还在被服务端处理：状态号（每推一次格子内容就变）
                 // 连着几 tick 不动了再开工 —— 不然第一下拿材料就是照着一份过期的物品栏点的。
-                int revision = session.handler().getRevision();
+                int revision = session.handler().getStateId();
                 if (revision != openRevision) {
                     openRevision = revision;
                     openSettleTicks = 0;
@@ -290,7 +291,7 @@ public class CraftAction extends Action {
 
         if (gridIndex >= grid.size()) {
             // 手上不能留着东西（会挡住下一格拿材料）
-            if (!session.handler().getCursorStack().isEmpty()) {
+            if (!session.handler().getCarried().isEmpty()) {
                 returnCursor();
                 return;
             }
@@ -305,13 +306,13 @@ public class CraftAction extends Action {
         int index = gridIndex;
         Slot slot = grid.get(index);
         Item want = wantedItemAt(grid, index);
-        ItemStack have = slot.getStack();
-        ItemStack cursor = session.handler().getCursorStack();
+        ItemStack have = slot.getItem();
+        ItemStack cursor = session.handler().getCarried();
 
         // 手上有东西：这一格还要的话就接着往里放，不然先放回物品栏
         if (!cursor.isEmpty()) {
-            if (want != null && cursor.isOf(want)
-                && (have.isEmpty() || have.isOf(want)) && have.getCount() < amount) {
+            if (want != null && cursor.is(want)
+                && (have.isEmpty() || have.is(want)) && have.getCount() < amount) {
                 placeFromCursor(slot, index, amount - have.getCount(), have.getCount());
             } else {
                 returnCursor();
@@ -325,14 +326,14 @@ public class CraftAction extends Action {
                 gridIndex++;
                 return;
             }
-            click(slot.id, 0, SlotActionType.PICKUP);   // 拿走，下一 tick 放回物品栏
+            click(slot.index, 0, ContainerInput.PICKUP);   // 拿走，下一 tick 放回物品栏
             watch(index, 0);
             return;
         }
 
         // 东西不对 / 放多了：先清掉，下一 tick 按计划重摆
-        if (!have.isEmpty() && (!have.isOf(want) || have.getCount() > amount)) {
-            click(slot.id, 0, SlotActionType.PICKUP);
+        if (!have.isEmpty() && (!have.is(want) || have.getCount() > amount)) {
+            click(slot.index, 0, ContainerInput.PICKUP);
             watch(index, 0);
             return;
         }
@@ -362,7 +363,7 @@ public class CraftAction extends Action {
                 + " 个）；" + describeWhereIs(want));
             return;
         }
-        click(source, 0, SlotActionType.PICKUP);
+        click(source, 0, ContainerInput.PICKUP);
     }
 
     /** 记下「刚动过这一格、它现在应该有 count 个」，接下来先等它稳定下来再动别的格子。 */
@@ -379,14 +380,14 @@ public class CraftAction extends Action {
      * 这一遍从头按计划重摆。
      */
     private void clearGridStep(List<Slot> grid) {
-        ItemStack cursor = session.handler().getCursorStack();
+        ItemStack cursor = session.handler().getCarried();
         if (!cursor.isEmpty()) {
             returnCursor();
             return;
         }
         for (int i = 0; i < grid.size(); i++) {
-            if (grid.get(i).getStack().isEmpty()) continue;
-            click(grid.get(i).id, 0, SlotActionType.PICKUP);
+            if (grid.get(i).getItem().isEmpty()) continue;
+            click(grid.get(i).index, 0, ContainerInput.PICKUP);
             watch(i, 0);
             return;
         }
@@ -404,7 +405,7 @@ public class CraftAction extends Action {
      * @return true = 稳定了，可以接着动
      */
     private boolean awaitStable(List<Slot> grid) {
-        int now = grid.get(watchingCell).getStack().getCount();
+        int now = grid.get(watchingCell).getItem().getCount();
         if (now != watchingCount) {
             if (now < watchingCount) {
                 ChatUtils.debug("格子 %d 的数量被服务端改成 %d 个（这一批点完应该是 %d 个），按实际数量接着补",
@@ -426,17 +427,17 @@ public class CraftAction extends Action {
      * @param have  放之前这一格有几个（放完之后用来看服务端认不认这个数）
      */
     private void placeFromCursor(Slot slot, int index, int space, int have) {
-        ItemStack cursor = session.handler().getCursorStack();
+        ItemStack cursor = session.handler().getCarried();
         int place = Math.min(space, cursor.getCount());
         if (place <= 0) return;
 
         if (place == cursor.getCount()) {
-            click(slot.id, 0, SlotActionType.PICKUP);
+            click(slot.index, 0, ContainerInput.PICKUP);
             watch(index, have + place);
             return;
         }
         int placed = 0;
-        while (placed < place && click(slot.id, 1, SlotActionType.PICKUP)) {
+        while (placed < place && click(slot.index, 1, ContainerInput.PICKUP)) {
             placed++;
         }
         watch(index, have + placed);
@@ -451,9 +452,9 @@ public class CraftAction extends Action {
         int amount = plan.amountForRound(round);
         for (int i = 0; i < grid.size(); i++) {
             if (i == exceptIndex) continue;
-            ItemStack stack = grid.get(i).getStack();
-            if (stack.isEmpty() || !stack.isOf(item)) continue;
-            if (stack.getCount() > amount) return grid.get(i).id;
+            ItemStack stack = grid.get(i).getItem();
+            if (stack.isEmpty() || !stack.is(item)) continue;
+            if (stack.getCount() > amount) return grid.get(i).index;
         }
         return -1;
     }
@@ -502,11 +503,11 @@ public class CraftAction extends Action {
             int index = gridIndexOf(cell, grid);
             planned[index] = true;
 
-            ItemStack stack = grid.get(index).getStack();
+            ItemStack stack = grid.get(index).getItem();
             if (stack.isEmpty()) {
                 return "第 " + index + " 格应该是 " + id(cell.item()) + "，但里面是空的";
             }
-            if (!stack.isOf(cell.item())) {
+            if (!stack.is(cell.item())) {
                 return "第 " + index + " 格应该是 " + id(cell.item()) + "，但里面是 "
                     + InventoryUtils.describe(stack);
             }
@@ -518,7 +519,7 @@ public class CraftAction extends Action {
 
         for (int i = 0; i < grid.size(); i++) {
             if (planned[i]) continue;
-            ItemStack stack = grid.get(i).getStack();
+            ItemStack stack = grid.get(i).getItem();
             if (!stack.isEmpty()) {
                 return "第 " + i + " 格应该空着，但里面有 " + InventoryUtils.describe(stack);
             }
@@ -532,7 +533,7 @@ public class CraftAction extends Action {
      * <p>工作台的成品格是服务端算的，材料摆完那一刻客户端不一定看得到；切石机还要先选配方。
      * 最多等 {@link #READY_WAIT_TICKS} tick；等不到就回去重新摆一遍（重摆会按格子里实际有多少个补齐）。
      */
-    private void tickReady(MinecraftClient mc) {
+    private void tickReady(Minecraft mc) {
         if (plan.station() == CraftPlan.Station.STONECUTTER && recipeIndex < 0) {
             selectStonecutterRecipe(mc);
             return;
@@ -540,7 +541,7 @@ public class CraftAction extends Action {
 
         ItemStack result = slotStack(resultSlotId());
         if (!result.isEmpty()) {
-            if (!result.isOf(plan.target())) {
+            if (!result.is(plan.target())) {
                 String problem = gridProblem();
                 fail("成品格是 " + id(result.getItem()) + "，不是 " + id(plan.target())
                     + (problem == null ? "（格子看着是对的）" : "（" + problem + "）"));
@@ -571,7 +572,7 @@ public class CraftAction extends Action {
      */
     private void craft() {
         craftedBefore = countCrafted();
-        if (!click(resultSlotId(), 0, SlotActionType.QUICK_MOVE)) return;   // 这一 tick 点满了，下一 tick 再点
+        if (!click(resultSlotId(), 0, ContainerInput.QUICK_MOVE)) return;   // 这一 tick 点满了，下一 tick 再点
 
         craftClicks++;
         waitTicks = 0;
@@ -657,7 +658,7 @@ public class CraftAction extends Action {
      * 只扫主背包就会误报「找不到足够的材料」：
      * <ul>
      *   <li>合成界面关掉的时候，格子里剩下的材料会被退回物品栏，而原版的
-     *       {@code PlayerInventory.addStack} 是**先从快捷栏**找位置的；</li>
+     *       {@code Inventory.addStack} 是**先从快捷栏**找位置的；</li>
      *   <li>上一步合成出来的中间产物（QuickMove）本来就落在快捷栏里。</li>
      * </ul>
      * 只拿这一格要的那种材料，所以不会把别的东西抓进来；成品本身不会成为自己的材料，
@@ -672,16 +673,16 @@ public class CraftAction extends Action {
         int exact = -1;
         int exactCount = -1;
         for (Slot slot : inventorySlots()) {
-            ItemStack stack = slot.getStack();
-            if (stack.isEmpty() || !stack.isOf(item)) continue;
+            ItemStack stack = slot.getItem();
+            if (stack.isEmpty() || !stack.is(item)) continue;
             if (stack.getCount() <= need) {
                 if (stack.getCount() > exactCount) {
-                    exact = slot.id;
+                    exact = slot.index;
                     exactCount = stack.getCount();
                 }
                 continue;
             }
-            if (fallback < 0) fallback = slot.id;
+            if (fallback < 0) fallback = slot.index;
         }
         return exact >= 0 ? exact : fallback;
     }
@@ -691,20 +692,20 @@ public class CraftAction extends Action {
         int main = 0;
         int hotbar = 0;
         for (Slot slot : inventorySlots()) {
-            ItemStack stack = slot.getStack();
-            if (stack.isEmpty() || !stack.isOf(item)) continue;
-            if (slot.getIndex() < 9) hotbar += stack.getCount();
+            ItemStack stack = slot.getItem();
+            if (stack.isEmpty() || !stack.is(item)) continue;
+            if (slot.getContainerSlot() < 9) hotbar += stack.getCount();
             else main += stack.getCount();
         }
 
         int grid = 0;
         for (Slot slot : gridSlots()) {
-            ItemStack stack = slot.getStack();
-            if (!stack.isEmpty() && stack.isOf(item)) grid += stack.getCount();
+            ItemStack stack = slot.getItem();
+            if (!stack.isEmpty() && stack.is(item)) grid += stack.getCount();
         }
 
-        ItemStack cursor = session.handler().getCursorStack();
-        int onCursor = !cursor.isEmpty() && cursor.isOf(item) ? cursor.getCount() : 0;
+        ItemStack cursor = session.handler().getCarried();
+        int onCursor = !cursor.isEmpty() && cursor.is(item) ? cursor.getCount() : 0;
 
         return "现在物品栏里这种材料：主背包 " + main + " 个、快捷栏 " + hotbar + " 个、"
             + "合成格 " + grid + " 个、光标 " + onCursor + " 个（一共 "
@@ -713,10 +714,10 @@ public class CraftAction extends Action {
 
     /** 把手上的东西放回主背包 27 格（优先同类半叠）。 */
     private void returnCursor() {
-        ItemStack cursor = session.handler().getCursorStack();
+        ItemStack cursor = session.handler().getCarried();
         if (cursor.isEmpty()) return;
 
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) {
             fail("玩家不存在");
             return;
@@ -727,21 +728,21 @@ public class CraftAction extends Action {
             fail("主背包 27 格放不下手上剩下的 " + id(cursor.getItem()) + " x" + cursor.getCount());
             return;
         }
-        click(target.id, 0, SlotActionType.PICKUP);
+        click(target.index, 0, ContainerInput.PICKUP);
     }
 
     // ------------------------------------------------------------------
     // 切石机选配方
     // ------------------------------------------------------------------
 
-    private void selectStonecutterRecipe(MinecraftClient mc) {
-        if (mc.world == null) {
+    private void selectStonecutterRecipe(Minecraft mc) {
+        if (mc.level == null) {
             fail("没有世界");
             return;
         }
 
-        CuttingRecipeDisplay.Grouping<StonecuttingRecipe> grouping =
-            ((StonecutterScreenHandler) session.handler()).getAvailableRecipes();
+        SelectableRecipe.SingleInputSet<StonecutterRecipe> grouping =
+            ((StonecutterMenu) session.handler()).getVisibleRecipes();
         if (grouping == null || grouping.isEmpty()) {
             if (++recipeWaitTicks > READY_WAIT_TICKS * 2) {
                 recipeWaitTicks = 0;
@@ -750,11 +751,11 @@ public class CraftAction extends Action {
             return;
         }
 
-        ContextParameterMap context = SlotDisplayContexts.createParameters(mc.world);
+        ContextMap context = SlotDisplayContext.fromLevel(mc.level);
         int index = 0;
-        for (CuttingRecipeDisplay.GroupEntry<StonecuttingRecipe> entry : grouping.entries()) {
-            for (ItemStack option : entry.recipe().optionDisplay().getStacks(context)) {
-                if (!option.isEmpty() && option.isOf(plan.target())) {
+        for (SelectableRecipe.SingleInputEntry<StonecutterRecipe> entry : grouping.entries()) {
+            for (ItemStack option : entry.recipe().optionDisplay().resolveForStacks(context)) {
+                if (!option.isEmpty() && option.is(plan.target())) {
                     recipeIndex = index;
                     ContainerClicks.clickButton(session.handler(), index);
                     ChatUtils.debug("切石机：选中第 %d 个配方（共 %d 个选项），等成品格",
@@ -776,9 +777,9 @@ public class CraftAction extends Action {
     /** 这台机器上的输入格（工作台 9 格、切石机 1 格）。 */
     private List<Slot> gridSlots() {
         if (plan.station() == CraftPlan.Station.STONECUTTER) {
-            return List.of(session.handler().slots.get(StonecutterScreenHandler.INPUT_ID));
+            return List.of(session.handler().slots.get(StonecutterMenu.INPUT_SLOT));
         }
-        return ((CraftingScreenHandler) session.handler()).getInputSlots();
+        return ((CraftingMenu) session.handler()).getInputGridSlots();
     }
 
     /** 计划里的格子 → 输入格列表里的下标。 */
@@ -797,12 +798,12 @@ public class CraftAction extends Action {
 
     private int resultSlotId() {
         return plan.station() == CraftPlan.Station.CRAFTING_TABLE
-            ? CraftingScreenHandler.RESULT_ID
-            : StonecutterScreenHandler.OUTPUT_ID;
+            ? CraftingMenu.RESULT_SLOT
+            : StonecutterMenu.RESULT_SLOT;
     }
 
     private ItemStack slotStack(int slotId) {
-        return session.handler().slots.get(slotId).getStack();
+        return session.handler().slots.get(slotId).getItem();
     }
 
     /**
@@ -810,7 +811,7 @@ public class CraftAction extends Action {
      *
      * @return false = 这一 tick 的点击用完了，什么也没点（下一 tick 接着来）
      */
-    private boolean click(int slotId, int button, SlotActionType type) {
+    private boolean click(int slotId, int button, ContainerInput type) {
         if (clicksLeft <= 0) return false;
         if (!ContainerClicks.clickQuiet(session.handler(), slotId, button, type)) {
             fail("点不了格子 #" + slotId);
@@ -825,7 +826,7 @@ public class CraftAction extends Action {
     private List<Slot> inventorySlots() {
         List<Slot> slots = new ArrayList<>();
         for (Slot slot : session.handler().slots) {
-            if (slot.inventory instanceof PlayerInventory && slot.getIndex() < 36) {
+            if (slot.container instanceof Inventory && slot.getContainerSlot() < 36) {
                 slots.add(slot);
             }
         }
@@ -836,14 +837,14 @@ public class CraftAction extends Action {
     private int countCrafted() {
         int total = 0;
         for (Slot slot : session.handler().slots) {
-            if (!(slot.inventory instanceof PlayerInventory)) continue;
-            ItemStack stack = slot.getStack();
-            if (!stack.isEmpty() && stack.isOf(plan.target())) total += stack.getCount();
+            if (!(slot.container instanceof Inventory)) continue;
+            ItemStack stack = slot.getItem();
+            if (!stack.isEmpty() && stack.is(plan.target())) total += stack.getCount();
         }
         return total;
     }
 
     private static String id(Item item) {
-        return Registries.ITEM.getId(item).toString();
+        return BuiltInRegistries.ITEM.getKey(item).toString();
     }
 }

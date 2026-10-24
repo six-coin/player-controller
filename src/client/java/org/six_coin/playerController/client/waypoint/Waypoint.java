@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.waypoint;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.util.DimensionUtils;
 
@@ -86,7 +86,7 @@ public final class Waypoint {
     }
 
     /** 玩家站在这个路径点方块里时，应该对齐到的精确位置（x/z 为 n.5，y 为 n + 0.2）。 */
-    public Vec3d center() {
+    public Vec3 center() {
         return org.six_coin.playerController.client.util.PlayerUtils.blockCenter(pos());
     }
 

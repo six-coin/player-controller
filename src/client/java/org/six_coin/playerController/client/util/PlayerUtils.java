@@ -1,13 +1,12 @@
 package org.six_coin.playerController.client.util;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 
@@ -33,19 +32,19 @@ public final class PlayerUtils {
     private PlayerUtils() {
     }
 
-    public static ClientPlayerEntity player() {
-        return MinecraftClient.getInstance().player;
+    public static LocalPlayer player() {
+        return Minecraft.getInstance().player;
     }
 
     /** 玩家所在的方块坐标（取整，和路径点用的是同一套坐标）。 */
     @Nullable
     public static BlockPos currentBlockPos() {
-        ClientPlayerEntity player = player();
-        return player == null ? null : BlockPos.ofFloored(player.getEntityPos());
+        LocalPlayer player = player();
+        return player == null ? null : BlockPos.containing(player.position());
     }
 
     /** 玩家沿某个轴的坐标。 */
-    public static double axisValue(Direction.Axis axis, ClientPlayerEntity player) {
+    public static double axisValue(Direction.Axis axis, LocalPlayer player) {
         return axis.choose(player.getX(), player.getY(), player.getZ());
     }
 
@@ -56,10 +55,10 @@ public final class PlayerUtils {
     /** 准星看到的方块，没看到返回 null。 */
     @Nullable
     public static BlockPos lookedAtBlock() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) return null;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return null;
 
-        HitResult hit = mc.player.raycast(reach(), 0.0f, false);
+        HitResult hit = mc.player.pick(reach(), 0.0f, false);
         if (hit instanceof BlockHitResult blockHit && hit.getType() == HitResult.Type.BLOCK) {
             return blockHit.getBlockPos();
         }
@@ -75,39 +74,38 @@ public final class PlayerUtils {
      *
      * <p>因为路径点存的是方块坐标，y 用方块自身的高度（也就是站在这块地上时脚的位置）。
      */
-    public static Vec3d blockCenter(BlockPos pos) {
-        return new Vec3d(pos.getX() + 0.5, pos.getY() + CENTER_Y_OFFSET, pos.getZ() + 0.5);
+    public static Vec3 blockCenter(BlockPos pos) {
+        return new Vec3(pos.getX() + 0.5, pos.getY() + CENTER_Y_OFFSET, pos.getZ() + 0.5);
     }
 
     /** 玩家是否已经在所在方块的中心。 */
     public static boolean isAtBlockCenter() {
-        ClientPlayerEntity player = player();
+        LocalPlayer player = player();
         if (player == null) return false;
-        BlockPos pos = BlockPos.ofFloored(player.getEntityPos());
-        Vec3d center = blockCenter(pos);
+        BlockPos pos = BlockPos.containing(player.position());
+        Vec3 center = blockCenter(pos);
         return Math.abs(player.getX() - center.x) <= CENTER_EPSILON
             && Math.abs(player.getY() - center.y) <= CENTER_EPSILON
             && Math.abs(player.getZ() - center.z) <= CENTER_EPSILON;
     }
 
     /**
-     * 把玩家直接对齐到方块中心，并把新位置同步给服务端。
+     * 把玩家直接对齐到方块中心。
      *
      * <p>对齐是必须的：路径点存的是整数方块坐标，只有先站到方块中心，
      * 沿轴移动整数格之后才会落在下一个方块的中心。
+     *
+     * <p><b>不要在这里自己发包</b>：26.3 的服务端一个 tick 只接受一个带位置的移动包，
+     * 多发一个就是 {@code Invalid move player packet received} 直接断开。
+     * 位置既然改了，原版 {@code LocalPlayer.sendPosition} 下一 tick 自然会把它报上去。
      */
     public static void snapToBlockCenter(BlockPos pos) {
-        ClientPlayerEntity player = player();
+        LocalPlayer player = player();
         if (player == null) return;
 
-        Vec3d center = blockCenter(pos);
-        player.setPosition(center.x, center.y, center.z);
-        player.setVelocity(Vec3d.ZERO);
-
-        if (player.networkHandler != null) {
-            player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-                center.x, center.y, center.z, player.isOnGround(), player.horizontalCollision));
-        }
+        Vec3 center = blockCenter(pos);
+        player.setPos(center.x, center.y, center.z);
+        player.setDeltaMovement(Vec3.ZERO);
     }
 
     // ------------------------------------------------------------------
@@ -132,9 +130,9 @@ public final class PlayerUtils {
     }
 
     public static double eyeDistanceTo(BlockPos pos) {
-        ClientPlayerEntity player = player();
+        LocalPlayer player = player();
         if (player == null) return Double.MAX_VALUE;
-        return player.getEyePos().distanceTo(Vec3d.ofCenter(pos));
+        return player.getEyePosition().distanceTo(Vec3.atCenterOf(pos));
     }
 
     /**
@@ -143,8 +141,8 @@ public final class PlayerUtils {
      * <p>工作站用站立点当参照：所有相关方块都要在站立点的触及范围内。
      */
     public static double eyeDistanceFrom(BlockPos standOn, BlockPos target) {
-        Vec3d eye = Vec3d.ofCenter(standOn).add(0, EYE_HEIGHT, 0);
-        return eye.distanceTo(Vec3d.ofCenter(target));
+        Vec3 eye = Vec3.atCenterOf(standOn).add(0, EYE_HEIGHT, 0);
+        return eye.distanceTo(Vec3.atCenterOf(target));
     }
 
     /** 站在 {@code standOn} 上够不够得着 {@code target}。 */
@@ -154,28 +152,28 @@ public final class PlayerUtils {
 
     /** 看向某个方块中心所需要的 yaw。 */
     public static float yawTo(BlockPos pos) {
-        ClientPlayerEntity player = player();
-        Vec3d eye = player.getEyePos();
-        double dx = pos.getX() + 0.5 - eye.getX();
-        double dz = pos.getZ() + 0.5 - eye.getZ();
+        LocalPlayer player = player();
+        Vec3 eye = player.getEyePosition();
+        double dx = pos.getX() + 0.5 - eye.x;
+        double dz = pos.getZ() + 0.5 - eye.z;
         return (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
     }
 
     /** 看向某个方块中心所需要的 pitch。 */
     public static float pitchTo(BlockPos pos) {
-        ClientPlayerEntity player = player();
-        Vec3d eye = player.getEyePos();
-        double dx = pos.getX() + 0.5 - eye.getX();
-        double dy = pos.getY() + 0.5 - eye.getY();
-        double dz = pos.getZ() + 0.5 - eye.getZ();
+        LocalPlayer player = player();
+        Vec3 eye = player.getEyePosition();
+        double dx = pos.getX() + 0.5 - eye.x;
+        double dy = pos.getY() + 0.5 - eye.y;
+        double dz = pos.getZ() + 0.5 - eye.z;
         double horizontal = Math.sqrt(dx * dx + dz * dz);
         return (float) (-Math.toDegrees(Math.atan2(dy, horizontal)));
     }
 
     /** 玩家眼睛相对方块中心的方向，也就是应该点击的面。 */
     public static Direction facingSide(BlockPos pos) {
-        ClientPlayerEntity player = player();
+        LocalPlayer player = player();
         if (player == null) return Direction.UP;
-        return Direction.getFacing(player.getEyePos().subtract(Vec3d.ofCenter(pos)));
+        return Direction.getApproximateNearest(player.getEyePosition().subtract(Vec3.atCenterOf(pos)));
     }
 }

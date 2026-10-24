@@ -2,7 +2,7 @@ package org.six_coin.playerController.client.stock.station;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -64,17 +64,17 @@ public final class StationManager {
     // ------------------------------------------------------------------
 
     /** 工作站数据的目录：{@code world_<n>/stock/station/}。 */
-    public static Path stationDir(int world) {
-        return WaypointManager.worldDir(world).resolve("stock").resolve("station");
+    public static Path stationDir(int level) {
+        return WaypointManager.worldDir(level).resolve("stock").resolve("station");
     }
 
-    public static Path stationFile(int world) {
-        return stationDir(world).resolve(FILE_NAME);
+    public static Path stationFile(int level) {
+        return stationDir(level).resolve(FILE_NAME);
     }
 
     /** 检查报告：{@code world_<n>/stock/station/check.json}。 */
-    public static Path checkFile(int world) {
-        return stationDir(world).resolve("check.json");
+    public static Path checkFile(int level) {
+        return stationDir(level).resolve("check.json");
     }
 
     public Path currentFile() {
@@ -93,16 +93,16 @@ public final class StationManager {
         load(PlayerControllerConfig.getWorld());
     }
 
-    public void load(int world) {
-        world = Math.max(1, world);
-        loadedWorld = world;
+    public void load(int level) {
+        level = Math.max(1, level);
+        loadedWorld = level;
         loadedOk = false;
         data = new StationData();
 
-        Path path = stationFile(world);
+        Path path = stationFile(level);
         if (!Files.exists(path)) {
             loadedOk = true;
-            ChatUtils.debug("world_" + world + " 还没有工作站文件，用空的: " + path);
+            ChatUtils.debug("world_" + level + " 还没有工作站文件，用空的: " + path);
             return;
         }
 
@@ -111,7 +111,7 @@ public final class StationManager {
             if (loaded != null) data = loaded;
             data.resequence();
             loadedOk = true;
-            ChatUtils.debug("已加载 world_" + world + " 的工作站：" + totalCount() + " 个坐标");
+            ChatUtils.debug("已加载 world_" + level + " 的工作站：" + totalCount() + " 个坐标");
         } catch (Exception e) {
             loadedOk = false;
             data = new StationData();
@@ -121,10 +121,10 @@ public final class StationManager {
     }
 
     /** 切换世界配置：先把旧的存起来，再读新的。 */
-    public void switchWorld(int world) {
+    public void switchWorld(int level) {
         save();
-        load(world);
-        ChatUtils.info("工作站已切到 world_" + world + "（" + totalCount() + " 个坐标）");
+        load(level);
+        ChatUtils.info("工作站已切到 world_" + level + "（" + totalCount() + " 个坐标）");
     }
 
     public void save() {

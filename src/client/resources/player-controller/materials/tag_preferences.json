@@ -21,5 +21,8 @@
   "#minecraft:wooden_tool_materials": "minecraft:cherry_planks",
   "#minecraft:bundles": "minecraft:bundle",
   "#minecraft:wool": "minecraft:white_wool",
-  "#minecraft:soul_fire_base_blocks": "minecraft:soul_sand"
+  "#minecraft:soul_fire_base_blocks": "minecraft:soul_sand",
+  "#minecraft:metal_nuggets": "minecraft:iron_nugget",
+  "#minecraft:clonable_maps": "minecraft:filled_map",
+  "#minecraft:mushrooms": "minecraft:red_mushroom"
 }

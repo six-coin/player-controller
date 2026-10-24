@@ -1,12 +1,12 @@
 package org.six_coin.playerController.client.stock;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.container.ContainerClicks;
@@ -94,7 +94,7 @@ public class TakeItemAction extends Action {
      */
     public TakeItemAction(BlockPos pos, int hotbarIndex, Predicate<ItemStack> filter, String what,
                           @Nullable java.util.function.Function<ItemStack, String> explain) {
-        this.pos = pos.toImmutable();
+        this.pos = pos.immutable();
         this.hotbarIndex = hotbarIndex;
         this.filter = filter;
         this.what = what;
@@ -135,13 +135,13 @@ public class TakeItemAction extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
-        if (!(mc.world.getBlockEntity(pos) instanceof Inventory)) {
+        if (!(mc.level.getBlockEntity(pos) instanceof Container)) {
             fail(pos.toShortString() + " 不是容器（没有物品栏）");
             return;
         }
@@ -151,7 +151,7 @@ public class TakeItemAction extends Action {
                 + "，触及范围 " + String.format("%.2f", PlayerUtils.reach()) + "）");
             return;
         }
-        if (!player.currentScreenHandler.getCursorStack().isEmpty()) {
+        if (!player.containerMenu.getCarried().isEmpty()) {
             fail("光标上还有物品，先放下再执行");
             return;
         }
@@ -164,8 +164,8 @@ public class TakeItemAction extends Action {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -206,7 +206,7 @@ public class TakeItemAction extends Action {
 
     @Override
     protected void onEnd() {
-        session.close(MinecraftClient.getInstance());
+        session.close(Minecraft.getInstance());
 
         if (failureReason() == null) {
             if (found) {
@@ -220,7 +220,7 @@ public class TakeItemAction extends Action {
 
     // ------------------------------------------------------------------
 
-    private void tickOpening(MinecraftClient mc) {
+    private void tickOpening(Minecraft mc) {
         switch (session.awaitOpen(mc)) {
             case READY -> {
                 phase = Phase.FIND;
@@ -238,7 +238,7 @@ public class TakeItemAction extends Action {
         nearMiss.clear();
 
         for (Slot slot : InventoryUtils.containerSlots(session.handler())) {
-            ItemStack stack = slot.getStack();
+            ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
 
             if (filter.test(stack)) {
@@ -247,7 +247,7 @@ public class TakeItemAction extends Action {
             }
 
             nonEmptySlots++;
-            ChatUtils.debug("第 %d 格 %s 不符合条件", slot.id, InventoryUtils.describe(stack));
+            ChatUtils.debug("第 %d 格 %s 不符合条件", slot.index, InventoryUtils.describe(stack));
             if (explain != null) {
                 String reason = explain.apply(stack);
                 if (reason != null) nearMiss.add(reason);
@@ -266,27 +266,27 @@ public class TakeItemAction extends Action {
             fail("找不到快捷栏第 " + (hotbarIndex + 1) + " 格");
             return;
         }
-        if (!target.getStack().isEmpty()) {
+        if (!target.getItem().isEmpty()) {
             fail("快捷栏第 " + (hotbarIndex + 1) + " 格被 " + InventoryUtils.describe(target) + " 占了，先腾出来");
             return;
         }
 
-        expected = source.getStack().copy();
+        expected = source.getItem().copy();
         ChatUtils.debug("选中第 %d 格：%s → 快捷栏第 %d 格（%s）",
-            source.id, InventoryUtils.describe(expected), hotbarIndex + 1, InventoryUtils.describe(target));
-        click(source, 0, SlotActionType.PICKUP, "拿起 " + InventoryUtils.describe(expected));
+            source.index, InventoryUtils.describe(expected), hotbarIndex + 1, InventoryUtils.describe(target));
+        click(source, 0, ContainerInput.PICKUP, "拿起 " + InventoryUtils.describe(expected));
         phase = Phase.PICK;
     }
 
     private void tickPick() {
-        ItemStack cursor = session.handler().getCursorStack();
+        ItemStack cursor = session.handler().getCarried();
 
         if (pendingClick) {
-            if (!cursor.isEmpty() && ItemStack.areItemsAndComponentsEqual(cursor, expected)) {
+            if (!cursor.isEmpty() && ItemStack.isSameItemSameComponents(cursor, expected)) {
                 pendingClick = false;
                 stepWaitTicks = 0;
                 expected = cursor.copy();
-                click(InventoryUtils.hotbarSlot(session.handler(), hotbarIndex), 0, SlotActionType.PICKUP,
+                click(InventoryUtils.hotbarSlot(session.handler(), hotbarIndex), 0, ContainerInput.PICKUP,
                     "放进快捷栏第 " + (hotbarIndex + 1) + " 格");
                 phase = Phase.DROP;
                 return;
@@ -299,21 +299,21 @@ public class TakeItemAction extends Action {
             return;
         }
 
-        click(source, 0, SlotActionType.PICKUP, "拿起源格整叠");
+        click(source, 0, ContainerInput.PICKUP, "拿起源格整叠");
     }
 
     private void tickDrop() {
         Slot target = InventoryUtils.hotbarSlot(session.handler(), hotbarIndex);
 
         if (pendingClick) {
-            if (session.handler().getCursorStack().isEmpty()) {
+            if (session.handler().getCarried().isEmpty()) {
                 pendingClick = false;
                 stepWaitTicks = 0;
-                if (target == null || target.getStack().isEmpty()) {
+                if (target == null || target.getItem().isEmpty()) {
                     fail("东西没放进快捷栏第 " + (hotbarIndex + 1) + " 格");
                     return;
                 }
-                taken = target.getStack().copy();
+                taken = target.getItem().copy();
                 found = true;
                 output().info("已取出 " + InventoryUtils.describe(taken)
                     + " 放进快捷栏第 " + (hotbarIndex + 1) + " 格");
@@ -321,19 +321,19 @@ public class TakeItemAction extends Action {
                 return;
             }
             if (++stepWaitTicks > MAX_STEP_WAIT_TICKS) {
-                fail("放进快捷栏失败：光标上还有 " + InventoryUtils.describe(session.handler().getCursorStack()));
+                fail("放进快捷栏失败：光标上还有 " + InventoryUtils.describe(session.handler().getCarried()));
                 return;
             }
             return;
         }
 
-        click(target, 0, SlotActionType.PICKUP, "放进快捷栏第 " + (hotbarIndex + 1) + " 格");
+        click(target, 0, ContainerInput.PICKUP, "放进快捷栏第 " + (hotbarIndex + 1) + " 格");
     }
 
     // ------------------------------------------------------------------
 
     /** 点一下，然后等结果。 */
-    private void click(Slot slot, int button, SlotActionType type, String action) {
+    private void click(Slot slot, int button, ContainerInput type, String action) {
         if (!session.click(slot, button, type, action)) {
             fail("点不了格子（" + action + "）");
             return;

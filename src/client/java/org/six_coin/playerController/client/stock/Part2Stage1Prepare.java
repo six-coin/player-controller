@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.stock;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.container.ContainerItemsExporter;
 import org.six_coin.playerController.client.stock.station.StationManager;
 import org.six_coin.playerController.client.stock.station.StationPart;
@@ -42,8 +42,8 @@ final class Part2Stage1Prepare extends StockStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("没有玩家或世界");
             return;
         }

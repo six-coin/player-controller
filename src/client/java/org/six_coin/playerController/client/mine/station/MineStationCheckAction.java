@@ -4,16 +4,16 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.PathMoveAction;
@@ -153,8 +153,8 @@ public class MineStationCheckAction extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("没有玩家或世界");
             return;
         }
@@ -178,7 +178,7 @@ public class MineStationCheckAction extends Action {
     }
 
     /** 第 1 步：给所有容器算 access_position、检查可达性、列出要开的目标。 */
-    private void prepare(MinecraftClient mc) {
+    private void prepare(Minecraft mc) {
         MineStationManager manager = MineStationManager.get();
         WaypointGraph graph = WaypointManager.get().graph();
 
@@ -306,9 +306,9 @@ public class MineStationCheckAction extends Action {
 
     private void arrive() {
         Target target = current;
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (target == null || player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (target == null || player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -322,8 +322,8 @@ public class MineStationCheckAction extends Action {
         }
 
         // 对齐到落点方块中心：开容器用的是玩家当前位置，偏了可能够不着
-        Vec3d center = PlayerUtils.blockCenter(target.access());
-        if (player.squaredDistanceTo(center) > 1.0E-6) {
+        Vec3 center = PlayerUtils.blockCenter(target.access());
+        if (player.distanceToSqr(center) > 1.0E-6) {
             PlayerUtils.snapToBlockCenter(target.access());
         }
 
@@ -334,9 +334,9 @@ public class MineStationCheckAction extends Action {
             return;
         }
 
-        MinecraftClient client = MinecraftClient.getInstance();
-        BlockState state = client.world.getBlockState(target.pos());
-        String blockId = Registries.BLOCK.getId(state.getBlock()).toString();
+        Minecraft client = Minecraft.getInstance();
+        BlockState state = client.level.getBlockState(target.pos());
+        String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
         boolean shulkerBox = state.getBlock() instanceof ShulkerBoxBlock;
         boolean supported = ContainerTypes.isSupported(state.getBlock());
 
@@ -362,8 +362,8 @@ public class MineStationCheckAction extends Action {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -402,7 +402,7 @@ public class MineStationCheckAction extends Action {
         arrive();
     }
 
-    private void tickOpen(MinecraftClient mc) {
+    private void tickOpen(Minecraft mc) {
         Target target = current;
         if (target == null || session == null) {
             fail("内部状态不对：没有正在打开的容器");
@@ -439,8 +439,8 @@ public class MineStationCheckAction extends Action {
     }
 
     private void survey(Target target, ContainerSession open) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        BlockState state = mc.world.getBlockState(target.pos());
+        Minecraft mc = Minecraft.getInstance();
+        BlockState state = mc.level.getBlockState(target.pos());
 
         List<ItemStack> stacks = new ArrayList<>();
         Map<String, Integer> items = new LinkedHashMap<>();
@@ -449,19 +449,19 @@ public class MineStationCheckAction extends Action {
 
         for (Slot slot : InventoryUtils.containerSlots(open.handler())) {
             totalSlots++;
-            ItemStack stack = slot.getStack();
+            ItemStack stack = slot.getItem();
             if (stack.isEmpty()) {
                 emptySlots++;
                 continue;
             }
             ItemStack copy = stack.copy();
             stacks.add(copy);
-            items.merge(Registries.ITEM.getId(copy.getItem()).toString(), copy.getCount(), Integer::sum);
+            items.merge(BuiltInRegistries.ITEM.getKey(copy.getItem()).toString(), copy.getCount(), Integer::sum);
         }
 
         surveys.add(new Survey(target.part(), target.place().id(), target.place().itemId(),
             target.place().dimension(), target.pos(), target.access(),
-            Registries.BLOCK.getId(state.getBlock()).toString(),
+            BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
             state.getBlock() instanceof ShulkerBoxBlock,
             totalSlots, emptySlots, stacks, items));
 
@@ -475,10 +475,10 @@ public class MineStationCheckAction extends Action {
      * <p>不看「上面能不能放盒子」这种细节 —— 只按用户的要求要求这里是空的。
      */
     private void checkPlacement(Target target) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
 
-        BlockState state = mc.world.getBlockState(target.pos());
+        BlockState state = mc.level.getBlockState(target.pos());
         if (!state.isAir()) {
             addProblem(describe(target.part(), target.place()) + " 必须空着（现在是 "
                 + ContainerTypes.idOf(state) + "）");
@@ -487,7 +487,7 @@ public class MineStationCheckAction extends Action {
         ChatUtils.debug("挖掘站检查：" + describe(target.part(), target.place()) + " 是空的");
     }
 
-    private void closeSession(MinecraftClient mc) {
+    private void closeSession(Minecraft mc) {
         if (session == null) return;
         session.close(mc);
         session = null;
@@ -513,7 +513,7 @@ public class MineStationCheckAction extends Action {
 
     @Override
     protected void onEnd() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         if (moveAction != null) {
             moveAction.cleanup();
             moveAction = null;
@@ -582,7 +582,7 @@ public class MineStationCheckAction extends Action {
                 continue;
             }
             for (ItemStack stack : survey.stacks()) {
-                String id = Registries.ITEM.getId(stack.getItem()).toString();
+                String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
                 if (id.equals(itemId)) continue;
                 addProblem(describe(MineStationPart.ITEM_COLLECTOR, survey) + " 里有 " + id
                     + " x" + stack.getCount() + "，只允许 " + itemId + " 或者空");
@@ -598,13 +598,13 @@ public class MineStationCheckAction extends Action {
                     + " 个空格，" + label + "要装满（每一格都是满堆）");
             }
             for (ItemStack stack : survey.stacks()) {
-                String id = Registries.ITEM.getId(stack.getItem()).toString();
+                String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
                 if (!id.equals(itemId)) {
                     addProblem(describe(part, survey) + " 里有 " + id + " x" + stack.getCount()
                         + "，这里只能放" + label);
-                } else if (stack.getCount() != stack.getMaxCount()) {
+                } else if (stack.getCount() != stack.getMaxStackSize()) {
                     addProblem(describe(part, survey) + " 里的" + label + "只有 " + stack.getCount()
-                        + " 个（每格要 " + stack.getMaxCount() + " 个）");
+                        + " 个（每格要 " + stack.getMaxStackSize() + " 个）");
                 }
             }
         }
@@ -653,7 +653,7 @@ public class MineStationCheckAction extends Action {
     private void validateBoxCache(MineStationPart part, String label, Set<String> allowed) {
         for (Survey survey : surveysOf(part)) {
             for (ItemStack stack : survey.stacks()) {
-                String outerId = Registries.ITEM.getId(stack.getItem()).toString();
+                String outerId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
                 if (!ShulkerUtils.isShulkerBox(stack)) {
                     addProblem(describe(part, survey) + " 里放了 " + outerId + " x" + stack.getCount()
                         + "，这里只能放装满" + label + "的潜影盒");
@@ -663,7 +663,7 @@ public class MineStationCheckAction extends Action {
                 int total = 0;
                 List<String> wrong = new ArrayList<>();
                 for (ItemStack inner : ShulkerUtils.contents(stack)) {
-                    String innerId = Registries.ITEM.getId(inner.getItem()).toString();
+                    String innerId = BuiltInRegistries.ITEM.getKey(inner.getItem()).toString();
                     if (!allowed.contains(innerId)) {
                         wrong.add(innerId + " x" + inner.getCount());
                         continue;
@@ -829,7 +829,7 @@ public class MineStationCheckAction extends Action {
         for (Survey survey : surveysOf(part)) {
             for (ItemStack stack : survey.stacks()) {
                 for (ItemStack inner : ShulkerUtils.contents(stack)) {
-                    totals.merge(Registries.ITEM.getId(inner.getItem()).toString(),
+                    totals.merge(BuiltInRegistries.ITEM.getKey(inner.getItem()).toString(),
                         inner.getCount(), Integer::sum);
                 }
             }
@@ -898,7 +898,7 @@ public class MineStationCheckAction extends Action {
     }
 
     private static String describeItem(ItemStack stack) {
-        return Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount()
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()) + " x" + stack.getCount()
             + "（剩余耐久 " + MineTools.remaining(stack) + "）";
     }
 

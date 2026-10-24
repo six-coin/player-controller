@@ -1,22 +1,23 @@
 package org.six_coin.playerController.client.attack;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.SpawnReason;
-import net.minecraft.entity.boss.WitherEntity;
-import net.minecraft.entity.boss.dragon.EnderDragonEntity;
-import net.minecraft.entity.mob.ElderGuardianEntity;
-import net.minecraft.entity.mob.MobEntity;
-import net.minecraft.entity.mob.Monster;
-import net.minecraft.entity.mob.WardenEntity;
-import net.minecraft.entity.passive.AnimalEntity;
-import net.minecraft.entity.passive.PassiveEntity;
-import net.minecraft.entity.passive.WaterAnimalEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.registry.Registries;
-import net.minecraft.world.World;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.boss.wither.WitherBoss;
+import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
+import net.minecraft.world.entity.monster.ElderGuardian;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.monster.warden.Warden;
+import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.AgeableMob;
+import net.minecraft.world.entity.animal.fish.WaterAnimal;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -37,14 +38,14 @@ import java.util.Set;
  * players        玩家
  * bosses         首领      末影龙、凋灵、监守者、远古守卫者
  * hostile_mobs   敌对生物  原版那些 Monster（僵尸、苦力怕、末影人、猪灵…）
- * water_mobs     水生生物  WaterAnimalEntity（鱼、鱿鱼、海豚…）
- * passive_mobs   被动生物  AnimalEntity / PassiveEntity（牛、羊、村民…）
- * neutral_mobs   中立生物  剩下的 MobEntity（铁傀儡、雪傀儡、蝙蝠…）
+ * water_mobs     水生生物  WaterAnimal（鱼、鱿鱼、海豚…）
+ * passive_mobs   被动生物  Animal / AgeableMob（牛、羊、村民…）
+ * neutral_mobs   中立生物  剩下的 Mob（铁傀儡、雪傀儡、蝙蝠…）
  * others         其他      剩下的活物（盔甲架…）
  * </pre>
  *
  * <p>判定顺序就是上面这个顺序，所以「守卫者」算敌对生物（它是 Monster），
- * 「美西螈」算被动生物（它是 AnimalEntity）。只有活着的（{@code LivingEntity}）才会出现在这里。
+ * 「美西螈」算被动生物（它是 Animal）。只有活着的（{@code LivingEntity}）才会出现在这里。
  *
  * <p>怎么知道一个实体类型是不是活物：{@link EntityType#getBaseClass()} 现在只会返回
  * {@code Entity.class}（没法用），所以这里让原版造一个实例出来看它到底是什么
@@ -116,15 +117,15 @@ public final class EntityGroups {
     /** 所有活着的实体类型，按组的顺序、组内按 id 排序（还没进世界的时候是空的）。 */
     public static List<EntityType<?>> allMobs() {
         if (cache != null) return cache;
-        if (MinecraftClient.getInstance().world == null) return List.of();
+        if (Minecraft.getInstance().level == null) return List.of();
 
         List<EntityType<?>> mobs = new ArrayList<>();
-        for (EntityType<?> type : Registries.ENTITY_TYPE) {
+        for (EntityType<?> type : BuiltInRegistries.ENTITY_TYPE) {
             if (groupOf(type) != null) mobs.add(type);
         }
         mobs.sort(Comparator
             .comparingInt((EntityType<?> type) -> groupOf(type).ordinal())
-            .thenComparing(type -> Registries.ENTITY_TYPE.getId(type).toString()));
+            .thenComparing(type -> BuiltInRegistries.ENTITY_TYPE.getKey(type).toString()));
 
         cache = List.copyOf(mobs);
         return cache;
@@ -142,7 +143,7 @@ public final class EntityGroups {
         if (NOT_LIVING.contains(type)) return null;
 
         // 还没进世界的时候造不出实例，这时候不缓存结果（不然会一辈子算成「不是活物」）
-        if (MinecraftClient.getInstance().world == null) return null;
+        if (Minecraft.getInstance().level == null) return null;
 
         Group computed = computeGroup(type);
         if (computed == null) {
@@ -156,32 +157,32 @@ public final class EntityGroups {
     @Nullable
     private static Group computeGroup(EntityType<?> type) {
         // 玩家是唯一造不出实例的（原版那个工厂返回 null），单独认
-        if (type == EntityType.PLAYER) return Group.PLAYERS;
+        if (type == EntityTypes.PLAYER) return Group.PLAYERS;
 
-        World world = MinecraftClient.getInstance().world;
-        if (world == null) return null;
+        Level level = Minecraft.getInstance().level;
+        if (level == null) return null;
 
         Entity entity;
         try {
-            entity = type.create(world, SpawnReason.COMMAND);
+            entity = type.create(level, EntitySpawnReason.COMMAND);
         } catch (Exception e) {
-            ChatUtils.debug("造一个 " + Registries.ENTITY_TYPE.getId(type) + " 的实例失败：" + e);
+            ChatUtils.debug("造一个 " + BuiltInRegistries.ENTITY_TYPE.getKey(type) + " 的实例失败：" + e);
             return null;
         }
         if (entity == null) return null;
-        if (entity instanceof PlayerEntity) return Group.PLAYERS;
+        if (entity instanceof Player) return Group.PLAYERS;
         if (!(entity instanceof LivingEntity)) return null;
 
-        if (entity instanceof EnderDragonEntity
-            || entity instanceof WitherEntity
-            || entity instanceof WardenEntity
-            || entity instanceof ElderGuardianEntity) {
+        if (entity instanceof EnderDragon
+            || entity instanceof WitherBoss
+            || entity instanceof Warden
+            || entity instanceof ElderGuardian) {
             return Group.BOSSES;
         }
         if (entity instanceof Monster) return Group.HOSTILE;
-        if (entity instanceof WaterAnimalEntity) return Group.WATER;
-        if (entity instanceof AnimalEntity || entity instanceof PassiveEntity) return Group.PASSIVE;
-        if (entity instanceof MobEntity) return Group.NEUTRAL;
+        if (entity instanceof WaterAnimal) return Group.WATER;
+        if (entity instanceof Animal || entity instanceof AgeableMob) return Group.PASSIVE;
+        if (entity instanceof Mob) return Group.NEUTRAL;
         return Group.OTHERS;
     }
 }

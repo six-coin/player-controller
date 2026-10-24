@@ -77,17 +77,17 @@ public final class StockManager {
     // 路径
     // ------------------------------------------------------------------
 
-    public static Path stockFile(int world) {
-        return WaypointManager.worldDir(world).resolve("stock").resolve(FILE_NAME);
+    public static Path stockFile(int level) {
+        return WaypointManager.worldDir(level).resolve("stock").resolve(FILE_NAME);
     }
 
     /** 任务文件夹的父目录：{@code world_<n>/stock/tasks/}。 */
-    public static Path stockDir(int world) {
-        return WaypointManager.worldDir(world).resolve("stock").resolve("tasks");
+    public static Path stockDir(int level) {
+        return WaypointManager.worldDir(level).resolve("stock").resolve("tasks");
     }
 
-    public static Path taskDir(int world, String task) {
-        return stockDir(world).resolve(task);
+    public static Path taskDir(int level, String task) {
+        return stockDir(level).resolve(task);
     }
 
     /**
@@ -96,87 +96,87 @@ public final class StockManager {
      * <p>这是唯一需要用户手动准备的文件；{@link #materialFile} 那份是
      * {@code /pc stock task <名字> generate_materials_list} 根据它生成的。
      */
-    public static Path originalFile(int world, String task) {
-        return taskDir(world, task).resolve("original.json");
+    public static Path originalFile(int level, String task) {
+        return taskDir(level, task).resolve("original.json");
     }
 
     /** {@code materials.json}：备货真正用的那份材料树（generate_materials_list 生成）。 */
-    public static Path materialFile(int world, String task) {
-        return taskDir(world, task).resolve("materials.json");
+    public static Path materialFile(int level, String task) {
+        return taskDir(level, task).resolve("materials.json");
     }
 
-    public static Path cleanFile(int world, String task) {
-        return taskDir(world, task).resolve("1_1_material_clean.json");
+    public static Path cleanFile(int level, String task) {
+        return taskDir(level, task).resolve("1_1_material_clean.json");
     }
 
-    public static Path optimizedFile(int world, String task) {
-        return taskDir(world, task).resolve("1_2_material_optimized.json");
+    public static Path optimizedFile(int level, String task) {
+        return taskDir(level, task).resolve("1_2_material_optimized.json");
     }
 
-    public static Path finalFinalFile(int world, String task) {
-        return taskDir(world, task).resolve("final_final.json");
+    public static Path finalFinalFile(int level, String task) {
+        return taskDir(level, task).resolve("final_final.json");
     }
 
     /** {@code 1_3_material_can_access_all.json}：1_1 里「仓库 + 容器凑得齐」的，数量还是**完整需求量**。 */
-    public static Path canAccessAllFile(int world, String task) {
-        return taskDir(world, task).resolve("1_3_material_can_access_all.json");
+    public static Path canAccessAllFile(int level, String task) {
+        return taskDir(level, task).resolve("1_3_material_can_access_all.json");
     }
 
     /** {@code final_pack.json}：分盒（第一部分阶段3）照着它装盒 —— 是完整需求量，不是要取货的量。 */
-    public static Path finalPackFile(int world, String task) {
-        return taskDir(world, task).resolve("final_pack.json");
+    public static Path finalPackFile(int level, String task) {
+        return taskDir(level, task).resolve("final_pack.json");
     }
 
     // ---- 第二部分（收集需要合成的材料）的文件 ----
 
     /** {@code 2_1_process_raw.json}：materials.json 去掉 final_final 已经收过的那些。 */
-    public static Path processRawFile(int world, String task) {
-        return taskDir(world, task).resolve("2_1_process_raw.json");
+    public static Path processRawFile(int level, String task) {
+        return taskDir(level, task).resolve("2_1_process_raw.json");
     }
 
     /** {@code 2_2_material_raw.json}：2_1 里所有「原材料」摊平成 item_list。 */
-    public static Path materialRawFile(int world, String task) {
-        return taskDir(world, task).resolve("2_2_material_raw.json");
+    public static Path materialRawFile(int level, String task) {
+        return taskDir(level, task).resolve("2_2_material_raw.json");
     }
 
     /** {@code 2_3_material_clean.json}：2_2 里「仓库 + 容器凑得齐」的那些。 */
-    public static Path materialCleanFile(int world, String task) {
-        return taskDir(world, task).resolve("2_3_material_clean.json");
+    public static Path materialCleanFile(int level, String task) {
+        return taskDir(level, task).resolve("2_3_material_clean.json");
     }
 
     /** {@code 2_4_process_clean.json}：2_1 里「材料都齐」的最终产物。 */
-    public static Path processCleanFile(int world, String task) {
-        return taskDir(world, task).resolve("2_4_process_clean.json");
+    public static Path processCleanFile(int level, String task) {
+        return taskDir(level, task).resolve("2_4_process_clean.json");
     }
 
     /** {@code 2_5_material_cleaner.json}：2_4 里所有「原材料」摊平成 item_list。 */
-    public static Path materialCleanerFile(int world, String task) {
-        return taskDir(world, task).resolve("2_5_material_cleaner.json");
+    public static Path materialCleanerFile(int level, String task) {
+        return taskDir(level, task).resolve("2_5_material_cleaner.json");
     }
 
     /** {@code 2_6_material_final.json}：2_5 再扣掉仓库里已经有的部分。 */
-    public static Path materialFinalFile(int world, String task) {
-        return taskDir(world, task).resolve("2_6_material_final.json");
+    public static Path materialFinalFile(int level, String task) {
+        return taskDir(level, task).resolve("2_6_material_final.json");
     }
 
     /** {@code final_material.json}：2_6 的副本（第二部分阶段2 就照它去取货）。 */
-    public static Path finalMaterialFile(int world, String task) {
-        return taskDir(world, task).resolve("final_material.json");
+    public static Path finalMaterialFile(int level, String task) {
+        return taskDir(level, task).resolve("final_material.json");
     }
 
     /** {@code final_process.json}：2_4 的副本（第二部分阶段3 合成用）。 */
-    public static Path finalProcessFile(int world, String task) {
-        return taskDir(world, task).resolve("final_process.json");
+    public static Path finalProcessFile(int level, String task) {
+        return taskDir(level, task).resolve("final_process.json");
     }
 
     /** {@code final_steps.json}：把 final_process 摊平成「一步一个配方」的合成步骤（附件 2.1.4）。 */
-    public static Path finalStepsFile(int world, String task) {
-        return taskDir(world, task).resolve("final_steps.json");
+    public static Path finalStepsFile(int level, String task) {
+        return taskDir(level, task).resolve("final_steps.json");
     }
 
     /** {@code unreachable.json}：整个过程中拿不到的最终产物（item_list）。 */
-    public static Path unreachableFile(int world, String task) {
-        return taskDir(world, task).resolve("unreachable.json");
+    public static Path unreachableFile(int level, String task) {
+        return taskDir(level, task).resolve("unreachable.json");
     }
 
     public static boolean isValidName(String name) {
@@ -188,78 +188,78 @@ public final class StockManager {
     }
 
     public Path currentTaskDir(String task) {
-        return taskDir(world(), task);
+        return taskDir(level(), task);
     }
 
     public Path currentMaterialFile(String task) {
-        return materialFile(world(), task);
+        return materialFile(level(), task);
     }
 
     public Path currentOriginalFile(String task) {
-        return originalFile(world(), task);
+        return originalFile(level(), task);
     }
 
     public Path currentCleanFile(String task) {
-        return cleanFile(world(), task);
+        return cleanFile(level(), task);
     }
 
     public Path currentOptimizedFile(String task) {
-        return optimizedFile(world(), task);
+        return optimizedFile(level(), task);
     }
 
     public Path currentFinalFinalFile(String task) {
-        return finalFinalFile(world(), task);
+        return finalFinalFile(level(), task);
     }
 
     public Path currentCanAccessAllFile(String task) {
-        return canAccessAllFile(world(), task);
+        return canAccessAllFile(level(), task);
     }
 
     public Path currentFinalPackFile(String task) {
-        return finalPackFile(world(), task);
+        return finalPackFile(level(), task);
     }
 
     public Path currentMaterialFinalFile(String task) {
-        return materialFinalFile(world(), task);
+        return materialFinalFile(level(), task);
     }
 
     public Path currentProcessRawFile(String task) {
-        return processRawFile(world(), task);
+        return processRawFile(level(), task);
     }
 
     public Path currentMaterialRawFile(String task) {
-        return materialRawFile(world(), task);
+        return materialRawFile(level(), task);
     }
 
     public Path currentMaterialCleanFile(String task) {
-        return materialCleanFile(world(), task);
+        return materialCleanFile(level(), task);
     }
 
     public Path currentProcessCleanFile(String task) {
-        return processCleanFile(world(), task);
+        return processCleanFile(level(), task);
     }
 
     public Path currentMaterialCleanerFile(String task) {
-        return materialCleanerFile(world(), task);
+        return materialCleanerFile(level(), task);
     }
 
     public Path currentFinalMaterialFile(String task) {
-        return finalMaterialFile(world(), task);
+        return finalMaterialFile(level(), task);
     }
 
     public Path currentFinalProcessFile(String task) {
-        return finalProcessFile(world(), task);
+        return finalProcessFile(level(), task);
     }
 
     public Path currentFinalStepsFile(String task) {
-        return finalStepsFile(world(), task);
+        return finalStepsFile(level(), task);
     }
 
     public Path currentUnreachableFile(String task) {
-        return unreachableFile(world(), task);
+        return unreachableFile(level(), task);
     }
 
-    private int world() {
+    private int level() {
         return loadedWorld >= 0 ? loadedWorld : PlayerControllerConfig.getWorld();
     }
 
@@ -279,16 +279,16 @@ public final class StockManager {
         load(PlayerControllerConfig.getWorld());
     }
 
-    public void load(int world) {
-        world = Math.max(1, world);
-        loadedWorld = world;
+    public void load(int level) {
+        level = Math.max(1, level);
+        loadedWorld = level;
         loadedOk = false;
         tasks = new ArrayList<>();
 
-        Path path = stockFile(world);
+        Path path = stockFile(level);
         if (!Files.exists(path)) {
             loadedOk = true;
-            ChatUtils.debug("world_" + world + " 还没有 tasks.json，用空的: " + path);
+            ChatUtils.debug("world_" + level + " 还没有 tasks.json，用空的: " + path);
             return;
         }
 
@@ -296,7 +296,7 @@ public final class StockManager {
             List<String> loaded = GSON.fromJson(reader, FILE_TYPE);
             if (loaded != null) tasks = new ArrayList<>(loaded);
             loadedOk = true;
-            ChatUtils.debug("已加载 world_" + world + " 的备货任务：" + tasks.size() + " 个 " + tasks);
+            ChatUtils.debug("已加载 world_" + level + " 的备货任务：" + tasks.size() + " 个 " + tasks);
         } catch (Exception e) {
             loadedOk = false;
             tasks = new ArrayList<>();
@@ -304,10 +304,10 @@ public final class StockManager {
         }
     }
 
-    public void switchWorld(int world) {
+    public void switchWorld(int level) {
         save();
-        load(world);
-        ChatUtils.info("备货任务表已切到 world_" + world + "（" + tasks.size() + " 个任务）");
+        load(level);
+        ChatUtils.info("备货任务表已切到 world_" + level + "（" + tasks.size() + " 个任务）");
     }
 
     public void save() {
@@ -331,7 +331,7 @@ public final class StockManager {
         }
         if (tasks.contains(name)) return false;
 
-        Files.createDirectories(taskDir(world(), name));
+        Files.createDirectories(taskDir(level(), name));
         tasks.add(name);
         save();
         ChatUtils.info("已新建备货任务 " + name + "：文件夹 " + currentTaskDir(name));
@@ -342,10 +342,10 @@ public final class StockManager {
     public boolean delTask(String name) throws IOException {
         if (!tasks.contains(name)) return false;
 
-        Path dir = taskDir(world(), name);
+        Path dir = taskDir(level(), name);
         if (Files.exists(dir)) {
             // 只允许删 stock 目录下面的东西
-            Path stock = stockDir(world()).toAbsolutePath().normalize();
+            Path stock = stockDir(level()).toAbsolutePath().normalize();
             Path target = dir.toAbsolutePath().normalize();
             if (!target.startsWith(stock) || target.equals(stock)) {
                 throw new IOException("拒绝删除 " + target + "：它不在 " + stock + " 里面");

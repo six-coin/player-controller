@@ -1,25 +1,26 @@
 package org.six_coin.playerController.client.attack;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.Tameable;
-import net.minecraft.entity.mob.EndermanEntity;
-import net.minecraft.entity.mob.MobEntity;
-import net.minecraft.entity.mob.PiglinEntity;
-import net.minecraft.entity.mob.ZombifiedPiglinEntity;
-import net.minecraft.entity.passive.WolfEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.tag.ItemTags;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.OwnableEntity;
+import net.minecraft.world.entity.monster.Enderman;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.monster.piglin.Piglin;
+import net.minecraft.world.entity.monster.zombie.ZombifiedPiglin;
+import net.minecraft.world.entity.animal.wolf.Wolf;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.component.SwingAnimation;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.feature.ServerTickRate;
@@ -72,6 +73,7 @@ public final class AttackManager {
         HOTBAR_DENIED("快捷栏被备货占着，这一次不打"),
         ROTATE_DENIED("不准转头，这一次不打"),
         COOLDOWN("等原版攻击间隔"),
+        CRIT_WAIT("补暴击包（下一 tick 出手）"),
         ATTACKING("正在攻击");
 
         private final String text;
@@ -136,9 +138,9 @@ public final class AttackManager {
             return;
         }
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null || mc.interactionManager == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null || mc.gameMode == null) {
             idle(State.NO_TARGET);
             return;
         }
@@ -146,7 +148,7 @@ public final class AttackManager {
             idle(State.OFF);
             return;
         }
-        if (player.isUsingItem() || mc.interactionManager.isBreakingBlock()) {
+        if (player.isUsingItem() || mc.gameMode.isDestroying()) {
             idle(State.PAUSED_USE);
             return;
         }
@@ -170,7 +172,7 @@ public final class AttackManager {
             idle(State.HOTBAR_DENIED);
             return;
         }
-        if (!isWeapon(player.getInventory().getSelectedStack())) {
+        if (!isWeapon(player.getInventory().getSelectedItem())) {
             idle(State.NO_WEAPON);
             return;
         }
@@ -182,18 +184,21 @@ public final class AttackManager {
         targetName = nameOf(target);
 
         // 原版的攻击间隔：这把武器的冷却满了才打
-        if (player.getAttackCooldownProgress(COOLDOWN_BASE_TIME) < 1.0F) {
+        if (player.getAttackStrengthScale(COOLDOWN_BASE_TIME) < 1.0F) {
             state = State.COOLDOWN;
             return;
         }
 
         AttackProfile.Rule rule = profile.rule(target.getType());
-        if (profile.effective(AttackProfile.Field.CRITICAL, rule)) {
-            SilentCriticals.crit(mc);
+        if (profile.effective(AttackProfile.Field.CRITICAL, rule) && !SilentCriticals.step(mc)) {
+            // 26.3 一个 tick 只准发一个带位置的移动包，所以「假装下落」得摊到前两个 tick：
+            // 这一 tick 只把原版的位置包改好，真正的攻击包等下一 tick 再发
+            state = State.CRIT_WAIT;
+            return;
         }
 
-        mc.interactionManager.attackEntity(player, target);
-        player.swingHand(Hand.MAIN_HAND);
+        mc.gameMode.attack(player, target);
+        player.swing(InteractionHand.MAIN_HAND, SwingAnimation.DEFAULT, false);
 
         state = State.ATTACKING;
         if (!wasAttacking) {
@@ -206,6 +211,8 @@ public final class AttackManager {
     private void idle(State reason) {
         state = reason;
         targetName = null;
+        // 暴击准备被中断了：把阶段清掉，免得下次一上来就直接当「已经掉过了」
+        SilentCriticals.reset();
         if (wasAttacking) {
             ChatUtils.debug("停止攻击：" + reason.text());
             wasAttacking = false;
@@ -219,18 +226,18 @@ public final class AttackManager {
     // ------------------------------------------------------------------
 
     @Nullable
-    private LivingEntity findTarget(MinecraftClient mc, AttackProfile profile) {
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) return null;
+    private LivingEntity findTarget(Minecraft mc, AttackProfile profile) {
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) return null;
 
         double reach = PlayerControllerConfig.getReach();
 
         LivingEntity best = null;
         double bestDistance = Double.MAX_VALUE;
-        for (LivingEntity candidate : mc.world.getEntitiesByClass(LivingEntity.class,
-            player.getBoundingBox().expand(reach), entity -> isTarget(mc, profile, entity))) {
+        for (LivingEntity candidate : mc.level.getEntitiesOfClass(LivingEntity.class,
+            player.getBoundingBox().inflate(reach), entity -> isTarget(mc, profile, entity))) {
 
-            double distance = player.squaredDistanceTo(candidate);
+            double distance = player.distanceToSqr(candidate);
             if (distance < bestDistance) {
                 bestDistance = distance;
                 best = candidate;
@@ -240,11 +247,11 @@ public final class AttackManager {
     }
 
     /** 这个生物该不该打。 */
-    private boolean isTarget(MinecraftClient mc, AttackProfile profile, LivingEntity entity) {
-        ClientPlayerEntity player = mc.player;
+    private boolean isTarget(Minecraft mc, AttackProfile profile, LivingEntity entity) {
+        LocalPlayer player = mc.player;
         if (player == null) return false;
         if (entity == player || entity == mc.getCameraEntity()) return false;
-        if (entity.isDead() || !entity.isAlive()) return false;
+        if (entity.isRemoved() || !entity.isAlive()) return false;
 
         // 没写在 profile 里的生物一律不打
         AttackProfile.Rule rule = profile.rule(entity.getType());
@@ -268,7 +275,7 @@ public final class AttackManager {
             return false;
         }
 
-        if (entity instanceof PlayerEntity other) {
+        if (entity instanceof Player other) {
             if (other.isCreative() || other.isSpectator()) return false;
         }
         return true;
@@ -279,12 +286,12 @@ public final class AttackManager {
     // ------------------------------------------------------------------
 
     /** 眼睛到「离自己最近的那一点」的距离够不够得着（和原版打实体用的判定一样）。 */
-    private static boolean withinHitboxRange(ClientPlayerEntity player, LivingEntity entity, double range) {
-        Box box = entity.getBoundingBox();
-        double x = MathHelper.clamp(player.getX(), box.minX, box.maxX);
-        double y = MathHelper.clamp(player.getEyeY(), box.minY, box.maxY);
-        double z = MathHelper.clamp(player.getZ(), box.minZ, box.maxZ);
-        return player.getEyePos().squaredDistanceTo(x, y, z) <= range * range;
+    private static boolean withinHitboxRange(LocalPlayer player, LivingEntity entity, double range) {
+        AABB box = entity.getBoundingBox();
+        double x = Mth.clamp(player.getX(), box.minX, box.maxX);
+        double y = Mth.clamp(player.getEyeY(), box.minY, box.maxY);
+        double z = Mth.clamp(player.getZ(), box.minZ, box.maxZ);
+        return player.getEyePosition().distanceToSqr(x, y, z) <= range * range;
     }
 
     /**
@@ -301,19 +308,19 @@ public final class AttackManager {
      * 也就是 profile 说打就打 —— 玩家同理。
      */
     private static boolean isIdlePassive(LivingEntity entity) {
-        if (entity instanceof EndermanEntity enderman) {
+        if (entity instanceof Enderman enderman) {
             return !enderman.isAngry();
         }
-        if (entity instanceof PiglinEntity
-            || entity instanceof ZombifiedPiglinEntity
-            || entity instanceof WolfEntity) {
-            return !((MobEntity) entity).isAttacking();
+        if (entity instanceof Piglin
+            || entity instanceof ZombifiedPiglin
+            || entity instanceof Wolf) {
+            return !((Mob) entity).isAggressive();
         }
         return false;
     }
 
-    private static boolean isTamedBy(LivingEntity entity, ClientPlayerEntity player) {
-        return entity instanceof Tameable tameable && tameable.getOwner() == player;
+    private static boolean isTamedBy(LivingEntity entity, LocalPlayer player) {
+        return entity instanceof OwnableEntity tameable && tameable.getOwner() == player;
     }
 
     // ------------------------------------------------------------------
@@ -325,14 +332,14 @@ public final class AttackManager {
      *
      * @return -1 = 没有合用的武器（这一次不打）
      */
-    private static int weaponSlot(PlayerInventory inventory, AttackProfile profile) {
+    private static int weaponSlot(Inventory inventory, AttackProfile profile) {
         if (!profile.autoSwitch()) {
             int selected = inventory.getSelectedSlot();
-            return isWeapon(inventory.getSelectedStack()) ? selected : -1;
+            return isWeapon(inventory.getSelectedItem()) ? selected : -1;
         }
 
-        for (int i = 0; i < PlayerInventory.getHotbarSize(); i++) {
-            if (isWeapon(inventory.getStack(i))) return i;
+        for (int i = 0; i < Inventory.getSelectionSize(); i++) {
+            if (isWeapon(inventory.getItem(i))) return i;
         }
         return -1;
     }
@@ -340,26 +347,26 @@ public final class AttackManager {
     /** 剑类，而且剩余耐久还够。 */
     private static boolean isWeapon(@Nullable ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
-        if (!stack.isIn(ItemTags.SWORDS)) return false;
+        if (!stack.is(ItemTags.SWORDS)) return false;
         return remainingDurability(stack) > MIN_DURABILITY;
     }
 
     /** 剩余耐久；不会坏的物品算无限。 */
     private static int remainingDurability(ItemStack stack) {
-        if (!stack.isDamageable()) return Integer.MAX_VALUE;
-        return stack.getMaxDamage() - stack.getDamage();
+        if (!stack.isDamageableItem()) return Integer.MAX_VALUE;
+        return stack.getMaxDamage() - stack.getDamageValue();
     }
 
     // ------------------------------------------------------------------
 
     /** 转头瞄的那个点：身体正中间。 */
-    private static Vec3d aimPoint(LivingEntity entity) {
-        return new Vec3d(entity.getX(), entity.getY() + entity.getHeight() * 0.5, entity.getZ());
+    private static Vec3 aimPoint(LivingEntity entity) {
+        return new Vec3(entity.getX(), entity.getY() + entity.getBbHeight() * 0.5, entity.getZ());
     }
 
     /** 「僵尸 (minecraft:zombie)」这种。 */
     public static String nameOf(EntityType<?> type) {
-        return type.getName().getString() + " (" + Registries.ENTITY_TYPE.getId(type) + ")";
+        return type.getDescription().getString() + " (" + BuiltInRegistries.ENTITY_TYPE.getKey(type) + ")";
     }
 
     private static String nameOf(Entity entity) {

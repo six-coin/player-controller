@@ -1,10 +1,10 @@
 package org.six_coin.playerController.client.stock;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.ContainerPutAction;
 import org.six_coin.playerController.client.stock.station.StationCheckAction;
@@ -52,8 +52,8 @@ final class Part1Stage1Prepare extends StockStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("没有玩家或世界");
             return;
         }
@@ -189,7 +189,7 @@ final class Part1Stage1Prepare extends StockStep {
             take = new TakeItemAction(temp.pos(), StockTask.PICKAXE_HOTBAR,
                 Part1Stage1Prepare::isUsablePickaxe,
                 "够耐久的钻石镐",
-                stack -> stack.isOf(Items.DIAMOND_PICKAXE)
+                stack -> stack.is(Items.DIAMOND_PICKAXE)
                     ? "钻石镐（剩余耐久 " + remainingDurability(stack) + "）"
                     : null);
             take.start();
@@ -275,18 +275,18 @@ final class Part1Stage1Prepare extends StockStep {
     /** 这一叠算不算「能用的钻石镐」：是钻石镐、而且剩余耐久够。 */
     private static boolean isUsablePickaxe(ItemStack stack) {
         return !stack.isEmpty()
-            && stack.isOf(Items.DIAMOND_PICKAXE)
+            && stack.is(Items.DIAMOND_PICKAXE)
             && remainingDurability(stack) >= StockTask.REQUIRED_PICKAXE_DURABILITY;
     }
 
     /** 剩余耐久（没耐久的物品就是 0）。 */
     private static int remainingDurability(ItemStack stack) {
-        return stack.getMaxDamage() - stack.getDamage();
+        return stack.getMaxDamage() - stack.getDamageValue();
     }
 
     private static ItemStack inventoryStack(int index) {
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        return player == null ? ItemStack.EMPTY : player.getInventory().getStack(index);
+        LocalPlayer player = Minecraft.getInstance().player;
+        return player == null ? ItemStack.EMPTY : player.getInventory().getItem(index);
     }
 
     /** 确认快捷栏第一格真的就位了。 */
@@ -305,7 +305,7 @@ final class Part1Stage1Prepare extends StockStep {
         if (stack == null || stack.isEmpty()) return "空";
         return Items.DIAMOND_PICKAXE == stack.getItem()
             ? "钻石镐（剩余耐久 " + remainingDurability(stack) + "）"
-            : Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount();
+            : BuiltInRegistries.ITEM.getKey(stack.getItem()) + " x" + stack.getCount();
     }
 
     private static List<String> limit(List<String> list, int max) {

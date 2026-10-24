@@ -1,15 +1,15 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.stock.MineBlockAction;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -84,8 +84,8 @@ class SingleStageStage3 extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -109,9 +109,9 @@ class SingleStageStage3 extends SingleStageStep {
     // ------------------------------------------------------------------
 
     private void collectStep() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             queue.cancel();
             return;
@@ -145,7 +145,7 @@ class SingleStageStage3 extends SingleStageStep {
                 repeats = 0;
                 lastTarget = -1;
                 ChatUtils.debug("捡不到掉落物 #" + id + "（"
-                    + nearest.getBlockPos().toShortString() + "），先跳过它");
+                    + nearest.blockPosition().toShortString() + "），先跳过它");
                 queue.sync("继续收集", this::collectStep);
                 return;
             }
@@ -154,7 +154,7 @@ class SingleStageStage3 extends SingleStageStep {
             repeats = 0;
         }
 
-        queue.child("去捡 " + nearest.getBlockPos().toShortString(),
+        queue.child("去捡 " + nearest.blockPosition().toShortString(),
             () -> new SingleStagePickupAction(ctx, id));
         queue.sync("继续收集", this::collectStep);
     }
@@ -166,20 +166,20 @@ class SingleStageStage3 extends SingleStageStep {
      * 后两种卸货的时候是要装盒的，以前只认 item_collector，圆石掉在地上就永远不去捡了。
      * 其它东西（泥土、砂砾之类）扔在地上不管，捡了也只能扔掉。
      */
-    private List<ItemEntity> findDrops(MinecraftClient mc) {
+    private List<ItemEntity> findDrops(Minecraft mc) {
         List<ItemEntity> drops = new ArrayList<>();
         int minX = ctx.targetMin.getX();
         int minZ = ctx.targetMin.getZ();
         // 稍微放宽一圈：掉落物会滚 / 弹到边缘外一点点
-        Box area = new Box(minX - 2, bottom - 2, minZ - 2,
+        AABB area = new AABB(minX - 2, bottom - 2, minZ - 2,
             minX + 18, top + 3, minZ + 18);
 
-        for (Entity entity : mc.world.getEntities()) {
+        for (Entity entity : mc.level.entitiesForRendering()) {
             if (!(entity instanceof ItemEntity item)) continue;
-            ItemStack stack = item.getStack();
+            ItemStack stack = item.getItem();
             if (stack.isEmpty()) continue;
             if (!wanted(stack)) continue;
-            if (!area.contains(item.getEntityPos())) continue;
+            if (!area.contains(item.position())) continue;
             if (ignored.contains(item.getId())) continue;
             drops.add(item);
         }
@@ -191,7 +191,7 @@ class SingleStageStage3 extends SingleStageStep {
 
     /** 这种掉落物要不要捡。 */
     private boolean wanted(ItemStack stack) {
-        String id = Registries.ITEM.getId(stack.getItem()).toString();
+        String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
         if (ctx.collectorItems.contains(id)) return true;
         if ("minecraft:cobblestone".equals(id)) return !cobbleEnough();
         return "minecraft:slime_block".equals(id) || "minecraft:resin_block".equals(id);
@@ -209,12 +209,12 @@ class SingleStageStage3 extends SingleStageStep {
         return total >= COBBLE_ENOUGH;
     }
 
-    private static ItemEntity nearest(ClientPlayerEntity player, List<ItemEntity> drops) {
-        Vec3d here = player.getEntityPos();
+    private static ItemEntity nearest(LocalPlayer player, List<ItemEntity> drops) {
+        Vec3 here = player.position();
         ItemEntity best = drops.get(0);
         double bestDistance = Double.MAX_VALUE;
         for (ItemEntity drop : drops) {
-            double distance = here.squaredDistanceTo(drop.getEntityPos());
+            double distance = here.distanceToSqr(drop.position());
             if (distance < bestDistance) {
                 bestDistance = distance;
                 best = drop;
@@ -296,10 +296,10 @@ class SingleStageStage3 extends SingleStageStep {
         return Set.of("minecraft:slime_block", "minecraft:resin_block");
     }
 
-    private static final Predicate<ItemStack> COBBLE = stack -> stack.isOf(Items.COBBLESTONE);
+    private static final Predicate<ItemStack> COBBLE = stack -> stack.is(Items.COBBLESTONE);
 
     private Predicate<ItemStack> collectorFilter() {
-        return stack -> ctx.collectorItems.contains(Registries.ITEM.getId(stack.getItem()).toString());
+        return stack -> ctx.collectorItems.contains(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
     }
 
     /** 内容多的排前面（「先装有的，再装没的」）。 */
@@ -323,8 +323,8 @@ class SingleStageStage3 extends SingleStageStep {
             if (junk.isEmpty()) return;
 
             ChatUtils.info("理应是空位的 " + junk.size() + " 格里有东西，去扔掉");
-            BlockPos high = ctx.initialMin.add(6, 14, 6);
-            BlockPos drop = ctx.initialMin.add(4, 14, 4);
+            BlockPos high = ctx.initialMin.offset(6, 14, 6);
+            BlockPos drop = ctx.initialMin.offset(4, 14, 4);
 
             queue.child("snap 到 6 14 6", () -> new SingleStageSnapAction(ctx, high));
             queue.child("snap 到 4 14 4", () -> new SingleStageSnapAction(ctx, drop));

@@ -1,11 +1,11 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.ContainerInput;
 import org.six_coin.playerController.client.container.ContainerClicks;
 import org.six_coin.playerController.client.container.InventoryUtils;
 
@@ -53,13 +53,13 @@ class SingleStageInventoryAction extends SingleStageStep {
      *
      * <p>给「挖着挖着工具快坏了，当场换一把」这种并行的小操作使用。
      */
-    static boolean swapNow(ClientPlayerEntity player, int inventoryIndex, int hotbarIndex) {
-        ScreenHandler handler = player.currentScreenHandler;
-        if (handler != player.playerScreenHandler) return false;
+    static boolean swapNow(LocalPlayer player, int inventoryIndex, int hotbarIndex) {
+        AbstractContainerMenu handler = player.containerMenu;
+        if (handler != player.inventoryMenu) return false;
 
         Slot slot = InventoryUtils.inventorySlot(handler, player.getInventory(), inventoryIndex);
         if (slot == null) return false;
-        return ContainerClicks.click(handler, slot, hotbarIndex, SlotActionType.SWAP,
+        return ContainerClicks.click(handler, slot, hotbarIndex, ContainerInput.SWAP,
             "把第 " + inventoryIndex + " 格和第 " + (hotbarIndex + 1) + " 快捷栏格交换");
     }
 
@@ -78,20 +78,20 @@ class SingleStageInventoryAction extends SingleStageStep {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) {
             fail("玩家不存在");
             return;
         }
 
-        ScreenHandler handler = player.currentScreenHandler;
-        if (handler != player.playerScreenHandler) {
+        AbstractContainerMenu handler = player.containerMenu;
+        if (handler != player.inventoryMenu) {
             fail("现在开着别的界面，没法整理物品栏");
             return;
         }
-        if (!handler.getCursorStack().isEmpty()) {
-            fail("光标上还有 " + SingleStageData.idOf(handler.getCursorStack()) + "，先放下");
+        if (!handler.getCarried().isEmpty()) {
+            fail("光标上还有 " + SingleStageData.idOf(handler.getCarried()) + "，先放下");
             return;
         }
 
@@ -104,7 +104,7 @@ class SingleStageInventoryAction extends SingleStageStep {
 
     // ------------------------------------------------------------------
 
-    private boolean apply(ScreenHandler handler, ClientPlayerEntity player, Op op) {
+    private boolean apply(AbstractContainerMenu handler, LocalPlayer player, Op op) {
         switch (op.kind()) {
             case SWAP -> {
                 Slot slot = InventoryUtils.inventorySlot(handler, player.getInventory(), op.a());
@@ -112,7 +112,7 @@ class SingleStageInventoryAction extends SingleStageStep {
                     fail("找不到物品栏第 " + op.a() + " 格");
                     return false;
                 }
-                return ContainerClicks.click(handler, slot, op.b(), SlotActionType.SWAP, op.note());
+                return ContainerClicks.click(handler, slot, op.b(), ContainerInput.SWAP, op.note());
             }
             case MOVE -> {
                 return move(handler, player, op);
@@ -123,8 +123,8 @@ class SingleStageInventoryAction extends SingleStageStep {
                     fail("找不到物品栏第 " + op.a() + " 格");
                     return false;
                 }
-                if (slot.getStack().isEmpty()) return true;
-                return ContainerClicks.click(handler, slot, 1, SlotActionType.THROW, op.note());
+                if (slot.getItem().isEmpty()) return true;
+                return ContainerClicks.click(handler, slot, 1, ContainerInput.THROW, op.note());
             }
             default -> {
                 return true;
@@ -132,27 +132,27 @@ class SingleStageInventoryAction extends SingleStageStep {
         }
     }
 
-    private boolean move(ScreenHandler handler, ClientPlayerEntity player, Op op) {
+    private boolean move(AbstractContainerMenu handler, LocalPlayer player, Op op) {
         Slot from = InventoryUtils.inventorySlot(handler, player.getInventory(), op.a());
         Slot to = InventoryUtils.inventorySlot(handler, player.getInventory(), op.b());
         if (from == null || to == null) {
             fail("找不到物品栏第 " + (from == null ? op.a() : op.b()) + " 格");
             return false;
         }
-        if (from.getStack().isEmpty()) return true;
+        if (from.getItem().isEmpty()) return true;
 
-        ItemStack source = from.getStack();
-        ItemStack target = to.getStack();
-        if (!target.isEmpty() && !ItemStack.areItemsAndComponentsEqual(target, source)) {
+        ItemStack source = from.getItem();
+        ItemStack target = to.getItem();
+        if (!target.isEmpty() && !ItemStack.isSameItemSameComponents(target, source)) {
             fail("要挪到的那一格（第 " + op.b() + " 格）被 " + SingleStageData.idOf(target) + " 占着");
             return false;
         }
 
-        if (!ContainerClicks.click(handler, from, 0, SlotActionType.PICKUP, "拿起")) return false;
-        if (!ContainerClicks.click(handler, to, 0, SlotActionType.PICKUP, op.note())) return false;
-        if (!handler.getCursorStack().isEmpty()) {
+        if (!ContainerClicks.click(handler, from, 0, ContainerInput.PICKUP, "拿起")) return false;
+        if (!ContainerClicks.click(handler, to, 0, ContainerInput.PICKUP, op.note())) return false;
+        if (!handler.getCarried().isEmpty()) {
             // 目标格塞不下整叠：剩下的放回原格，别把东西丢在光标上
-            if (!ContainerClicks.click(handler, from, 0, SlotActionType.PICKUP, "剩下的放回去")) {
+            if (!ContainerClicks.click(handler, from, 0, ContainerInput.PICKUP, "剩下的放回去")) {
                 return false;
             }
         }

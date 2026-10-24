@@ -66,39 +66,39 @@ public final class MineComplexManager {
     // ------------------------------------------------------------------
 
     /** 挖掘数据目录：{@code world_<n>/mine/}（任务目录和挖掘站文件都在这里）。 */
-    public static Path mineDir(int world) {
-        return WaypointManager.worldDir(world).resolve("mine");
+    public static Path mineDir(int level) {
+        return WaypointManager.worldDir(level).resolve("mine");
     }
 
     /** 任务清单 + simple 缓存：{@code world_<n>/mine.json}（和 waypoints.json 并排）。 */
-    public static Path file(int world) {
-        return WaypointManager.worldDir(world).resolve(FILE_NAME);
+    public static Path file(int level) {
+        return WaypointManager.worldDir(level).resolve(FILE_NAME);
     }
 
     /** 一个任务的目录：{@code world_<n>/mine/<task>/}。 */
-    public static Path taskDir(int world, String name) {
-        return mineDir(world).resolve(name);
+    public static Path taskDir(int level, String name) {
+        return mineDir(level).resolve(name);
     }
 
     /** 一个任务的区域文件：{@code world_<n>/mine/<task>/region.json}。 */
-    public static Path regionFile(int world, String name) {
-        return taskDir(world, name).resolve(REGION_FILE);
+    public static Path regionFile(int level, String name) {
+        return taskDir(level, name).resolve(REGION_FILE);
     }
 
-    private int world() {
+    private int level() {
         return loadedWorld >= 0 ? loadedWorld : PlayerControllerConfig.getWorld();
     }
 
     public Path currentFile() {
-        return file(world());
+        return file(level());
     }
 
     public Path currentTaskDir(String name) {
-        return taskDir(world(), name);
+        return taskDir(level(), name);
     }
 
     public Path currentRegionFile(String name) {
-        return regionFile(world(), name);
+        return regionFile(level(), name);
     }
 
     public int loadedWorld() {
@@ -109,16 +109,16 @@ public final class MineComplexManager {
         load(PlayerControllerConfig.getWorld());
     }
 
-    public void load(int world) {
-        world = Math.max(1, world);
-        loadedWorld = world;
+    public void load(int level) {
+        level = Math.max(1, level);
+        loadedWorld = level;
         loadedOk = false;
         data = new MineComplexData();
 
-        Path path = file(world);
+        Path path = file(level);
         if (!Files.exists(path)) {
             loadedOk = true;
-            ChatUtils.debug("world_" + world + " 还没有 mine.json，用空的: " + path);
+            ChatUtils.debug("world_" + level + " 还没有 mine.json，用空的: " + path);
             return;
         }
 
@@ -126,7 +126,7 @@ public final class MineComplexManager {
             MineComplexData loaded = GSON.fromJson(reader, MineComplexData.class);
             if (loaded != null) data = loaded;
             loadedOk = true;
-            ChatUtils.debug("已加载 world_" + world + " 的 mine.json：任务 " + data.complex().size()
+            ChatUtils.debug("已加载 world_" + level + " 的 mine.json：任务 " + data.complex().size()
                 + " 个，simple " + (data.simple() == null ? "无" : "有"));
         } catch (Exception e) {
             loadedOk = false;
@@ -137,9 +137,9 @@ public final class MineComplexManager {
     }
 
     /** 切换世界配置：先把旧的存起来，再读新的。 */
-    public void switchWorld(int world) {
+    public void switchWorld(int level) {
         save();
-        load(world);
+        load(level);
     }
 
     public void save() {

@@ -7,17 +7,17 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.text.ClickEvent;
-import net.minecraft.text.HoverEvent;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Style;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.Component;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.action.ContainerCacheAddAction;
@@ -73,28 +73,28 @@ public final class ContainerCacheCommand {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
-        return ClientCommandManager.literal("cache")
+        return ClientCommands.literal("cache")
             .executes(ContainerCacheCommand::status)
             .then(positionAdd("add"))
             .then(positionAdd("add_position"))
-            .then(ClientCommandManager.literal("add_target")
+            .then(ClientCommands.literal("add_target")
                 .executes(ContainerCacheCommand::addTarget))
             .then(batchAdd())
             .then(positionDel("del"))
             .then(positionDel("del_position"))
-            .then(ClientCommandManager.literal("del_id")
-                .then(ClientCommandManager.argument("id", IntegerArgumentType.integer())
+            .then(ClientCommands.literal("del_id")
+                .then(ClientCommands.argument("id", IntegerArgumentType.integer())
                     .executes(ContainerCacheCommand::delId)))
-            .then(ClientCommandManager.literal("del_target")
+            .then(ClientCommands.literal("del_target")
                 .executes(ContainerCacheCommand::delTarget))
             .then(batchDel())
-            .then(ClientCommandManager.literal("optimize")
+            .then(ClientCommands.literal("optimize")
                 .executes(ContainerCacheCommand::optimize))
-            .then(ClientCommandManager.literal("list")
+            .then(ClientCommands.literal("list")
                 .executes(ContainerCacheCommand::list))
-            .then(ClientCommandManager.literal("show")
+            .then(ClientCommands.literal("show")
                 .executes(ContainerCacheCommand::toggleShow))
-            .then(ClientCommandManager.literal("get_all_items")
+            .then(ClientCommands.literal("get_all_items")
                 .executes(ContainerCacheCommand::getAllItems));
     }
 
@@ -106,11 +106,11 @@ public final class ContainerCacheCommand {
         FabricClientCommandSource source = context.getSource();
         ContainerCacheManager cache = ContainerCacheManager.get();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7容器缓存（world_" + cache.loadedWorld()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7容器缓存（world_" + cache.loadedWorld()
             + "）：" + cache.size() + " 个容器"));
-        source.sendFeedback(Text.literal("  高亮: " + (cache.isShowing() ? "§a开" : "§c关")
+        source.sendFeedback(Component.literal("  高亮: " + (cache.isShowing() ? "§a开" : "§c关")
             + "§r  支持的类型: " + ContainerTypes.describeSupported()));
-        source.sendFeedback(Text.literal("  文件: " + cache.currentFile()));
+        source.sendFeedback(Component.literal("  文件: " + cache.currentFile()));
         return 1;
     }
 
@@ -120,12 +120,12 @@ public final class ContainerCacheCommand {
 
     /** {@code add} / {@code add_position}：两个名字是同一条命令。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> positionAdd(String name) {
-        return ClientCommandManager.literal(name)
-            .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
+        return ClientCommands.literal(name)
+            .then(ClientCommands.argument("x", IntegerArgumentType.integer())
                 .suggests(LookSuggestions::x)
-                .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+                .then(ClientCommands.argument("y", IntegerArgumentType.integer())
                     .suggests(LookSuggestions::y)
-                    .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                    .then(ClientCommands.argument("z", IntegerArgumentType.integer())
                         .suggests(LookSuggestions::z)
                         .executes(context -> addPosition(context, readPos(context))))));
     }
@@ -138,27 +138,27 @@ public final class ContainerCacheCommand {
         FabricClientCommandSource source = context.getSource();
         BlockPos pos = PlayerUtils.lookedAtBlock();
         if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
+            source.sendError(Component.literal("你没有看向任何方块"));
             return 0;
         }
         return addOne(source, pos);
     }
 
     private static int addOne(FabricClientCommandSource source, BlockPos pos) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
-            source.sendError(Text.literal("没有玩家或世界"));
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
             return 0;
         }
 
-        BlockState state = mc.world.getBlockState(pos);
+        BlockState state = mc.level.getBlockState(pos);
         if (!ContainerTypes.isSupported(state.getBlock())) {
-            source.sendError(Text.literal(pos.toShortString() + " 是 " + ContainerTypes.idOf(state)
+            source.sendError(Component.literal(pos.toShortString() + " 是 " + ContainerTypes.idOf(state)
                 + "，不是支持的容器（只支持 " + ContainerTypes.describeSupported() + "）"));
             return 0;
         }
         if (!PlayerUtils.isWithinReach(pos)) {
-            source.sendError(Text.literal("容器 " + pos.toShortString() + " 超出触及范围（距离 "
+            source.sendError(Component.literal("容器 " + pos.toShortString() + " 超出触及范围（距离 "
                 + String.format("%.2f", PlayerUtils.eyeDistanceTo(pos))
                 + "，触及范围 " + String.format("%.2f", PlayerUtils.reach()) + "）"));
             return 0;
@@ -166,27 +166,27 @@ public final class ContainerCacheCommand {
 
         ChatUtils.debug("加入缓存：" + pos.toShortString() + "（" + ContainerTypes.idOf(state) + "）");
         ActionManager.get().submit(new ContainerCacheAddAction(List.of(pos), 0, 0, true));
-        source.sendFeedback(Text.literal("已排队缓存 " + pos.toShortString() + "（"
+        source.sendFeedback(Component.literal("已排队缓存 " + pos.toShortString() + "（"
             + ContainerTypes.idOf(state) + "），跑完会输出结果"));
         return 1;
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> batchAdd() {
-        return ClientCommandManager.literal("add_batch")
+        return ClientCommands.literal("add_batch")
             .then(intChain(BOX_ARGS, 0, builder -> builder.executes(ContainerCacheCommand::addBatch)));
     }
 
     private static int addBatch(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null || mc.player == null) {
-            source.sendError(Text.literal("没有玩家或世界"));
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
             return 0;
         }
 
         List<BlockPos> box = readBox(context);
         if (box == null) {
-            source.sendError(Text.literal("范围太大，一次最多 " + MAX_BATCH + " 个位置"));
+            source.sendError(Component.literal("范围太大，一次最多 " + MAX_BATCH + " 个位置"));
             return 0;
         }
 
@@ -194,7 +194,7 @@ public final class ContainerCacheCommand {
         int outOfReach = 0;
         int unsupported = 0;
         for (BlockPos pos : box) {
-            BlockState state = mc.world.getBlockState(pos);
+            BlockState state = mc.level.getBlockState(pos);
             if (!ContainerTypes.isSupported(state.getBlock())) {
                 if (!state.isAir()) unsupported++;
                 continue;
@@ -208,7 +208,7 @@ public final class ContainerCacheCommand {
 
         ChatUtils.debug("批量加缓存：范围 " + box.size() + " 个位置，可用 " + valid.size()
             + "，超出触及范围 " + outOfReach + "，不是支持的容器 " + unsupported);
-        source.sendFeedback(Text.literal("已排队批量缓存：范围 " + box.size() + " 个位置，其中 "
+        source.sendFeedback(Component.literal("已排队批量缓存：范围 " + box.size() + " 个位置，其中 "
             + valid.size() + " 个会打开记录（跑完输出汇总）"));
         ActionManager.get().submit(new ContainerCacheAddAction(valid, outOfReach, unsupported, false));
         return 1;
@@ -220,15 +220,15 @@ public final class ContainerCacheCommand {
 
     /** {@code del} / {@code del_position}：两个名字是同一条命令。 */
     private static LiteralArgumentBuilder<FabricClientCommandSource> positionDel(String name) {
-        return ClientCommandManager.literal(name)
-            .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
+        return ClientCommands.literal(name)
+            .then(ClientCommands.argument("x", IntegerArgumentType.integer())
                 .suggests(LookSuggestions::x)
-                .then(ClientCommandManager.argument("y", IntegerArgumentType.integer())
+                .then(ClientCommands.argument("y", IntegerArgumentType.integer())
                     .suggests(LookSuggestions::y)
-                    .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                    .then(ClientCommands.argument("z", IntegerArgumentType.integer())
                         .suggests(LookSuggestions::z)
                         .executes(ContainerCacheCommand::delPosition)
-                        .then(ClientCommandManager.argument("dim", StringArgumentType.greedyString())
+                        .then(ClientCommands.argument("dim", StringArgumentType.greedyString())
                             .suggests(DimensionSuggestions::suggest)
                             .executes(ContainerCacheCommand::delPosition)))));
     }
@@ -240,10 +240,10 @@ public final class ContainerCacheCommand {
 
         int removed = ContainerCacheManager.get().removeAt(dimension, pos);
         if (removed == 0) {
-            source.sendFeedback(Text.literal(DimensionUtils.display(dimension) + " "
+            source.sendFeedback(Component.literal(DimensionUtils.display(dimension) + " "
                 + pos.toShortString() + " 没有缓存"));
         } else {
-            source.sendFeedback(Text.literal("已取消缓存 " + DimensionUtils.display(dimension)
+            source.sendFeedback(Component.literal("已取消缓存 " + DimensionUtils.display(dimension)
                 + " " + pos.toShortString()));
         }
         return 1;
@@ -255,11 +255,11 @@ public final class ContainerCacheCommand {
 
         CachedContainer container = ContainerCacheManager.get().byId(id);
         if (container == null) {
-            source.sendError(Text.literal("没有 #" + id + " 这个缓存"));
+            source.sendError(Component.literal("没有 #" + id + " 这个缓存"));
             return 0;
         }
         ContainerCacheManager.get().remove(id);
-        source.sendFeedback(Text.literal("已取消缓存 #" + id + " " + container.type() + " "
+        source.sendFeedback(Component.literal("已取消缓存 #" + id + " " + container.type() + " "
             + DimensionUtils.display(container.dimension()) + " " + container.coordString()));
         return 1;
     }
@@ -268,27 +268,27 @@ public final class ContainerCacheCommand {
         FabricClientCommandSource source = context.getSource();
         BlockPos pos = PlayerUtils.lookedAtBlock();
         if (pos == null) {
-            source.sendError(Text.literal("你没有看向任何方块"));
+            source.sendError(Component.literal("你没有看向任何方块"));
             return 0;
         }
 
         String dimension = DimensionUtils.current();
         int removed = ContainerCacheManager.get().removeAt(dimension, pos);
         if (removed == 0) {
-            source.sendFeedback(Text.literal(DimensionUtils.display(dimension) + " "
+            source.sendFeedback(Component.literal(DimensionUtils.display(dimension) + " "
                 + pos.toShortString() + " 没有缓存"));
         } else {
-            source.sendFeedback(Text.literal("已取消缓存 " + DimensionUtils.display(dimension)
+            source.sendFeedback(Component.literal("已取消缓存 " + DimensionUtils.display(dimension)
                 + " " + pos.toShortString()));
         }
         return 1;
     }
 
     private static LiteralArgumentBuilder<FabricClientCommandSource> batchDel() {
-        return ClientCommandManager.literal("del_batch")
+        return ClientCommands.literal("del_batch")
             .then(intChain(BOX_ARGS, 0, builder -> {
                 builder.executes(ContainerCacheCommand::delBatch);
-                builder.then(ClientCommandManager.argument("dim", StringArgumentType.greedyString())
+                builder.then(ClientCommands.argument("dim", StringArgumentType.greedyString())
                     .suggests(DimensionSuggestions::suggest)
                     .executes(ContainerCacheCommand::delBatch));
             }));
@@ -299,7 +299,7 @@ public final class ContainerCacheCommand {
 
         List<BlockPos> box = readBox(context);
         if (box == null) {
-            source.sendError(Text.literal("范围太大，一次最多 " + MAX_BATCH + " 个位置"));
+            source.sendError(Component.literal("范围太大，一次最多 " + MAX_BATCH + " 个位置"));
             return 0;
         }
 
@@ -309,9 +309,9 @@ public final class ContainerCacheCommand {
         int removed = ContainerCacheManager.get().removeInBox(dimension, a, b);
 
         if (removed == 0) {
-            source.sendFeedback(Text.literal(DimensionUtils.display(dimension) + " 这个范围里没有缓存"));
+            source.sendFeedback(Component.literal(DimensionUtils.display(dimension) + " 这个范围里没有缓存"));
         } else {
-            source.sendFeedback(Text.literal("已取消 " + removed + " 个缓存（"
+            source.sendFeedback(Component.literal("已取消 " + removed + " 个缓存（"
                 + DimensionUtils.display(dimension) + " " + a.toShortString() + " ~ " + b.toShortString() + "）"));
         }
         return 1;
@@ -327,7 +327,7 @@ public final class ContainerCacheCommand {
 
         int before = cache.size();
         cache.optimize();
-        source.sendFeedback(Text.literal("容器缓存已重排：" + before + " 个容器按「"
+        source.sendFeedback(Component.literal("容器缓存已重排：" + before + " 个容器按「"
             + "主世界、下界、末地、其它」+ xyz 递增重新编号（id 从 1 开始）"));
         return 1;
     }
@@ -337,17 +337,17 @@ public final class ContainerCacheCommand {
         ContainerCacheManager cache = ContainerCacheManager.get();
         List<CachedContainer> all = cache.all();
 
-        source.sendFeedback(Text.literal("§8[§bPC§8]§r §7容器缓存（world_" + cache.loadedWorld()
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7容器缓存（world_" + cache.loadedWorld()
             + "，" + all.size() + " 个）："));
         if (all.isEmpty()) {
-            source.sendFeedback(Text.literal("  §8（空）"));
+            source.sendFeedback(Component.literal("  §8（空）"));
             return 1;
         }
 
         int shown = 0;
         for (CachedContainer container : all) {
             if (shown++ >= LIST_LIMIT) {
-                source.sendFeedback(Text.literal("  §8… 还有 " + (all.size() - LIST_LIMIT) + " 个没有显示"));
+                source.sendFeedback(Component.literal("  §8… 还有 " + (all.size() - LIST_LIMIT) + " 个没有显示"));
                 break;
             }
             source.sendFeedback(containerLine(container));
@@ -357,7 +357,7 @@ public final class ContainerCacheCommand {
 
     private static int toggleShow(CommandContext<FabricClientCommandSource> context) {
         boolean showing = ContainerCacheManager.get().toggleShow();
-        context.getSource().sendFeedback(Text.literal("容器缓存高亮已"
+        context.getSource().sendFeedback(Component.literal("容器缓存高亮已"
             + (showing ? "§a开启" : "§c关闭") + "§r（紫色方块）"));
         return 1;
     }
@@ -368,8 +368,8 @@ public final class ContainerCacheCommand {
      */
     private static int getAllItems(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        if (source.getPlayer() == null || source.getWorld() == null) {
-            source.sendError(Text.literal("没有玩家或世界"));
+        if (source.getPlayer() == null || source.getLevel() == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
             return 0;
         }
 
@@ -377,46 +377,46 @@ public final class ContainerCacheCommand {
         Waypoint start = WaypointManager.get().playerStartWaypoint();
         if (start == null) {
             BlockPos here = PlayerUtils.currentBlockPos();
-            source.sendError(Text.literal("你现在" + (here == null ? "" : "所在的 " + here.toShortString())
+            source.sendError(Component.literal("你现在" + (here == null ? "" : "所在的 " + here.toShortString())
                 + " 既不是路径点，也不在任何边上，先站到图上再执行"));
             return 0;
         }
 
         if (ContainerCacheManager.get().size() == 0) {
-            source.sendFeedback(Text.literal("容器缓存是空的，先加点容器再执行"));
+            source.sendFeedback(Component.literal("容器缓存是空的，先加点容器再执行"));
             return 1;
         }
 
         ContainerItemsExporter.Result result = ContainerItemsExporter.export(start);
         if (result.file() == null) {
-            source.sendError(Text.literal("生成 all_items.json 失败，看看日志"));
+            source.sendError(Component.literal("生成 all_items.json 失败，看看日志"));
             return 0;
         }
 
-        source.sendFeedback(Text.literal("起点 #" + start.id() + "；缓存容器 " + result.containers()
+        source.sendFeedback(Component.literal("起点 #" + start.id() + "；缓存容器 " + result.containers()
             + " 个：找得到落点 " + result.withAccess() + " 个，走得到并写入 " + result.written() + " 个"));
-        source.sendFeedback(Text.literal("overall：" + result.overallKinds() + " 种物品 / "
+        source.sendFeedback(Component.literal("overall：" + result.overallKinds() + " 种物品 / "
             + result.overallCount() + " 个"));
-        source.sendFeedback(Text.literal("文件: " + result.file()));
+        source.sendFeedback(Component.literal("文件: " + result.file()));
         return 1;
     }
 
     /** {@code id [取消缓存] [复制物品] [主] [x y z]} */
-    private static Text containerLine(CachedContainer container) {
-        MutableText line = Text.literal(" " + container.id() + " ").formatted(Formatting.GRAY);
+    private static Component containerLine(CachedContainer container) {
+        MutableComponent line = Component.literal(" " + container.id() + " ").withStyle(ChatFormatting.GRAY);
 
         line.append(actionButton("取消缓存", ROOT + "del_id " + container.id(),
             "点击把删除命令填到聊天栏（" + ROOT + "del_id <id>）"));
-        line.append(Text.literal(" "));
-        line.append(Text.literal("[复制物品]").setStyle(Style.EMPTY
-            .withColor(Formatting.YELLOW)
+        line.append(Component.literal(" "));
+        line.append(Component.literal("[复制物品]").setStyle(Style.EMPTY
+            .withColor(ChatFormatting.YELLOW)
             .withClickEvent(new ClickEvent.CopyToClipboard(container.itemsJson()))
-            .withHoverEvent(new HoverEvent.ShowText(Text.literal("点击复制 items 的 JSON（"
+            .withHoverEvent(new HoverEvent.ShowText(Component.literal("点击复制 items 的 JSON（"
                 + container.itemsSummary() + "）")))));
 
-        line.append(Text.literal(" "));
+        line.append(Component.literal(" "));
         line.append(dimensionTag(container.dimension()));
-        line.append(Text.literal(" "));
+        line.append(Component.literal(" "));
         line.append(coordText(container.pos()));
         return line;
     }
@@ -430,7 +430,7 @@ public final class ContainerCacheCommand {
             String[] names, int index,
             Consumer<RequiredArgumentBuilder<FabricClientCommandSource, Integer>> deepest) {
         RequiredArgumentBuilder<FabricClientCommandSource, Integer> builder =
-            ClientCommandManager.argument(names[index], IntegerArgumentType.integer())
+            ClientCommands.argument(names[index], IntegerArgumentType.integer())
                 .suggests(suggestionsFor(names[index]));
         if (index + 1 < names.length) {
             builder.then(intChain(names, index + 1, deepest));
@@ -503,36 +503,36 @@ public final class ContainerCacheCommand {
         }
     }
 
-    private static Text dimensionTag(String dimension) {
+    private static Component dimensionTag(String dimension) {
         String shortName = switch (dimension) {
             case DimensionUtils.NETHER -> "下";
             case DimensionUtils.END -> "末";
             case DimensionUtils.OVERWORLD -> "主";
             default -> dimension;
         };
-        Formatting color = switch (dimension) {
-            case DimensionUtils.NETHER -> Formatting.RED;
-            case DimensionUtils.END -> Formatting.LIGHT_PURPLE;
-            case DimensionUtils.OVERWORLD -> Formatting.GREEN;
-            default -> Formatting.GRAY;
+        ChatFormatting color = switch (dimension) {
+            case DimensionUtils.NETHER -> ChatFormatting.RED;
+            case DimensionUtils.END -> ChatFormatting.LIGHT_PURPLE;
+            case DimensionUtils.OVERWORLD -> ChatFormatting.GREEN;
+            default -> ChatFormatting.GRAY;
         };
-        return Text.literal("[" + shortName + "]").formatted(color);
+        return Component.literal("[" + shortName + "]").withStyle(color);
     }
 
-    private static Text coordText(BlockPos pos) {
+    private static Component coordText(BlockPos pos) {
         String text = pos.getX() + " " + pos.getY() + " " + pos.getZ();
-        return Text.literal("[" + text + "]")
+        return Component.literal("[" + text + "]")
             .setStyle(Style.EMPTY
-                .withColor(Formatting.AQUA)
+                .withColor(ChatFormatting.AQUA)
                 .withClickEvent(new ClickEvent.CopyToClipboard(text))
-                .withHoverEvent(new HoverEvent.ShowText(Text.literal("点击复制坐标"))));
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal("点击复制坐标"))));
     }
 
-    private static Text actionButton(String label, String command, String hint) {
-        return Text.literal("[" + label + "]")
+    private static Component actionButton(String label, String command, String hint) {
+        return Component.literal("[" + label + "]")
             .setStyle(Style.EMPTY
-                .withColor(Formatting.YELLOW)
+                .withColor(ChatFormatting.YELLOW)
                 .withClickEvent(new ClickEvent.SuggestCommand(command))
-                .withHoverEvent(new HoverEvent.ShowText(Text.literal(hint))));
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal(hint))));
     }
 }

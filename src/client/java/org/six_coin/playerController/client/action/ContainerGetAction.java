@@ -2,15 +2,15 @@ package org.six_coin.playerController.client.action;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.container.ContainerClicks;
@@ -112,7 +112,7 @@ public class ContainerGetAction extends Action {
     private Phase phase = Phase.OPENING;
 
     private final ContainerSession session;
-    private PlayerInventory playerInventory;
+    private Inventory playerInventory;
     private List<Slot> containerSlots = List.of();
 
     /** 这一轮挑中的那一格（挑法见 {@link #pickChoice()}）。 */
@@ -167,7 +167,7 @@ public class ContainerGetAction extends Action {
     }
 
     public ContainerGetAction(BlockPos pos, ItemList itemList, boolean wantDetail, Mode mode) {
-        this.pos = pos.toImmutable();
+        this.pos = pos.immutable();
         this.itemList = itemList;
         this.requestText = itemList.describe();
         this.wantDetail = wantDetail;
@@ -196,13 +196,13 @@ public class ContainerGetAction extends Action {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
-        if (!(mc.world.getBlockEntity(pos) instanceof Inventory)) {
+        if (!(mc.level.getBlockEntity(pos) instanceof Container)) {
             fail(pos.toShortString() + " 不是容器（没有物品栏）");
             return;
         }
@@ -212,7 +212,7 @@ public class ContainerGetAction extends Action {
                 + "，触及范围 " + String.format("%.2f", PlayerUtils.reach()) + "）");
             return;
         }
-        ItemStack cursor = player.currentScreenHandler.getCursorStack();
+        ItemStack cursor = player.containerMenu.getCarried();
         if (!cursor.isEmpty()) {
             fail("光标上还有物品（" + InventoryUtils.describe(cursor) + "），先放下再执行");
             return;
@@ -224,7 +224,7 @@ public class ContainerGetAction extends Action {
 
         ChatUtils.debug("容器任务开始：目标 %s（%s），item_list = %s",
             pos.toShortString(),
-            Registries.BLOCK.getId(mc.world.getBlockState(pos).getBlock()),
+            BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(pos).getBlock()),
             itemList.toJson());
 
         session.open(mc, player);
@@ -232,8 +232,8 @@ public class ContainerGetAction extends Action {
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayerEntity player = mc.player;
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
         if (player == null) {
             fail("玩家不存在");
             return;
@@ -269,7 +269,7 @@ public class ContainerGetAction extends Action {
     }
 
     private void dispatch() {
-        MinecraftClient mc = MinecraftClient.getInstance();
+        Minecraft mc = Minecraft.getInstance();
         switch (phase) {
             case OPENING -> tickOpening(mc);
             case SCAN -> tickScan();
@@ -288,12 +288,12 @@ public class ContainerGetAction extends Action {
             detail = session.breakdown();
             freeSlots = 0;
             for (Slot slot : containerSlots) {
-                if (slot.getStack().isEmpty()) freeSlots++;
+                if (slot.getItem().isEmpty()) freeSlots++;
             }
         }
 
         // 关掉界面，顺手把这个容器的缓存刷新一遍
-        session.close(MinecraftClient.getInstance());
+        session.close(Minecraft.getInstance());
 
         if (stopReason != null) {
             output().info("容器任务结束：" + stopReason);
@@ -345,7 +345,7 @@ public class ContainerGetAction extends Action {
     // 打开容器
     // ------------------------------------------------------------------
 
-    private void tickOpening(MinecraftClient mc) {
+    private void tickOpening(Minecraft mc) {
         switch (session.awaitOpen(mc)) {
             case READY -> {
                 playerInventory = mc.player.getInventory();
@@ -354,7 +354,7 @@ public class ContainerGetAction extends Action {
                 stepWaitTicks = 0;
                 phase = mode == Mode.NORMAL || mode == Mode.ONLY_ITEM ? Phase.SCAN : Phase.ONE_BOX;
                 ChatUtils.debug("容器已打开：syncId=%d，界面共 %d 格，其中容器格 %d 格",
-                    session.handler().syncId, session.handler().slots.size(), containerSlots.size());
+                    session.handler().containerId, session.handler().slots.size(), containerSlots.size());
                 dumpContainerSlots();
             }
             case TIMEOUT -> fail("等待容器界面超时");
@@ -377,17 +377,17 @@ public class ContainerGetAction extends Action {
                         : "容器里没有「装着 item_list 需要的东西」的潜影盒");
                     return;
                 }
-                ItemStack box = session.handler().slots.get(boxSlotId).getStack();
+                ItemStack box = session.handler().slots.get(boxSlotId).getItem();
                 ChatUtils.debug("选中第 %d 格的潜影盒（内容：%s）", boxSlotId,
                     ShulkerUtils.describeContents(box));
                 oneBoxStep = 1;
             }
             case 1 -> {
-                click(session.handler().slots.get(boxSlotId), 0, SlotActionType.PICKUP, "拿起潜影盒");
+                click(session.handler().slots.get(boxSlotId), 0, ContainerInput.PICKUP, "拿起潜影盒");
                 oneBoxStep = 2;
             }
             case 2 -> {
-                if (session.handler().getCursorStack().isEmpty()) {
+                if (session.handler().getCarried().isEmpty()) {
                     fail("潜影盒没拿起来");
                     return;
                 }
@@ -399,15 +399,15 @@ public class ContainerGetAction extends Action {
                     fail("找不到快捷栏第 " + (HOTBAR_BOX_INDEX + 1) + " 格");
                     return;
                 }
-                if (!target.getStack().isEmpty()) {
+                if (!target.getItem().isEmpty()) {
                     fail("快捷栏第 " + (HOTBAR_BOX_INDEX + 1) + " 格被 " + InventoryUtils.describe(target) + " 占了");
                     return;
                 }
-                click(target, 0, SlotActionType.PICKUP, "把潜影盒放进快捷栏");
+                click(target, 0, ContainerInput.PICKUP, "把潜影盒放进快捷栏");
                 oneBoxStep = 4;
             }
             default -> {
-                if (!session.handler().getCursorStack().isEmpty()) {
+                if (!session.handler().getCarried().isEmpty()) {
                     fail("潜影盒没放进快捷栏");
                     return;
                 }
@@ -420,16 +420,16 @@ public class ContainerGetAction extends Action {
     /** 找一个里面有 item_list 需要的东西、而且没改过名字的潜影盒。 */
     private int findShulkerWithNeeded() {
         for (Slot slot : containerSlots) {
-            ItemStack stack = slot.getStack();
+            ItemStack stack = slot.getItem();
             if (stack.isEmpty() || !ShulkerUtils.isShulkerBox(stack)) continue;
             if (ItemRules.customNameOf(stack) != null) continue;
             if (mode == Mode.ONLY_FULL_SHULKER) {
                 // 只认「只装一种、而且装满一整盒」的（整盒直挪用）
                 if (!ShulkerUtils.isFullOfWanted(stack, itemList)) continue;
-                return slot.id;
+                return slot.index;
             }
             if (!ShulkerUtils.containsWanted(stack, itemList)) continue;
-            return slot.id;
+            return slot.index;
         }
         return -1;
     }
@@ -438,7 +438,7 @@ public class ContainerGetAction extends Action {
     @Nullable
     private Slot hotbarSlot(int index) {
         for (Slot slot : session.handler().slots) {
-            if (slot.inventory instanceof PlayerInventory && slot.getIndex() == index) return slot;
+            if (slot.container instanceof Inventory && slot.getContainerSlot() == index) return slot;
         }
         return null;
     }
@@ -486,7 +486,7 @@ public class ContainerGetAction extends Action {
         sourceStack = choice.stack;
         sourceCount = choice.stack.getCount();
         take = choice.take;
-        ChatUtils.debug("第 %d 格 %s", source.id, choice.why);
+        ChatUtils.debug("第 %d 格 %s", source.index, choice.why);
 
         // 每次提取之前都检查一次主背包有没有空位
         Slot empty = InventoryUtils.firstEmptyMainSlot(session.handler(), playerInventory);
@@ -502,21 +502,21 @@ public class ContainerGetAction extends Action {
         if (take == sourceCount) {
             ChatUtils.debug("搬法：整叠 %d 个 → 拿起后左键放进主背包"
                 + "（同类半叠优先，其次空格；不会碰快捷栏；空位检查通过，第一个空格是 #%d）",
-                take, empty.id);
+                take, empty.index);
             return;
         }
 
         // 只取一部分：优先塞进同类半叠，塞不下就放空格
         Slot merge = InventoryUtils.mergeTarget(session.handler(), playerInventory, sourceStack, take);
         target = merge != null ? merge : empty;
-        if (!target.canInsert(sourceStack)) {
+        if (!target.mayPlace(sourceStack)) {
             stoppedForInventory = true;
             stop("主背包里找不到能放下 " + InventoryUtils.describe(sourceStack)
                 + " 的格子，停止；item_list 还差：" + itemList.describe());
             return;
         }
         ChatUtils.debug("搬法：拿起整叠 → 右键往 #%d（%s）放 %d 个 → 剩下的放回原格（不会碰快捷栏）",
-            target.id, merge != null ? "同类半叠" : "空格", take);
+            target.index, merge != null ? "同类半叠" : "空格", take);
     }
 
     /** 这一轮挑中的那一格。 */
@@ -550,7 +550,7 @@ public class ContainerGetAction extends Action {
         Choice partial = null;
 
         for (Slot slot : containerSlots) {
-            ItemStack stack = slot.getStack();
+            ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
 
             // ① 潜影盒：盒子里有要的东西就整个搬走。
@@ -581,7 +581,7 @@ public class ContainerGetAction extends Action {
 
             // ② 普通物品：堆叠上限 1 的、改过名字的都当没看见
             if (ItemRules.isIgnored(stack)) {
-                explain(slot, "%s x%d 无视（%s）", Registries.ITEM.getId(stack.getItem()),
+                explain(slot, "%s x%d 无视（%s）", BuiltInRegistries.ITEM.getKey(stack.getItem()),
                     stack.getCount(), ItemRules.ignoreReason(stack));
                 continue;
             }
@@ -589,19 +589,19 @@ public class ContainerGetAction extends Action {
             int need = itemList.remaining(stack.getItem());
             if (need <= 0) {
                 explain(slot, "%s x%d 不需要，跳过",
-                    Registries.ITEM.getId(stack.getItem()), stack.getCount());
+                    BuiltInRegistries.ITEM.getKey(stack.getItem()), stack.getCount());
                 continue;
             }
 
             if (stack.getCount() <= need) {
                 if (whole == null || stack.getCount() > whole.stack.getCount()) {
                     whole = new Choice(slot, stack.copy(), stack.getCount(),
-                        Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount()
+                        BuiltInRegistries.ITEM.getKey(stack.getItem()) + " x" + stack.getCount()
                             + "，item_list 还要 " + need + " → 整叠取走");
                 }
             } else if (partial == null || stack.getCount() < partial.stack.getCount()) {
                 partial = new Choice(slot, stack.copy(), need,
-                    Registries.ITEM.getId(stack.getItem()) + " x" + stack.getCount()
+                    BuiltInRegistries.ITEM.getKey(stack.getItem()) + " x" + stack.getCount()
                         + "，item_list 还要 " + need + " → 提取 " + need + " 个（只取一部分）");
             }
         }
@@ -611,10 +611,10 @@ public class ContainerGetAction extends Action {
 
     /** 跳过的原因只报一次：每一轮都会把所有格子重新看一遍，不然日志会刷屏。 */
     private void explain(Slot slot, String format, Object... args) {
-        if (!explained.add(slot.id)) return;
+        if (!explained.add(slot.index)) return;
 
         Object[] all = new Object[args.length + 1];
-        all[0] = slot.id;
+        all[0] = slot.index;
         System.arraycopy(args, 0, all, 1, args.length);
         ChatUtils.debug("第 %d 格 " + format, all);
     }
@@ -624,10 +624,10 @@ public class ContainerGetAction extends Action {
     // ------------------------------------------------------------------
 
     private void tickPickup() {
-        ItemStack cursor = session.handler().getCursorStack();
+        ItemStack cursor = session.handler().getCarried();
 
         if (pendingClick) {
-            if (!cursor.isEmpty() && ItemStack.areItemsAndComponentsEqual(cursor, sourceStack)) {
+            if (!cursor.isEmpty() && ItemStack.isSameItemSameComponents(cursor, sourceStack)) {
                 // 以实际拿到手的数量为准（本地预测和服务端对不上时也不会乱）
                 if (cursor.getCount() != sourceCount) {
                     ChatUtils.debug("实际拿到手的是 %d 个（本来算的是 %d 个），按实际的来",
@@ -655,7 +655,7 @@ public class ContainerGetAction extends Action {
             return;
         }
 
-        click(source, 0, SlotActionType.PICKUP, "拿起源格整叠");
+        click(source, 0, ContainerInput.PICKUP, "拿起源格整叠");
     }
 
     private void tickPlace() {
@@ -664,7 +664,7 @@ public class ContainerGetAction extends Action {
             return;
         }
 
-        ItemStack cursor = session.handler().getCursorStack();
+        ItemStack cursor = session.handler().getCarried();
 
         // 上一批点完了：光标少了多少就是实际放进去多少（服务端少接受几下的情况也能自愈）
         if (pendingClick) {
@@ -691,11 +691,11 @@ public class ContainerGetAction extends Action {
         // 一个 tick 里连点几下（右键一次放 1 个），别一个一个等 tick。
         // 客户端点击是本地预测、同步生效的，一 tick 连点几下能快好几倍；
         // 每一批点完下一 tick 会按「光标少了多少」核对一次，服务端少接受几下也能自己纠正。
-        int room = target.getStack().isEmpty() ? 0
-            : Math.min(target.getMaxItemCount(sourceStack), sourceStack.getMaxCount())
-                - target.getStack().getCount();
+        int room = target.getItem().isEmpty() ? 0
+            : Math.min(target.getMaxStackSize(sourceStack), sourceStack.getMaxStackSize())
+                - target.getItem().getCount();
         int batch = Math.min(take - placed, Math.min(ContainerClicks.MAX_CLICKS_PER_TICK, cursor.getCount()));
-        if (!target.getStack().isEmpty()) {
+        if (!target.getItem().isEmpty()) {
             batch = Math.min(batch, Math.max(0, room));
         }
         if (batch <= 0) {
@@ -705,7 +705,7 @@ public class ContainerGetAction extends Action {
         }
 
         for (int i = 0; i < batch; i++) {
-            clickQuiet(target, 1, SlotActionType.PICKUP);
+            clickQuiet(target, 1, ContainerInput.PICKUP);
         }
         clickCursorCount = cursor.getCount();
         pendingClick = true;
@@ -734,7 +734,7 @@ public class ContainerGetAction extends Action {
         int back = sourceCount - take;
 
         if (pendingClick) {
-            if (session.handler().getCursorStack().isEmpty()) {
+            if (session.handler().getCarried().isEmpty()) {
                 pendingClick = false;
                 stepWaitTicks = 0;
                 ChatUtils.debug("剩下的 %d 个已经放回源格", back);
@@ -743,18 +743,18 @@ public class ContainerGetAction extends Action {
             }
             if (++stepWaitTicks > MAX_STEP_WAIT_TICKS) {
                 fail("把剩下的 " + back + " 个放回源格失败（光标上还有 "
-                    + session.handler().getCursorStack().getCount() + " 个）");
+                    + session.handler().getCarried().getCount() + " 个）");
                 return;
             }
             return;
         }
 
-        click(source, 0, SlotActionType.PICKUP, "把剩下的 " + back + " 个放回源格");
+        click(source, 0, ContainerInput.PICKUP, "把剩下的 " + back + " 个放回源格");
     }
 
     /** 整叠往主背包里放：左键点主背包格，直到光标空（同类半叠优先，其次空格）。 */
     private void tickDump() {
-        ItemStack cursor = session.handler().getCursorStack();
+        ItemStack cursor = session.handler().getCarried();
 
         if (cursor.isEmpty()) {
             pendingClick = false;
@@ -785,7 +785,7 @@ public class ContainerGetAction extends Action {
                 + cursor.getCount() + " 个）");
             return;
         }
-        click(dumpTarget, 0, SlotActionType.PICKUP, "把光标上的 " + cursor.getCount()
+        click(dumpTarget, 0, ContainerInput.PICKUP, "把光标上的 " + cursor.getCount()
             + " 个放进 " + InventoryUtils.describe(dumpTarget));
     }
 
@@ -795,7 +795,7 @@ public class ContainerGetAction extends Action {
 
     /** 一次提取成功：按实际搬走的量扣 item_list，然后继续看下一格。 */
     private void completeExtraction() {
-        int moved = sourceCount - source.getStack().getCount();
+        int moved = sourceCount - source.getItem().getCount();
         if (moved <= 0) {
             fail("源格 " + InventoryUtils.describe(source) + " 其实没搬走东西");
             return;
@@ -813,14 +813,14 @@ public class ContainerGetAction extends Action {
                 int amount = inner.getCount() * moved;
                 int cut = itemList.take(inner.getItem(), amount);
                 ChatUtils.debug("　%s：盒子里 x%d × %d 个盒子 = %d 个；item_list 里 %d → %d（扣了 %d）",
-                    Registries.ITEM.getId(inner.getItem()), inner.getCount(), moved, amount,
+                    BuiltInRegistries.ITEM.getKey(inner.getItem()), inner.getCount(), moved, amount,
                     before, itemList.remaining(inner.getItem()), cut);
             }
         } else {
             int before = itemList.remaining(sourceStack.getItem());
             int cut = itemList.take(sourceStack.getItem(), moved);
             ChatUtils.debug("%s 搬走 %d 个：item_list 里 %d → %d（扣了 %d）",
-                Registries.ITEM.getId(sourceStack.getItem()), moved,
+                BuiltInRegistries.ITEM.getKey(sourceStack.getItem()), moved,
                 before, itemList.remaining(sourceStack.getItem()), cut);
         }
 
@@ -842,8 +842,8 @@ public class ContainerGetAction extends Action {
         finish();
     }
 
-    private void click(Slot slot, int button, SlotActionType type, String what) {
-        clickCursorCount = session.handler().getCursorStack().getCount();
+    private void click(Slot slot, int button, ContainerInput type, String what) {
+        clickCursorCount = session.handler().getCarried().getCount();
         if (!session.click(slot, button, type, what)) {
             fail("点不了格子（" + what + "）");
             return;
@@ -859,8 +859,8 @@ public class ContainerGetAction extends Action {
      * <p>「一个一个往背包里放」那种循环会点几十上百次，每次都刷一行日志没有意义
      * （放完会有一句汇总）。
      */
-    private void clickQuiet(Slot slot, int button, SlotActionType type) {
-        clickCursorCount = session.handler().getCursorStack().getCount();
+    private void clickQuiet(Slot slot, int button, ContainerInput type) {
+        clickCursorCount = session.handler().getCarried().getCount();
         if (!session.clickQuiet(slot, button, type)) {
             fail("点不了格子（静默点击）");
             return;

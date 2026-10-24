@@ -1,11 +1,11 @@
 package org.six_coin.playerController.client.util;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.text.ClickEvent;
-import net.minecraft.text.HoverEvent;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Style;
-import net.minecraft.text.Text;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.Component;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 
 /** 统一往聊天栏输出信息。 */
@@ -44,18 +44,18 @@ public final class ChatUtils {
      * <p>点击可以复制这一行（文字本身不变），方便把结果再粘回命令里。
      */
     public static void rawCopyable(String message) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc == null || mc.inGameHud == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc == null || mc.gui == null) return;
 
-        MutableText text = Text.literal(message).setStyle(Style.EMPTY
+        MutableComponent text = Component.literal(message).setStyle(Style.EMPTY
             .withClickEvent(new ClickEvent.CopyToClipboard(message))
-            .withHoverEvent(new HoverEvent.ShowText(Text.literal("点击复制这一行"))));
-        mc.inGameHud.getChatHud().addMessage(text);
+            .withHoverEvent(new HoverEvent.ShowText(Component.literal("点击复制这一行"))));
+        mc.gui.hud.getChat().addClientSystemMessage(text);
     }
 
     private static void send(String message) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc == null || mc.inGameHud == null) return;
-        mc.inGameHud.getChatHud().addMessage(Text.literal(message));
+        Minecraft mc = Minecraft.getInstance();
+        if (mc == null || mc.gui == null) return;
+        mc.gui.hud.getChat().addClientSystemMessage(Component.literal(message));
     }
 }

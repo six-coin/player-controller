@@ -86,5 +86,7 @@
   "minecraft:ward_armor_trim_smithing_template",
   "minecraft:wayfinder_armor_trim_smithing_template",
   "minecraft:wild_armor_trim_smithing_template",
-  "minecraft:netherite_upgrade_smithing_template"
+  "minecraft:netherite_upgrade_smithing_template",
+  "minecraft:honey_block",
+  "minecraft:filled_map"
 ]

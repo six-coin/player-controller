@@ -4,7 +4,7 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.command.CommandSource;
+import net.minecraft.commands.SharedSuggestionProvider;
 import org.six_coin.playerController.client.container.CachedContainer;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.mending.MendingConfig;
@@ -51,6 +51,6 @@ public final class DimensionSuggestions {
             dimensions.add(place.dimension());
         }
 
-        return CommandSource.suggestMatching(dimensions, builder);
+        return SharedSuggestionProvider.suggest(dimensions, builder);
     }
 }

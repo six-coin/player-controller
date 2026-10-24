@@ -5,9 +5,9 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.minecraft.block.Block;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -154,7 +154,7 @@ public final class MineFilterConfig {
                 Identifier identifier = Identifier.tryParse(id);
                 Block block = identifier == null
                     ? null
-                    : Registries.BLOCK.getOptionalValue(identifier).orElse(null);
+                    : BuiltInRegistries.BLOCK.getOptional(identifier).orElse(null);
                 if (block == null) {
                     unknown.add(id);
                     continue;
@@ -180,7 +180,7 @@ public final class MineFilterConfig {
         for (String id : ids) {
             Identifier identifier = Identifier.tryParse(id);
             if (identifier == null) continue;
-            Registries.BLOCK.getOptionalValue(identifier).ifPresent(blocks::add);
+            BuiltInRegistries.BLOCK.getOptional(identifier).ifPresent(blocks::add);
         }
         return blocks;
     }
@@ -200,7 +200,7 @@ public final class MineFilterConfig {
 
     private static void saveBlocks(Path path, Set<Block> blocks) {
         List<String> ids = new ArrayList<>();
-        for (Block block : blocks) ids.add(Registries.BLOCK.getId(block).toString());
+        for (Block block : blocks) ids.add(BuiltInRegistries.BLOCK.getKey(block).toString());
         write(path, GSON.toJsonTree(ids));
     }
 

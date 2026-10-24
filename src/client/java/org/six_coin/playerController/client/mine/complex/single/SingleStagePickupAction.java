@@ -1,9 +1,9 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -35,8 +35,8 @@ class SingleStagePickupAction extends SingleStageStep {
 
     @Override
     protected void onStart() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -45,14 +45,14 @@ class SingleStagePickupAction extends SingleStageStep {
             finish();          // 已经不在了（被吸走 / 被别人捡了）
             return;
         }
-        move = new SingleStageSnapAction(ctx, item.getBlockPos());
+        move = new SingleStageSnapAction(ctx, item.blockPosition());
         move.start();
     }
 
     @Override
     protected void tick() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) {
             fail("玩家或世界不存在");
             return;
         }
@@ -84,9 +84,9 @@ class SingleStagePickupAction extends SingleStageStep {
     // ------------------------------------------------------------------
 
     @Nullable
-    private ItemEntity find(MinecraftClient mc) {
-        if (mc.world == null) return null;
-        Entity entity = mc.world.getEntityById(entityId);
+    private ItemEntity find(Minecraft mc) {
+        if (mc.level == null) return null;
+        Entity entity = mc.level.getEntity(entityId);
         if (!(entity instanceof ItemEntity item)) return null;
         return item.isRemoved() ? null : item;
     }

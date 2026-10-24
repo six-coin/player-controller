@@ -3,7 +3,7 @@ package org.six_coin.playerController.client.mending;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -27,7 +27,7 @@ import java.nio.file.Path;
  * </pre>
  *
  * <p>{@code ender_chest} 可以不设（那就不打开末影箱，只看物品栏）。
- * 放 world 目录下是因为不同存档 / 服务器的工作站位置不一样，换世界（{@code /pc config world <n>}）会跟着换。
+ * 放 level 目录下是因为不同存档 / 服务器的工作站位置不一样，换世界（{@code /pc config level <n>}）会跟着换。
  */
 public final class MendingConfig {
 
@@ -60,8 +60,8 @@ public final class MendingConfig {
         return INSTANCE;
     }
 
-    public static Path file(int world) {
-        return WaypointManager.worldDir(world).resolve(FILE_NAME);
+    public static Path file(int level) {
+        return WaypointManager.worldDir(level).resolve(FILE_NAME);
     }
 
     // ------------------------------------------------------------------
@@ -72,13 +72,13 @@ public final class MendingConfig {
         load(PlayerControllerConfig.getWorld());
     }
 
-    public void load(int world) {
-        world = Math.max(1, world);
-        loadedWorld = world;
+    public void load(int level) {
+        level = Math.max(1, level);
+        loadedWorld = level;
         loadedOk = false;
         data = new Data();
 
-        Path path = file(world);
+        Path path = file(level);
         if (!Files.exists(path)) {
             loadedOk = true;
             save();
@@ -114,10 +114,10 @@ public final class MendingConfig {
         return value == null || value.isBlank();
     }
 
-    public void switchWorld(int world) {
+    public void switchWorld(int level) {
         save();
-        load(world);
-        ChatUtils.info("mending 配置已切到 world_" + world + "（站立点 "
+        load(level);
+        ChatUtils.info("mending 配置已切到 world_" + level + "（站立点 "
             + (standPoint() == null ? "未设置" : standPoint().describe()) + "）");
     }
 

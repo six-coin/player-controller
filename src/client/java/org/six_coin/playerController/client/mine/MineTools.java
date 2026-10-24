@@ -1,13 +1,13 @@
 package org.six_coin.playerController.client.mine;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.tag.BlockTags;
-import net.minecraft.registry.tag.ItemTags;
-import net.minecraft.registry.tag.TagKey;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.tags.TagKey;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.HashMap;
@@ -29,10 +29,10 @@ public final class MineTools {
     /** 四类工具。枚举的**顺序**就是方块标签的查找顺序（锄头 → 镐子 → 斧头 → 铲子）。 */
     public enum Kind {
 
-        HOE("锄头", BlockTags.HOE_MINEABLE, ItemTags.HOES),
-        PICKAXE("镐子", BlockTags.PICKAXE_MINEABLE, ItemTags.PICKAXES),
-        AXE("斧头", BlockTags.AXE_MINEABLE, ItemTags.AXES),
-        SHOVEL("铲子", BlockTags.SHOVEL_MINEABLE, ItemTags.SHOVELS);
+        HOE("锄头", BlockTags.MINEABLE_WITH_HOE, ItemTags.HOES),
+        PICKAXE("镐子", BlockTags.MINEABLE_WITH_PICKAXE, ItemTags.PICKAXES),
+        AXE("斧头", BlockTags.MINEABLE_WITH_AXE, ItemTags.AXES),
+        SHOVEL("铲子", BlockTags.MINEABLE_WITH_SHOVEL, ItemTags.SHOVELS);
 
         private final String label;
         private final TagKey<Block> blockTag;
@@ -75,9 +75,9 @@ public final class MineTools {
     }
 
     private static Optional<Kind> lookup(Block block) {
-        BlockState state = block.getDefaultState();
+        BlockState state = block.defaultBlockState();
         for (Kind kind : Kind.values()) {
-            if (state.isIn(kind.blockTag())) return Optional.of(kind);
+            if (state.is(kind.blockTag())) return Optional.of(kind);
         }
         return Optional.empty();
     }
@@ -94,7 +94,7 @@ public final class MineTools {
         if (stack == null || stack.isEmpty()) return null;
         if (remaining(stack) < MIN_DURABILITY) return null;
         for (Kind kind : Kind.values()) {
-            if (stack.isIn(kind.itemTag())) return kind;
+            if (stack.is(kind.itemTag())) return kind;
         }
         return null;
     }
@@ -107,21 +107,21 @@ public final class MineTools {
      *
      * @return -1 = 快捷栏里没有
      */
-    public static int hotbarSlot(PlayerInventory inventory, Kind kind) {
-        ItemStack selected = inventory.getSelectedStack();
-        if (selected.isIn(kind.itemTag()) && remaining(selected) >= MIN_DURABILITY) {
+    public static int hotbarSlot(Inventory inventory, Kind kind) {
+        ItemStack selected = inventory.getSelectedItem();
+        if (selected.is(kind.itemTag()) && remaining(selected) >= MIN_DURABILITY) {
             return inventory.getSelectedSlot();
         }
-        for (int i = 0; i < PlayerInventory.getHotbarSize(); i++) {
-            ItemStack stack = inventory.getStack(i);
-            if (stack.isIn(kind.itemTag()) && remaining(stack) >= MIN_DURABILITY) return i;
+        for (int i = 0; i < Inventory.getSelectionSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.is(kind.itemTag()) && remaining(stack) >= MIN_DURABILITY) return i;
         }
         return -1;
     }
 
     /** 还剩多少耐久；不会坏的物品算无限。 */
     public static int remaining(ItemStack stack) {
-        if (stack == null || stack.isEmpty() || !stack.isDamageable()) return Integer.MAX_VALUE;
-        return stack.getMaxDamage() - stack.getDamage();
+        if (stack == null || stack.isEmpty() || !stack.isDamageableItem()) return Integer.MAX_VALUE;
+        return stack.getMaxDamage() - stack.getDamageValue();
     }
 }

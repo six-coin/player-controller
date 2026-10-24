@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.recipe;
 
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
+import net.minecraft.world.item.Item;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.List;
 
@@ -115,6 +115,6 @@ public final class CraftPlan {
     }
 
     private static String id(Item item) {
-        return Registries.ITEM.getId(item).toString();
+        return BuiltInRegistries.ITEM.getKey(item).toString();
     }
 }

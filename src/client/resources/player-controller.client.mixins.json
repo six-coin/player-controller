@@ -1,12 +1,15 @@
 {
   "required": true,
   "package": "org.six_coin.playerController.client.mixin",
-  "compatibilityLevel": "JAVA_21",
+  "compatibilityLevel": "JAVA_25",
   "client": [
+    "ClientPacketSendMixin",
     "ClientPlayerInteractionManagerAccessor",
     "ClientPlayNetworkHandlerMixin",
+    "LocalPlayerAccessor",
     "MinecraftClientAccessor",
-    "MinecraftClientMixin"
+    "MinecraftClientMixin",
+    "ServerboundMovePlayerPacketAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

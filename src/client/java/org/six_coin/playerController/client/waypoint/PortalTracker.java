@@ -1,7 +1,7 @@
 package org.six_coin.playerController.client.waypoint;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
@@ -58,7 +58,7 @@ public final class PortalTracker {
      */
     public static void arm(String dimension, BlockPos pos) {
         armedDimension = dimension;
-        armedPos = pos.toImmutable();
+        armedPos = pos.immutable();
         armedTicks = 0;
         entered = false;
         ChatUtils.debug("编辑模式：终点 " + pos.toShortString()
@@ -73,8 +73,8 @@ public final class PortalTracker {
         entered = false;
     }
 
-    public static void tick(MinecraftClient client) {
-        if (client.player == null || client.world == null) {
+    public static void tick(Minecraft client) {
+        if (client.player == null || client.level == null) {
             // 世界暂时不在了（切维度的一瞬间也可能是这样）：武装状态和 lastDimension 都留着，
             // 等世界回来之后再判断维度到底变没变
             return;
@@ -127,7 +127,7 @@ public final class PortalTracker {
         if (!dimension.equals(armedDimension)) return;   // 还没被传走
 
         // 站进终点那个传送门方块里了吗
-        BlockPos here = BlockPos.ofFloored(client.player.getEntityPos());
+        BlockPos here = BlockPos.containing(client.player.position());
         if (!here.equals(armedPos)) return;
 
         // 而且那一格现在仍然得是「下界传送门 + 下面是黑曜石」
@@ -145,7 +145,7 @@ public final class PortalTracker {
     }
 
     /** 两端都校验通过才写边。 */
-    private static void record(MinecraftClient client, String arrivalDimension) {
+    private static void record(Minecraft client, String arrivalDimension) {
         String sourceDimension = armedDimension;
         BlockPos sourcePos = armedPos;
         disarm();
@@ -154,13 +154,13 @@ public final class PortalTracker {
         if (client.player == null) return;
         if (sourceDimension.equals(arrivalDimension)) return;
 
-        BlockPos arrival = BlockPos.ofFloored(client.player.getEntityPos());
+        BlockPos arrival = BlockPos.containing(client.player.position());
 
         // 落点也得是「下界传送门 + 下面是黑曜石」，否则可能是死亡重生之类的维度变化
         if (!PortalUtils.isNetherPortalOnObsidian(arrival)) {
             ChatUtils.debug("维度变化了，但落点 " + arrival.toShortString()
                 + " 不是「下面垫着黑曜石的下界传送门方块」（该处是 "
-                + PortalUtils.blockId(arrival) + "，下方是 " + PortalUtils.blockId(arrival.down())
+                + PortalUtils.blockId(arrival) + "，下方是 " + PortalUtils.blockId(arrival.below())
                 + "），不记录传送门边");
             return;
         }

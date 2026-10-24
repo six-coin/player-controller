@@ -1,13 +1,13 @@
 package org.six_coin.playerController.client.util;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.chunk.ChunkStatus;
-import net.minecraft.world.chunk.WorldChunk;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.level.chunk.LevelChunk;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.MoveAction;
 import org.six_coin.playerController.client.mine.station.MineStationAccess;
@@ -99,7 +99,7 @@ public final class SnapUtils {
     /**
      * 这个坐标所在的区块，客户端上到底加载了没有。
      *
-     * <p><b>不能用 {@code mc.world.isChunkLoaded(x, z)}</b>：这个版本里
+     * <p><b>不能用 {@code mc.level.isChunkLoaded(x, z)}</b>：这个版本里
      * {@code ClientWorld.isChunkLoaded(int, int)} 是写死的 {@code return true;}，
      * 拿它判断等于没判断。
      *
@@ -110,24 +110,24 @@ public final class SnapUtils {
      *       没加载时它直接返回 null，拿到了才算加载。</li>
      * </ol>
      */
-    public static boolean isLoaded(MinecraftClient mc, BlockPos pos) {
-        if (mc.world == null) return false;
+    public static boolean isLoaded(Minecraft mc, BlockPos pos) {
+        if (mc.level == null) return false;
 
         int chunkX = pos.getX() >> 4;
         int chunkZ = pos.getZ() >> 4;
 
-        ClientPlayerEntity player = mc.player;
+        LocalPlayer player = mc.player;
         if (player != null) {
-            BlockPos here = player.getBlockPos();
-            int limit = mc.options.getViewDistance().getValue() + 2;
+            BlockPos here = player.blockPosition();
+            int limit = mc.options.renderDistance().get() + 2;
             if (Math.abs(chunkX - (here.getX() >> 4)) > limit
                 || Math.abs(chunkZ - (here.getZ() >> 4)) > limit) {
                 return false;
             }
         }
 
-        WorldChunk chunk = mc.world.getChunkManager().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
-        return chunk != null && chunk.getPos().toLong() == ChunkPos.toLong(chunkX, chunkZ);
+        LevelChunk chunk = mc.level.getChunkSource().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
+        return chunk != null && chunk.getPos().pack() == ChunkPos.pack(chunkX, chunkZ);
     }
 
     // ------------------------------------------------------------------
@@ -137,22 +137,22 @@ public final class SnapUtils {
     /**
      * 当前维度里、{@value #SEARCH_RADIUS} 格内、已加载的「路径点 / 边上的方块」，按距离由近到远。
      */
-    public static List<BlockPos> networkCandidates(MinecraftClient mc) {
-        ClientPlayerEntity player = mc.player;
-        if (player == null || mc.world == null) return List.of();
+    public static List<BlockPos> networkCandidates(Minecraft mc) {
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) return List.of();
 
         Map<String, Set<Long>> occupied = MineStationAccess.buildOccupied(WaypointManager.get().graph());
         Set<Long> positions = occupied.get(DimensionUtils.current());
         if (positions == null || positions.isEmpty()) return List.of();
 
         double limit = (double) SEARCH_RADIUS * SEARCH_RADIUS;
-        Vec3d here = player.getEntityPos();
+        Vec3 here = player.position();
 
         List<BlockPos> candidates = new ArrayList<>();
         List<Double> distances = new ArrayList<>();
         for (long packed : positions) {
-            BlockPos pos = BlockPos.fromLong(packed);
-            double distance = here.squaredDistanceTo(Vec3d.ofCenter(pos));
+            BlockPos pos = BlockPos.of(packed);
+            double distance = here.distanceToSqr(Vec3.atCenterOf(pos));
             if (distance > limit) continue;         // 超出搜索半径
             if (!isLoaded(mc, pos)) continue;       // 没加载的区块不进去（进了也读不到方块）
             candidates.add(pos);
@@ -174,7 +174,7 @@ public final class SnapUtils {
      * <p>最近的不可达就试次近的，一直试到 1000 格内所有已加载的坐标都不行为止。
      */
     @Nullable
-    public static Snap findSnap(MinecraftClient mc, BlockPos from) {
+    public static Snap findSnap(Minecraft mc, BlockPos from) {
         for (BlockPos candidate : networkCandidates(mc)) {
             if (candidate.equals(from)) continue;
             // 便宜的预筛：目的地那一格和它上面一格得是空气，不然连人形都放不下
@@ -192,8 +192,8 @@ public final class SnapUtils {
 
     /** 6 种轴顺序里第一种通的；都不通返回 null。 */
     @Nullable
-    public static Plan plan(MinecraftClient mc, BlockPos from, BlockPos to) {
-        if (mc.world == null || from.equals(to)) return null;
+    public static Plan plan(Minecraft mc, BlockPos from, BlockPos to) {
+        if (mc.level == null || from.equals(to)) return null;
 
         for (Direction.Axis[] order : ORDERS) {
             List<BlockPos> points = new ArrayList<>(4);
@@ -228,9 +228,9 @@ public final class SnapUtils {
      *
      * <p>起点自己那一格不查（玩家就站在那儿），但起点头顶那一格要查。
      */
-    private static boolean clear(MinecraftClient mc, List<BlockPos> points) {
+    private static boolean clear(Minecraft mc, List<BlockPos> points) {
         BlockPos start = points.get(0);
-        if (!mc.world.getBlockState(start.up()).isAir()) return false;
+        if (!mc.level.getBlockState(start.above()).isAir()) return false;
 
         Set<Long> checked = new HashSet<>();
         checked.add(start.asLong());
@@ -249,16 +249,16 @@ public final class SnapUtils {
                 BlockPos pos = moveAlong(previous, axis, step * moved);
                 if (!checked.add(pos.asLong())) continue;      // 两段重叠的地方只查一次
 
-                if (!mc.world.getBlockState(pos).isAir()) return false;
-                if (!mc.world.getBlockState(pos.up()).isAir()) return false;
+                if (!mc.level.getBlockState(pos).isAir()) return false;
+                if (!mc.level.getBlockState(pos.above()).isAir()) return false;
             }
         }
         return true;
     }
 
     /** 这一格能不能站人（方块本身和上面一格都是空气）。 */
-    private static boolean hasHeadroom(MinecraftClient mc, BlockPos pos) {
-        return mc.world.getBlockState(pos).isAir() && mc.world.getBlockState(pos.up()).isAir();
+    private static boolean hasHeadroom(Minecraft mc, BlockPos pos) {
+        return mc.level.getBlockState(pos).isAir() && mc.level.getBlockState(pos.above()).isAir();
     }
 
     // ------------------------------------------------------------------

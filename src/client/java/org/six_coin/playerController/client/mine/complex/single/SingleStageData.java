@@ -1,12 +1,12 @@
 package org.six_coin.playerController.client.mine.complex.single;
 
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
@@ -35,7 +35,7 @@ public final class SingleStageData {
     /** 潜影盒一共 27 格。 */
     public static final int BOX_SLOTS = 27;
 
-    /** 物品栏快照，下标和 {@link PlayerInventory#getStack(int)} 一致。 */
+    /** 物品栏快照，下标和 {@link Inventory#getStack(int)} 一致。 */
     private final ItemStack[] inventory = new ItemStack[41];
 
     /** 六个位置的盒子里装着什么（按方块坐标）。 */
@@ -50,10 +50,10 @@ public final class SingleStageData {
     // ------------------------------------------------------------------
 
     /** 把整份物品栏拍一张快照（判断之前调一次）。 */
-    public void refreshInventory(PlayerInventory inv) {
-        int size = Math.min(inventory.length, inv.size());
+    public void refreshInventory(Inventory inv) {
+        int size = Math.min(inventory.length, inv.getContainerSize());
         for (int i = 0; i < size; i++) {
-            inventory[i] = inv.getStack(i).copy();
+            inventory[i] = inv.getItem(i).copy();
         }
         for (int i = size; i < inventory.length; i++) inventory[i] = ItemStack.EMPTY;
     }
@@ -69,14 +69,14 @@ public final class SingleStageData {
 
     /** 这一格是不是某种物品。 */
     public boolean is(int index, Item item) {
-        return stack(index).isOf(item);
+        return stack(index).is(item);
     }
 
     /** 整份物品栏里某种物品一共多少个。 */
     public int count(Item item) {
         int total = 0;
         for (ItemStack stack : inventory) {
-            if (!stack.isEmpty() && stack.isOf(item)) total += stack.getCount();
+            if (!stack.isEmpty() && stack.is(item)) total += stack.getCount();
         }
         return total;
     }
@@ -139,7 +139,7 @@ public final class SingleStageData {
     public int boxCount(BlockPos pos, Item item) {
         int total = 0;
         for (ItemStack stack : box(pos)) {
-            if (stack.isOf(item)) total += stack.getCount();
+            if (stack.is(item)) total += stack.getCount();
         }
         return total;
     }
@@ -166,7 +166,7 @@ public final class SingleStageData {
     // ------------------------------------------------------------------
 
     public static String idOf(ItemStack stack) {
-        return stack.isEmpty() ? "空" : Registries.ITEM.getId(stack.getItem()).toString();
+        return stack.isEmpty() ? "空" : BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
     }
 
     /** 从物品自带的组件里读潜影盒内容（不用打开就能读）。 */
@@ -175,11 +175,11 @@ public final class SingleStageData {
     }
 
     /** 读界面里这个容器的全部非空格子。 */
-    public static List<ItemStack> contentsOf(ScreenHandler handler) {
+    public static List<ItemStack> contentsOf(AbstractContainerMenu handler) {
         List<ItemStack> result = new ArrayList<>();
         for (Slot slot : InventoryUtils.containerSlots(handler)) {
-            if (slot.getStack().isEmpty()) continue;
-            result.add(slot.getStack().copy());
+            if (slot.getItem().isEmpty()) continue;
+            result.add(slot.getItem().copy());
         }
         return result;
     }
