@@ -45,6 +45,9 @@ import java.util.List;
  *
  * <p>{@code inspected} 是 {@code /pc mine task <task_name> b_inspect_region} 写进去的：检查通过才是 {@code true}，
  * 每次 {@code a_set_region} 都会重置成 {@code false}。
+ *
+ * <p>{@code checked} 是 {@code c_station_check}（跑一遍 {@code /pc mine station check}）通过之后
+ * 才写进去的 {@code true}；没通过这个字段直接不写（{@code null} 时 Gson 会省略）。
  */
 public final class MineTaskRegion {
 
@@ -67,6 +70,14 @@ public final class MineTaskRegion {
     private int y2;
     private int z2;
     private boolean inspected;
+
+    /**
+     * {@code c_station_check} 通过之后才有值：{@code true} = 挖掘站检查通过。
+     *
+     * <p>用 {@link Boolean} 而不是 {@code boolean}：没过就是 {@code null}，Gson 不会写出这个字段
+     * —— 需求要的是「通过才加 {@code "checked": true}，否则不加」。
+     */
+    private Boolean checked;
 
     /** 建一个区域（两个角必须已经满足 {@link #validate}；{@code inspected} 从 false 开始）。 */
     public static MineTaskRegion of(String dimension,
@@ -189,6 +200,16 @@ public final class MineTaskRegion {
         this.inspected = value;
     }
 
+    /** 挖掘站检查通过了没有（{@code c_station_check} 写的；没过就是 false，文件里也没有这个字段）。 */
+    public boolean checked() {
+        return checked != null && checked;
+    }
+
+    /** {@code true} = 写 {@code "checked": true}；{@code false} = 把这个字段去掉。 */
+    public void setChecked(boolean value) {
+        this.checked = value ? Boolean.TRUE : null;
+    }
+
     /** 这个方块在不在框里（端点算在里面）。 */
     public boolean contains(BlockPos pos) {
         return pos.getX() >= x1 && pos.getX() <= x2
@@ -210,6 +231,7 @@ public final class MineTaskRegion {
     public String describe() {
         return DimensionUtils.display(dimension) + " " + min().toShortString() + " ~ "
             + max().toShortString() + "，" + chunkCount() + " 个区块，"
-            + (inspected ? "§a已检查" : "§c未检查");
+            + (inspected ? "§a已检查" : "§c未检查")
+            + (checked() ? "§r，§a挖掘站已检查" : "");
     }
 }

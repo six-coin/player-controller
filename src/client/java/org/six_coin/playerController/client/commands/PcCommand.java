@@ -56,6 +56,7 @@ public final class PcCommand {
                 source.sendFeedback(Component.literal("§7  /" + name + " mine complex add_task|del_task <名字>、/" + name + " mine complex task <名字> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim> §8- §7复杂挖掘任务（记在 mine/mine.json，范围写在 mine/<名字>/region.json）"));
                 source.sendFeedback(Component.literal("§7  /" + name + " mine task <名字> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim> §8- §7写挖掘区（记在 mine/<名字>/region.json）"));
                 source.sendFeedback(Component.literal("§7  /" + name + " mine task <名字> b_inspect_region §8- §7检查挖掘区（入口在不在路径点图上、区域里有没有路、区块里的方块能不能挖）"));
+                source.sendFeedback(Component.literal("§7  /" + name + " mine task <名字> c_station_check §8- §7跑挖掘站检查（要求 inspected: true），通过就把 checked: true 写进 region.json"));
                 source.sendFeedback(Component.literal("§7  /" + name + " mine station ... §8- §7挖掘站：list、check（算落点 + 走过去开箱检查）、show、safe_point / food_provider / totem_provider / item_collector / tool_cache / slime_cache / cobblestone_cache / unloading_shulker_box_placement"));
                 source.sendFeedback(Component.literal("§7  /" + name + " mine debug_chunk_miner <detail> §8- §c【临时调试】§7挖掉下面那个子区块（detail 是必填 JSON：item_collector_list / north / south / west / east / bottom / levels）"));
                 source.sendFeedback(Component.literal("§7  /" + name + " waypoint ... §8- §7路径点 / 边 / 出生点"));

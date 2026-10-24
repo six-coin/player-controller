@@ -20,6 +20,8 @@ import org.six_coin.playerController.client.action.PathMoveAction;
 import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.container.InventoryUtils;
+import org.six_coin.playerController.client.mine.complex.MineComplexManager;
+import org.six_coin.playerController.client.mine.complex.MineTaskRegion;
 import org.six_coin.playerController.client.mine.MineTools;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
@@ -130,6 +132,23 @@ public class MineStationCheckAction extends Action {
     private final List<Target> targets = new ArrayList<>();
     private final List<Survey> surveys = new ArrayList<>();
     private final List<String> problems = new ArrayList<>();
+
+    /**
+     * 检查通过之后要把 {@code checked: true} 写回哪个任务的 {@code region.json}。
+     *
+     * <p>{@code null} = 不写（普通 {@code /pc mine station check} 就是这样）；
+     * {@code c_station_check} 会传任务名进来。
+     */
+    @Nullable
+    private final String checkedTask;
+
+    public MineStationCheckAction() {
+        this(null);
+    }
+
+    public MineStationCheckAction(@Nullable String checkedTask) {
+        this.checkedTask = checkedTask;
+    }
 
     private int index;
     private Stage stage = Stage.MOVING;
@@ -522,9 +541,13 @@ public class MineStationCheckAction extends Action {
 
         if (failureReason() != null) {
             for (String problem : problems) ChatUtils.error("  · " + problem);
+            writeChecked(false);
             return;
         }
-        if (!scannedAll) return;
+        if (!scannedAll) {
+            writeChecked(false);
+            return;
+        }
 
         validate();
 
@@ -532,6 +555,8 @@ public class MineStationCheckAction extends Action {
         Map<String, Integer> slime = boxTotals(MineStationPart.SLIME_CACHE);
         Map<String, Integer> cobble = boxTotals(MineStationPart.COBBLESTONE_CACHE);
         writeReport(file, slime, cobble);
+
+        writeChecked(problems.isEmpty());
 
         if (problems.isEmpty()) {
             output().info("挖掘站检查通过，报告已写到 " + file);
@@ -544,6 +569,33 @@ public class MineStationCheckAction extends Action {
             + slime.getOrDefault(RESIN_BLOCK, 0) + " 个（" + boxCount(MineStationPart.SLIME_CACHE)
             + " 盒）；圆石 " + cobble.getOrDefault(COBBLESTONE, 0) + " 个（"
             + boxCount(MineStationPart.COBBLESTONE_CACHE) + " 盒）");
+    }
+
+    /**
+     * 把检查结果写回任务的 {@code region.json}：通过 → {@code "checked": true}，没通过 → 去掉这个字段。
+     *
+     * <p>只有 {@code c_station_check} 会传任务名进来，普通的 {@code /pc mine station check} 不动 region.json。
+     */
+    private void writeChecked(boolean passed) {
+        if (checkedTask == null) return;
+
+        MineComplexManager manager = MineComplexManager.get();
+        MineTaskRegion region = manager.region(checkedTask);
+        if (region == null) {
+            ChatUtils.error("检查结果写不回 region.json：任务 " + checkedTask + " 没有区域");
+            return;
+        }
+        if (region.checked() == passed) return;
+
+        region.setChecked(passed);
+        try {
+            region.save(manager.currentRegionFile(checkedTask));
+            output().info(passed
+                ? "已把 checked: true 写进 " + manager.currentRegionFile(checkedTask)
+                : "这次没通过，region.json 里的 checked 已经去掉");
+        } catch (IOException e) {
+            ChatUtils.error("写 region.json 失败：" + e.getMessage());
+        }
     }
 
     /** 第 2 步的内容检查。 */

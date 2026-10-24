@@ -26,6 +26,7 @@ import org.six_coin.playerController.client.mine.MineRegion;
 import org.six_coin.playerController.client.mine.complex.MineComplexManager;
 import org.six_coin.playerController.client.mine.complex.MineRegionInspectAction;
 import org.six_coin.playerController.client.mine.complex.MineTaskRegion;
+import org.six_coin.playerController.client.mine.station.MineStationCheckAction;
 import org.six_coin.playerController.client.mine.complex.single.MineComplexSingleStageN;
 import org.six_coin.playerController.client.mine.complex.single.SingleStageDetail;
 import org.six_coin.playerController.client.util.DimensionUtils;
@@ -63,6 +64,7 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
  * /pc mine task &lt;task_name&gt; a_set_region &lt;x1&gt; &lt;y1&gt; &lt;z1&gt; &lt;x2&gt; &lt;y2&gt; &lt;z2&gt; &lt;dim&gt;
  *                                            写 region.json（范围原样记下，inspected = false）
  * /pc mine task &lt;task_name&gt; b_inspect_region  检查这个任务的挖掘区
+ * /pc mine task &lt;task_name&gt; c_station_check   跑一遍 /pc mine station check，通过就写 checked: true
  *                                            （{@code /pc mine complex task <task_name> …} 是同一套）
  * </pre>
  *
@@ -402,6 +404,8 @@ public final class MineCommand {
         source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "task <task_name> b_inspect_region§7 - 检查挖掘区（路径点 / 安全点 / 区块里的方块）"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
+            + "task <task_name> c_station_check§7 - 跑挖掘站检查，通过就写 checked: true"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "debug_chunk_miner <detail>§7 - §c【临时调试】§7挖掉下面那个子区块（detail 是必填的 JSON）"));
         source.sendFeedback(Component.literal("§7    §8例：§f{\"item_collector_list\":[\"minecraft:coal\"],"
             + "\"north\":\"cobblestone\",\"south\":\"cobblestone\",\"west\":\"auto\",\"east\":\"auto\","
@@ -458,6 +462,51 @@ public final class MineCommand {
         source.sendFeedback(Component.literal("§7  先查路径点（入口 + 安全点 + 区域里不能有路），"
             + "再逐个区块扫 y " + region.min().getY() + " ~ " + region.max().getY()
             + "（没加载的区块会等着）"));
+        source.sendFeedback(Component.literal("§e提醒：开始挖之前先做伪和平（把刷怪压住），"
+            + "否则会经常被怪物打断 —— 效率降低、图腾消耗变多、风险提高。"));
+        return 1;
+    }
+
+    /**
+     * {@code /pc mine task <task_name> c_station_check}：跑一遍 {@code /pc mine station check}，
+     * 通过的话把 {@code "checked": true} 写进这个任务的 {@code region.json}。
+     *
+     * <p>前置要求：{@code region.json} 里 {@code inspected} 必须是 {@code true}
+     * （先跑 {@code b_inspect_region}）。
+     */
+    private static int stationCheck(CommandContext<FabricClientCommandSource> context, String name) {
+        FabricClientCommandSource source = context.getSource();
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
+            return 0;
+        }
+
+        MineComplexManager manager = MineComplexManager.get();
+        if (!manager.has(name)) {
+            source.sendError(Component.literal("没有这个挖掘任务：" + name
+                + "（先 " + ROOT + "complex add_task " + name + "）"));
+            return 0;
+        }
+
+        MineTaskRegion region = manager.region(name);
+        if (region == null) {
+            source.sendError(Component.literal("挖掘任务 " + name + " 还没设区域（"
+                + ROOT + "task " + name + " a_set_region …）"));
+            return 0;
+        }
+
+        if (!region.inspected()) {
+            source.sendError(Component.literal("任务 " + name + " 的 region.json 里 inspected 还不是 true"
+                + " —— 先跑 " + ROOT + "task " + name + " b_inspect_region"));
+            return 0;
+        }
+
+        ActionManager.get().submit(new MineStationCheckAction(name));
+        source.sendFeedback(Component.literal("开始检查挖掘站（任务 §f" + name + "§r）：先给每个容器算落点，"
+            + "再按路径图一个接一个走过去开箱（不显示界面，会走很久）"));
+        source.sendFeedback(Component.literal("§7  通过的话会把 checked: true 写进 "
+            + manager.currentRegionFile(name) + "；没通过就不写"));
         return 1;
     }
 
@@ -534,6 +583,8 @@ public final class MineCommand {
             + "task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "task <task_name> b_inspect_region§7 - 检查挖掘区"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
+            + "task <task_name> c_station_check§7 - 跑挖掘站检查，通过就写 checked: true"));
         source.sendFeedback(Component.literal("§7    §8（`complex task <task_name> ...` 是同一套，两种写法都行）"));
         source.sendFeedback(Component.literal("  文件: " + manager.currentFile()));
     }
@@ -630,6 +681,9 @@ public final class MineCommand {
                 .then(ClientCommands.literal("a_set_region").then(x1))
                 .then(ClientCommands.literal("b_inspect_region")
                     .executes(context -> inspectRegion(context,
+                        StringArgumentType.getString(context, "task_name"))))
+                .then(ClientCommands.literal("c_station_check")
+                    .executes(context -> stationCheck(context,
                         StringArgumentType.getString(context, "task_name")))));
     }
 
@@ -664,9 +718,12 @@ public final class MineCommand {
             + region.chunkCount() + " 个区块）"));
         source.sendFeedback(Component.literal("  入口（x1, y2+1, z1）: "
             + region.headPos().toShortString()));
-        source.sendFeedback(Component.literal("  inspected: " + region.inspected()));
+        source.sendFeedback(Component.literal("  inspected: " + region.inspected()
+            + "，checked: " + region.checked()));
         source.sendFeedback(Component.literal("§7  §f" + ROOT + "task " + name
             + " b_inspect_region§7 - 检查这个区域"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "task " + name
+            + " c_station_check§7 - 跑挖掘站检查（要先 inspected: true）"));
         source.sendFeedback(Component.literal("  文件: " + manager.currentRegionFile(name)));
         return 1;
     }
@@ -726,7 +783,6 @@ public final class MineCommand {
             + region.chunkCount() + " 个区块）"));
         source.sendFeedback(Component.literal("  入口（x1, y2+1, z1）: " + region.headPos().toShortString()));
         source.sendFeedback(Component.literal("§7  下一步：§f" + ROOT + "task " + name
-            + " b_inspect_region§7；文件：" + file));
-        return 1;
+            + " b_inspect_region§7；文件：" + file));        return 1;
     }
 }
