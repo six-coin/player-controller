@@ -33,14 +33,17 @@ import java.util.Set;
  * <p>分三关，任何一关不过就失败（不写 {@code inspected}）：
  * <ol>
  *   <li><b>入口</b>：{@code (x1, y2+1, z1)}（区域正上方那个角）必须在路径点网络里
- *       —— 要么正好是个路径点，要么压在某条走路边上；而且从安全点能走过去。
+ *       —— 要么正好是个路径点，要么压在某条走路边上；而且和安全点<b>双向都能走</b>
+ *       （过去回不来也算不通）。
  *       安全点见 {@code /pc mine station safe_point}，它本身也必须在网络里。</li>
  *   <li><b>区域里不能有路</b>：{@code x1 y1 z1 ~ x2 y2 z2} 里不能有任何路径点、
  *       也不能有任何边经过（挖掉就把路断了）。</li>
  *   <li><b>方块</b>：把区域按区块（16×16×世界高度 那种，不是子区块）切开，逐个区块扫
  *       {@code y1 ~ y2}：只要出现「不能挖」的方块就失败。能不能挖按当前的过滤器算
  *       （{@link MineFilterConfig}：黑名单模式 = 在黑名单里，白名单模式 = 不在白名单里；
- *       空气不算）。</li>
+ *       空气不算）。<br>
+ *       每个区块还要看<b>区域正上方那一层子区块</b>（{@code y2+1 ~ y2+16}）：必须每一个方块
+ *       都是空气，否则也失败（那一层是机器占的地方）。</li>
  * </ol>
  *
  * <p>区块只有加载了才读得到方块，所以第 3 关是<b>等</b>着扫的：每 tick 把还没扫的区块过一遍，
@@ -159,15 +162,21 @@ public class MineRegionInspectAction extends Action {
             }
         }
 
-        // 走的方向：安全点 -> 入口（去干活走的是这个方向）；反方向走不通不算错，只是提一句
+        // 双向都得走得通：安全点 <-> 入口。只能过去回不来（单向边）也算不通。
         if (!headNodes.isEmpty() && !safeNodes.isEmpty()) {
             Set<Integer> fromSafe = graph.reachableFrom(safeNodes);
+            Set<Integer> fromHead = graph.reachableFrom(headNodes);
             boolean forward = headNodes.stream().anyMatch(fromSafe::contains);
-            if (!forward) {
-                Set<Integer> fromHead = graph.reachableFrom(headNodes);
-                boolean backward = safeNodes.stream().anyMatch(fromHead::contains);
-                problems.add("从安全点 " + safe.describe() + " 走不到入口 " + head.toShortString()
-                    + (backward ? "（反过来从入口能走到安全点：单向边，方向反了）" : ""));
+            boolean backward = safeNodes.stream().anyMatch(fromHead::contains);
+
+            if (!forward && !backward) {
+                problems.add("安全点 " + safe.describe() + " 和入口 " + head.toShortString()
+                    + " 互相都走不到");
+            } else if (!forward) {
+                problems.add("从安全点 " + safe.describe() + " 走不到入口 " + head.toShortString());
+            } else if (!backward) {
+                problems.add("从入口 " + head.toShortString() + " 走不回安全点 " + safe.describe()
+                    + "（单向边）");
             }
         }
 
@@ -266,9 +275,16 @@ public class MineRegionInspectAction extends Action {
 
             Hit hit = scanChunk(mc.level, cx, cz);
             if (hit != null) {
-                fail("区块 [" + cx + ", " + cz + "] 的 y " + region.min().getY() + " ~ "
-                    + region.max().getY() + " 里有不能挖的方块：" + hit.blockId()
-                    + " @ " + hit.pos().toShortString());
+                if (hit.headRoom()) {
+                    fail("区块 [" + cx + ", " + cz + "] 上方那一层子区块（y "
+                        + (region.max().getY() + 1) + " ~ " + (region.max().getY() + 16)
+                        + "）必须整层都是空气，但那里有 " + hit.blockId()
+                        + " @ " + hit.pos().toShortString());
+                } else {
+                    fail("区块 [" + cx + ", " + cz + "] 的 y " + region.min().getY() + " ~ "
+                        + region.max().getY() + " 里有不能挖的方块：" + hit.blockId()
+                        + " @ " + hit.pos().toShortString());
+                }
                 return;
             }
 
@@ -299,13 +315,17 @@ public class MineRegionInspectAction extends Action {
         LevelChunk chunk = level.getChunk(cx, cz);
         if (chunk == null) return null;
 
+        LevelChunkSection[] sections = chunk.getSections();
+
+        // 先看区域正上方那一层子区块（y2+1 ~ y2+16）：必须整层都是空气
+        Hit head = scanHeadRoom(level, sections, cx, cz);
+        if (head != null) return head;
+
         int minSectionY = level.getMinSectionY();
         int maxSectionY = minSectionY + level.getSectionsCount() - 1;
         int fromY = Math.max(region.min().getY(), minSectionY * 16);
         int toY = Math.min(region.max().getY(), maxSectionY * 16 + 15);
         if (fromY > toY) return null;
-
-        LevelChunkSection[] sections = chunk.getSections();
 
         for (int sectionY = fromY >> 4; sectionY <= (toY >> 4); sectionY++) {
             int index = level.getSectionIndexFromSectionY(sectionY);
@@ -321,14 +341,55 @@ public class MineRegionInspectAction extends Action {
             int lo = Math.max(fromY, baseY);
             int hi = Math.min(toY, baseY + 15);
 
+            // 区块可能比区域宽（区域不按区块对齐的时候），只看区域盖住的那部分
+            int x0 = Math.max(region.min().getX(), cx << 4);
+            int x1 = Math.min(region.max().getX(), (cx << 4) + 15);
+            int z0 = Math.max(region.min().getZ(), cz << 4);
+            int z1 = Math.min(region.max().getZ(), (cz << 4) + 15);
+
             for (int y = lo; y <= hi; y++) {
-                for (int lx = 0; lx < 16; lx++) {
-                    for (int lz = 0; lz < 16; lz++) {
-                        BlockState state = section.getBlockState(lx, y & 15, lz);
+                for (int x = x0; x <= x1; x++) {
+                    for (int z = z0; z <= z1; z++) {
+                        BlockState state = section.getBlockState(x & 15, y & 15, z & 15);
                         if (!forbidden(state)) continue;
-                        return new Hit(new BlockPos((cx << 4) + lx, y, (cz << 4) + lz),
-                            BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+                        return new Hit(new BlockPos(x, y, z),
+                            BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), false);
                     }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 区域正上方那一层子区块（{@code y2+1 ~ y2+16}，正好是 16 格高）必须全是空气。
+     *
+     * <p>那一层是机器自己占的地方（也是 {@code b_inspect_region} 的入口），有方块就没法开工。
+     *
+     * @return 第一个不是空气的方块；整层都是空气返回 null
+     */
+    @Nullable
+    private Hit scanHeadRoom(ClientLevel level, LevelChunkSection[] sections, int cx, int cz) {
+        int baseY = region.max().getY() + 1;          // a_set_region 保证了它是 16 的倍数
+        int index = level.getSectionIndexFromSectionY(baseY >> 4);
+        if (index < 0 || index >= sections.length) return null;
+
+        LevelChunkSection section = sections[index];
+        if (section == null || section.hasOnlyAir()) return null;
+
+        // 区块可能比区域宽（区域不按区块对齐的时候），只看区域盖住的那部分
+        int x0 = Math.max(region.min().getX(), cx << 4);
+        int x1 = Math.min(region.max().getX(), (cx << 4) + 15);
+        int z0 = Math.max(region.min().getZ(), cz << 4);
+        int z1 = Math.min(region.max().getZ(), (cz << 4) + 15);
+
+        for (int y = baseY; y <= baseY + 15; y++) {
+            for (int x = x0; x <= x1; x++) {
+                for (int z = z0; z <= z1; z++) {
+                    BlockState state = section.getBlockState(x & 15, y & 15, z & 15);
+                    if (state.isAir()) continue;
+                    return new Hit(new BlockPos(x, y, z),
+                        BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), true);
                 }
             }
         }
@@ -374,7 +435,11 @@ public class MineRegionInspectAction extends Action {
         return ((long) cx << 32) | (cz & 0xFFFFFFFFL);
     }
 
-    /** 扫到的一个「不能挖」的方块。 */
-    private record Hit(BlockPos pos, String blockId) {
+    /**
+     * 扫到的一个方块。
+     *
+     * @param headRoom true = 区域正上方那一层（要求是空气）；false = 区域里面（要求能挖）
+     */
+    private record Hit(BlockPos pos, String blockId, boolean headRoom) {
     }
 }

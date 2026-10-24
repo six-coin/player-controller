@@ -105,11 +105,18 @@ public final class ContainerItemsExporter {
                     + " 在边上，已新建路径点 #" + accessNode.id());
             }
 
+            // 双向都要走得通：只能过去回不来的容器不能算「能拿到」（走过去就被困在那儿了）
             List<Waypoint> path = graph.shortestPath(start.id(), accessNode.id());
             if (path == null) {
                 ChatUtils.debug("容器 #" + container.id() + " 的落点 #" + accessNode.id() + " "
                     + accessPos.toShortString() + "（" + DimensionUtils.display(container.dimension())
                     + "）从这里走不到，跳过");
+                continue;
+            }
+            if (graph.shortestPath(accessNode.id(), start.id()) == null) {
+                ChatUtils.debug("容器 #" + container.id() + " 的落点 #" + accessNode.id() + " "
+                    + accessPos.toShortString() + "（" + DimensionUtils.display(container.dimension())
+                    + "）到了回不来（单向边），跳过");
                 continue;
             }
             int cost = graph.pathCost(path);

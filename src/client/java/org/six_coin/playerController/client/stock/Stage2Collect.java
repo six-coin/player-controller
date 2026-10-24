@@ -22,6 +22,7 @@ import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.ItemList;
 import org.six_coin.playerController.client.util.ShulkerUtils;
 import org.six_coin.playerController.client.waypoint.Waypoint;
+import org.six_coin.playerController.client.waypoint.WaypointGraph;
 import org.six_coin.playerController.client.waypoint.WaypointManager;
 
 import java.nio.charset.StandardCharsets;
@@ -32,6 +33,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 取货这一步的实现：第一部分阶段2（{@link Part1Stage2Collect}）和第二部分阶段2
@@ -301,7 +303,10 @@ abstract class Stage2Collect extends StockStep {
             return;
         }
 
-        Map<Integer, Double> dist = WaypointManager.get().graph().distancesFrom(here.id());
+        WaypointGraph graph = WaypointManager.get().graph();
+        Map<Integer, Double> dist = graph.distancesFrom(here.id());
+        // 双向可达才去：只能过去回不来的容器不算（走过去就被困在那儿了）
+        Set<Integer> backToHere = graph.reachableTo(List.of(here.id()));
 
         Integer bestId = null;
         Waypoint bestNode = null;
@@ -310,13 +315,18 @@ abstract class Stage2Collect extends StockStep {
             NeedEntry entry = entries.get(id);
             if (entry == null) continue;
 
-            Waypoint node = WaypointManager.get().graph().at(entry.dimension(), entry.accessPos());
+            Waypoint node = graph.at(entry.dimension(), entry.accessPos());
             if (node == null) {
                 ChatUtils.debug("容器 #" + id + " 的落点不是路径点，跳过");
                 continue;
             }
             Double cost = dist.get(node.id());
             if (cost == null || cost >= bestCost) continue;
+            if (!backToHere.contains(node.id())) {
+                ChatUtils.debug("容器 #" + id + " 的落点 #" + node.id()
+                    + " 到了回不来（单向边），跳过");
+                continue;
+            }
 
             bestCost = cost;
             bestId = id;
@@ -324,7 +334,7 @@ abstract class Stage2Collect extends StockStep {
         }
 
         if (bestId == null || bestNode == null) {
-            fail("剩下的 " + needList.size() + " 个容器从当前位置都走不到");
+            fail("剩下的 " + needList.size() + " 个容器从当前位置都走不到（要求来回都能走）");
             return;
         }
 

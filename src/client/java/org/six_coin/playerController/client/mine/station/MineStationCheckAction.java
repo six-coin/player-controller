@@ -265,9 +265,9 @@ public class MineStationCheckAction extends Action {
             addProblem(describe(part, place) + " 的落点 " + access.toShortString() + " 建不成路径点");
             return false;
         }
-        if (graph.shortestPath(safeNode.id(), node.id()) == null) {
+        if (!graph.connectedBothWays(safeNode.id(), node.id())) {
             addProblem(describe(part, place) + " 的落点 " + access.toShortString()
-                + " 从安全点走不到 —— 不在路径点的可达范围内");
+                + " 和安全点不是双向可达 —— 过去 / 回来有一个方向走不通");
             return false;
         }
         return true;

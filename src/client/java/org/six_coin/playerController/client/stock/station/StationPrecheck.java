@@ -164,8 +164,10 @@ public final class StationPrecheck {
             if (above == null) {
                 problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面那一格 "
                     + pos.above().toShortString() + " 还不是路径点");
-            } else if (standNode != null && graph.shortestPath(standNode.id(), above.id()) == null) {
-                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面那一格从站立点走不到");
+            } else if (standNode != null && !graph.connectedBothWays(standNode.id(), above.id())) {
+                // 必须来回都能走：只能过去回不来的点，走过去就被困在那儿了
+                problems.add("潜影盒摆放处 " + stationPos.coordString() + " 上面那一格和站立点不是双向可达"
+                    + "（过去 / 回来有一个方向走不通）");
             }
         }
 

@@ -63,7 +63,9 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
  * /pc mine complex del_task &lt;task_name&gt;      删任务（整个 mine/&lt;task&gt;/ 目录一起删）
  * /pc mine complex task &lt;task_name&gt; a_set_region &lt;x1&gt; &lt;y1&gt; &lt;z1&gt; &lt;x2&gt; &lt;y2&gt; &lt;z2&gt; &lt;dim&gt;
  *                                            写 region.json（范围原样记下，inspected = false）
- * /pc mine b_inspect_region [task_name]      检查 region.json 记的那个范围
+ * /pc mine complex task &lt;task_name&gt; b_inspect_region
+ *                                            检查这个任务的挖掘区（下面那个不带任务名的写法是同一件事）
+ * /pc mine b_inspect_region [task_name]      同上，任务名可以省
  * </pre>
  *
  * <p>simple 的范围会记进 {@code world_<n>/mine.json}，重新进世界自动接回来
@@ -563,6 +565,9 @@ public final class MineCommand {
             + "complex add_task|del_task <task_name>§7 - 建 / 删任务"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT
             + "complex task <task_name> a_set_region <x1> <y1> <z1> <x2> <y2> <z2> <dim>§7 - 写挖掘区"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
+            + "complex task <task_name> b_inspect_region§7 - 检查挖掘区（也可以 §f" + ROOT
+            + "b_inspect_region <task_name>§7）"));
         source.sendFeedback(Component.literal("  文件: " + manager.currentFile()));
     }
 
@@ -655,7 +660,10 @@ public final class MineCommand {
             .then(ClientCommands.argument("task_name", StringArgumentType.word())
                 .suggests(MineCommand::suggestTasks)
                 .executes(MineCommand::taskStatus)
-                .then(ClientCommands.literal("a_set_region").then(x1)));
+                .then(ClientCommands.literal("a_set_region").then(x1))
+                .then(ClientCommands.literal("b_inspect_region")
+                    .executes(context -> inspectRegion(context,
+                        StringArgumentType.getString(context, "task_name")))));
     }
 
     /** 补全 mine.json 里现有的任务名。 */
@@ -690,8 +698,9 @@ public final class MineCommand {
         source.sendFeedback(Component.literal("  入口（x1, y2+1, z1）: "
             + region.headPos().toShortString()));
         source.sendFeedback(Component.literal("  inspected: " + region.inspected()));
-        source.sendFeedback(Component.literal("§7  §f" + ROOT + "b_inspect_region " + name
-            + "§7 - 检查这个区域"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT + "complex task " + name
+            + " b_inspect_region§7 - 检查这个区域（也可以 §f" + ROOT
+            + "b_inspect_region " + name + "§7）"));
         source.sendFeedback(Component.literal("  文件: " + manager.currentRegionFile(name)));
         return 1;
     }

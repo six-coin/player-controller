@@ -297,6 +297,48 @@ public final class WaypointGraph {
         return seen;
     }
 
+    /**
+     * 反过来问：从哪些路径点出发能走到这些点（含它们自己）。
+     *
+     * <p>就是把边反过来走一遍 BFS：双向边两个方向都算，单向边只算 {@code to -> from}。
+     * 和 {@link #reachableFrom} 配对用 —— 「我能不能走过去」+「我能不能走回来」= 双向可达。
+     */
+    public Set<Integer> reachableTo(Collection<Integer> targets) {
+        Map<Integer, Set<Integer>> reverse = new HashMap<>();
+        for (Edge edge : edges.values()) {
+            reverse.computeIfAbsent(edge.to(), key -> new LinkedHashSet<>()).add(edge.from());
+            if (edge.bi()) {
+                reverse.computeIfAbsent(edge.from(), key -> new LinkedHashSet<>()).add(edge.to());
+            }
+        }
+
+        Set<Integer> seen = new LinkedHashSet<>();
+        Deque<Integer> queue = new ArrayDeque<>();
+        for (int id : targets) {
+            if (waypoints.containsKey(id) && seen.add(id)) queue.add(id);
+        }
+        while (!queue.isEmpty()) {
+            int id = queue.poll();
+            for (int previous : reverse.getOrDefault(id, Set.of())) {
+                if (seen.add(previous)) queue.add(previous);
+            }
+        }
+        return seen;
+    }
+
+    /**
+     * 两个点是不是<b>双向都走得通</b>（{@code a -> b} 和 {@code b -> a} 都有路）。
+     *
+     * <p>单向边（出生点那条、末地传送门那条）只满足一个方向，所以这里会判成不通 ——
+     * 「能过去但回不来」的地方不该被当成可达。
+     */
+    public boolean connectedBothWays(int a, int b) {
+        if (get(a) == null || get(b) == null) return false;
+        if (a == b) return true;
+        if (!reachableFrom(List.of(a)).contains(b)) return false;
+        return reachableFrom(List.of(b)).contains(a);
+    }
+
     /** 找一条能从 from 走到 to 的边（返回它的编号）。 */
     @Nullable
     public Integer findEdge(int from, int to) {

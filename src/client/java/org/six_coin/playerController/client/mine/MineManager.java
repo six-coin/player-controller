@@ -10,6 +10,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -174,6 +176,19 @@ public final class MineManager {
     private boolean hotbarHeld;
     private boolean rotateHeld;
 
+    /**
+     * 这一份任务是不是临时的（{@link #startTransient} 起的）。
+     *
+     * <p>临时任务不自动取消：复杂挖掘靠「没东西可挖」这个状态推进流程，自己 cancel 会把它卡死。
+     */
+    private boolean transientTask;
+
+    /** 连续几 tick 没东西可挖了（见 {@link #maybeAutoCancel}）。 */
+    private int emptyTicks;
+
+    /** 连续这么多 tick 没东西可挖，才开始看「整个区域是不是空了」。 */
+    private static final int CLEAR_SETTLE_TICKS = 20;
+
     private MineManager() {
     }
 
@@ -222,6 +237,8 @@ public final class MineManager {
         this.lastTickCount = 0;
         this.switchCooldown = 0;
         this.gravityGuard = false;
+        this.transientTask = false;
+        this.emptyTicks = 0;
         MineComplexManager.get().setSimple(MineComplexData.SimpleRegion.of(region));
         ChatUtils.debug("开始挖掘任务：" + region.describe());
     }
@@ -252,6 +269,8 @@ public final class MineManager {
         this.lastTickCount = 0;
         this.switchCooldown = 0;
         this.gravityGuard = gravityGuard;
+        this.transientTask = true;
+        this.emptyTicks = 0;
         ChatUtils.debug("开始临时挖掘任务（不写 mine.json"
             + (gravityGuard ? "，开重力方块保护" : "") + "）：" + region.describe());
     }
@@ -459,6 +478,8 @@ public final class MineManager {
         lastTickCount = 0;
         switchCooldown = 0;
         gravityGuard = false;
+        transientTask = false;
+        emptyTicks = 0;
         release();
         return true;
     }
@@ -472,6 +493,8 @@ public final class MineManager {
         lastTickCount = 0;
         switchCooldown = 0;
         gravityGuard = false;
+        transientTask = false;
+        emptyTicks = 0;
         debugToolPolicy = false;
         MineTools.clearCache();
         release();
@@ -570,6 +593,7 @@ public final class MineManager {
             clearTarget();
             release();
             setState(State.NO_BLOCKS);
+            maybeAutoCancel(mc);
             return;
         }
 
@@ -676,6 +700,7 @@ public final class MineManager {
             setState(State.MINING);
         } else {
             setState(State.NO_BLOCKS);
+            maybeAutoCancel(mc);
         }
     }
 
@@ -748,9 +773,100 @@ public final class MineManager {
 
     /** 状态变了才打一行调试日志（每 tick 都打就太吵了）。 */
     private void setState(State next) {
+        // 「没东西可挖」只要断一次就重新数：中间挖到过东西 / 走开过，都不算连续空转
+        if (next != State.NO_BLOCKS) emptyTicks = 0;
         if (state == next) return;
         ChatUtils.debug("挖掘：" + state.text() + " → " + next.text());
         state = next;
+    }
+
+    // ------------------------------------------------------------------
+    // 挖空了就自己收工
+    // ------------------------------------------------------------------
+
+    /**
+     * 连续 {@value #CLEAR_SETTLE_TICKS} tick 没东西可挖之后，看一眼整个区域是不是已经清空；
+     * 是的话就当玩家执行了 {@code /pc mine cancel}。
+     *
+     * <p>只在 {@code /pc mine simple}（{@link #start}）上做：复杂挖掘是 {@link #startTransient}
+     * 起的，它靠 {@code NO_BLOCKS} 这个状态推进流程，自己 cancel 会把调用方卡死。
+     *
+     * <p>「清空」= 区域里已经没有这个任务会挖的方块（空气、水 / 熔岩、挖不动的、过滤器不要的
+     * 都不算），而且盖住区域的所有区块都加载了 —— 没加载就不知道那边还有没有东西，不动。
+     */
+    private void maybeAutoCancel(Minecraft mc) {
+        if (transientTask) return;
+        if (region == null) return;
+
+        if (++emptyTicks < CLEAR_SETTLE_TICKS) return;
+        emptyTicks = 0;
+
+        if (!regionCleared(mc)) return;
+
+        ChatUtils.info("挖掘区已经清空（" + region.describe() + "），自动取消挖掘任务");
+        cancel();
+    }
+
+    /**
+     * 区域里还有没有「这个任务会挖的方块」。
+     *
+     * <p>整块区域都加载了才回答 yes / no；有一个区块没加载就返回 false（不知道）。
+     * 先用 {@link LevelChunkSection#hasOnlyAir()} 快速跳过空的子区块，只在
+     * 有东西的（以及跨在区域边界上的）子区块里逐格看。
+     */
+    private boolean regionCleared(Minecraft mc) {
+        MineRegion target = region;
+        ClientLevel level = mc.level;
+        if (target == null || level == null) return false;
+        if (!target.dimension().equals(DimensionUtils.current())) return false;
+
+        BlockPos min = target.min();
+        BlockPos max = target.max();
+        int minSectionY = level.getMinSectionY();
+        int maxSectionY = minSectionY + level.getSectionsCount() - 1;
+
+        int fromSectionY = Math.max(min.getY() >> 4, minSectionY);
+        int toSectionY = Math.min(max.getY() >> 4, maxSectionY);
+
+        for (int cx = min.getX() >> 4; cx <= max.getX() >> 4; cx++) {
+            for (int cz = min.getZ() >> 4; cz <= max.getZ() >> 4; cz++) {
+                if (!level.hasChunk(cx, cz)) return false;
+
+                LevelChunk chunk = level.getChunk(cx, cz);
+                if (chunk == null) return false;
+                LevelChunkSection[] sections = chunk.getSections();
+
+                int x0 = Math.max(min.getX(), cx << 4);
+                int x1 = Math.min(max.getX(), (cx << 4) + 15);
+                int z0 = Math.max(min.getZ(), cz << 4);
+                int z1 = Math.min(max.getZ(), (cz << 4) + 15);
+
+                for (int sectionY = fromSectionY; sectionY <= toSectionY; sectionY++) {
+                    int index = level.getSectionIndexFromSectionY(sectionY);
+                    if (index < 0 || index >= sections.length) continue;
+
+                    LevelChunkSection section = sections[index];
+                    if (section == null || section.hasOnlyAir()) continue;
+
+                    int baseY = sectionY * 16;
+                    int lo = Math.max(min.getY(), baseY);
+                    int hi = Math.min(max.getY(), baseY + 15);
+
+                    for (int y = lo; y <= hi; y++) {
+                        for (int x = x0; x <= x1; x++) {
+                            for (int z = z0; z <= z1; z++) {
+                                BlockState state = section.getBlockState(x & 15, y & 15, z & 15);
+                                if (breakable(level, new BlockPos(x, y, z), state)
+                                    && target.filter().allows(state.getBlock())) {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     // ------------------------------------------------------------------
