@@ -7,6 +7,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
@@ -51,8 +52,8 @@ import java.util.Set;
  * <p>三段（需求原文的顺序）：
  * <ol>
  *   <li><b>预检查</b>：人在安全点、对齐、region.json 的 {@code inspected} / {@code checked}、
- *       清空 mine simple、自动进食、物品栏空、关掉容器缓存、mending 站立点和安全点双向可达、
- *       读 {@code check.json} 当 {@code station_data}；</li>
+ *       清空 mine simple、自动进食、物品栏里正好是「快捷栏 9 个空潜影盒 + 背包第 1 格 1 个熔岩桶」、
+ *       关掉容器缓存、mending 站立点和安全点双向可达、读 {@code check.json} 当 {@code station_data}；</li>
  *   <li><b>准备物品栏</b>：按 {@link MineTaskKit} 去各个容器里拿货，凑成
  *       {@code debug_chunk_miner} 要求的那一套（工具、食物、图腾、圆石盒、黏液块盒、空盒、熔岩桶）；</li>
  *   <li><b>逐个区块挖</b>：区块按 x 再 z 从小到大排；每个区块从上往下找第一个没挖干净的子区块，
@@ -154,7 +155,7 @@ public class MineTaskMiningAction extends Action {
         ChatUtils.info("区块顺序：x 从小到大、z 从小到大，共 " + chunkStarts.size() + " 个；"
             + "挖掘区起始点 " + regionStart.toShortString());
 
-        run(MoveAction.alignToCenter(), this::beginPrepare);
+        run(MoveAction.alignToCenter(), this::startRearrange);
     }
 
     @Override
@@ -266,11 +267,11 @@ public class MineTaskMiningAction extends Action {
             ChatUtils.info("自动进食原本是关的，已经打开（/pc eat toggle 可以关掉）");
         }
 
-        // 7. 物品栏必须是空的（盔甲不算：盔甲穿在身上，耐久低了会去修）
-        List<String> occupied = occupiedSlots(player);
-        if (!occupied.isEmpty()) {
-            fail("物品栏不是空的（" + String.join("、", occupied) + "…）—— 先把东西放进"
-                + MineStationPart.INVENTORY_TEMP.display() + "再开始");
+        // 7. 物品栏：9 个空潜影盒（快捷栏 1~9）+ 1 个熔岩桶（背包 1），别的都不能有。
+        //    盔甲不算（穿在身上，耐久低了会去修）。搬到位在下面 startRearrange() 里做。
+        List<String> inventoryProblems = inventoryProblems(player);
+        if (!inventoryProblems.isEmpty()) {
+            fail("物品栏不对（" + inventoryProblems.size() + " 条）：" + String.join("；", inventoryProblems));
             return false;
         }
 
@@ -297,20 +298,47 @@ public class MineTaskMiningAction extends Action {
         return true;
     }
 
-    private List<String> occupiedSlots(LocalPlayer player) {
-        List<String> occupied = new ArrayList<>();
-        for (int slot = 0; slot <= 35; slot++) {
+    /**
+     * 开挖掘之前物品栏必须正好是：
+     * <ul>
+     *   <li>快捷栏 1~9：各一个<b>空潜影盒</b>（正好 9 个）；</li>
+     *   <li>背包 1：一个<b>熔岩桶</b>；背包 2~27 空着；</li>
+     *   <li>副手空着；盔甲不算。</li>
+     * </ul>
+     */
+    private List<String> inventoryProblems(LocalPlayer player) {
+        List<String> problems = new ArrayList<>();
+
+        for (int slot = 0; slot < 9; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!MineTaskKit.isEmptyBox(stack)) {
+                problems.add("快捷栏第 " + (slot + 1) + " 格不是空潜影盒（是 " + describe(stack) + "）");
+            }
+        }
+
+        ItemStack lava = player.getInventory().getItem(SingleStageCtx.SPARE_START);
+        if (!lava.is(Items.LAVA_BUCKET)) {
+            problems.add("背包第 1 格不是熔岩桶（是 " + describe(lava) + "）");
+        }
+
+        for (int slot = SingleStageCtx.SPARE_START + 1; slot <= 35; slot++) {
             ItemStack stack = player.getInventory().getItem(slot);
             if (stack.isEmpty()) continue;
-            occupied.add("第 " + slot + " 格 " + BuiltInRegistries.ITEM.getKey(stack.getItem())
-                + " x" + stack.getCount());
-            if (occupied.size() >= 5) break;
+            problems.add("背包第 " + (slot - SingleStageCtx.SPARE_START + 1) + " 格还有 "
+                + describe(stack) + "，要空着");
+            if (problems.size() >= 6) break;
         }
-        if (occupied.size() < 5 && !player.getInventory().getItem(MineTaskKit.OFFHAND).isEmpty()) {
-            ItemStack offhand = player.getInventory().getItem(MineTaskKit.OFFHAND);
-            occupied.add("副手 " + BuiltInRegistries.ITEM.getKey(offhand.getItem()));
+
+        ItemStack offhand = player.getInventory().getItem(MineTaskKit.OFFHAND);
+        if (!offhand.isEmpty()) {
+            problems.add("副手还有 " + describe(offhand) + "，要空着");
         }
-        return occupied;
+        return problems;
+    }
+
+    private static String describe(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return "空";
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()) + " x" + stack.getCount();
     }
 
     /** mending 站立点必须设了、而且和安全点双向可达。 */
@@ -355,6 +383,19 @@ public class MineTaskMiningAction extends Action {
     // ------------------------------------------------------------------
     // 第二阶段：备货
     // ------------------------------------------------------------------
+
+    /**
+     * 把玩家自带的 9 个空潜影盒（快捷栏 1~9）和熔岩桶（背包 1）挪到 debug_chunk_miner 要求的格子。
+     *
+     * <p>搬完快捷栏就空了 —— 后面备货要把工具放进快捷栏 1~5。
+     */
+    private void startRearrange() {
+        List<MineTaskInventoryMoveAction.Move> moves = new ArrayList<>();
+        moves.addAll(MineTaskKit.boxesToCollectSlots());
+        moves.addAll(MineTaskKit.lavaBucketMove());
+        ChatUtils.info("先把 9 个空潜影盒搬到背包 13~21、熔岩桶搬到背包 12");
+        run(new MineTaskInventoryMoveAction(moves), this::beginPrepare);
+    }
 
     private void beginPrepare() {
         phase = Phase.PREPARE;

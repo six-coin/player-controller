@@ -418,6 +418,16 @@ public final class MineTaskStationData {
         placementBoxes.put(placementKey(part, place), counts);
     }
 
+    /** 记下某个摆放处位置上那个盒子里有什么（按坐标；补货流程数完盒子之后调）。 */
+    public void recordPlacementBox(MineStationPart part, BlockPos pos, Map<String, Integer> contents) {
+        placementBoxes.put(part.id() + "||" + pos.asLong(), new LinkedHashMap<>(contents));
+    }
+
+    /** 某个摆放处位置上那个盒子里有什么（按坐标；没记过就是空 map）。 */
+    public Map<String, Integer> placementBox(MineStationPart part, BlockPos pos) {
+        return placementBoxes.getOrDefault(part.id() + "||" + pos.asLong(), Map.of());
+    }
+
     /** 盒子被拿走了（这个位置又空了）。 */
     public void clearPlacementBox(MineStationPart part, MinePlace place) {
         placementBoxes.remove(placementKey(part, place));

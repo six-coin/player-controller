@@ -14,6 +14,7 @@ import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
+import java.util.List;
 import java.util.function.Predicate;
 
 /**
@@ -37,6 +38,8 @@ public class MineTaskTakeAction extends Action {
     private final int targetSlot;
     private final Predicate<ItemStack> filter;
     private final String label;
+    /** {@code >= 0} = 只从容器里的这一格拿（按位置拿潜影盒时用）；{@code -1} = 按 filter 找。 */
+    private final int containerSlot;
 
     private final ContainerSession session;
 
@@ -68,8 +71,20 @@ public class MineTaskTakeAction extends Action {
      */
     public MineTaskTakeAction(MineTaskStationData.ContainerInfo container,
                               int targetSlot, Predicate<ItemStack> filter, String label) {
+        this(container, targetSlot, -1, filter, label);
+    }
+
+    /** 从容器里的**指定一格**拿（不看 filter，只看那一格非空）。 */
+    public MineTaskTakeAction(MineTaskStationData.ContainerInfo container,
+                              int targetSlot, int containerSlot, String label) {
+        this(container, targetSlot, containerSlot, stack -> true, label);
+    }
+
+    private MineTaskTakeAction(MineTaskStationData.ContainerInfo container, int targetSlot,
+                               int containerSlot, Predicate<ItemStack> filter, String label) {
         this.container = container;
         this.targetSlot = targetSlot;
+        this.containerSlot = containerSlot;
         this.filter = filter;
         this.label = label;
         this.session = new ContainerSession(container.pos());
@@ -232,7 +247,13 @@ public class MineTaskTakeAction extends Action {
 
     @Nullable
     private Slot findSource() {
-        for (Slot slot : InventoryUtils.containerSlots(session.handler())) {
+        List<Slot> slots = InventoryUtils.containerSlots(session.handler());
+        if (containerSlot >= 0) {
+            if (containerSlot >= slots.size()) return null;
+            Slot slot = slots.get(containerSlot);
+            return slot.getItem().isEmpty() ? null : slot;
+        }
+        for (Slot slot : slots) {
             ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
             if (filter.test(stack)) return slot;

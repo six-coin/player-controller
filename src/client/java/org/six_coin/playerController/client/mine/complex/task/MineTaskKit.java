@@ -27,7 +27,7 @@ import java.util.function.Predicate;
  *
  * <p>格子编号和 {@link SingleStageCtx} 里那套常量一致（{@code PlayerInventory} 下标）：
  * <pre>
- *   0~4    快捷栏 1~5：剑 镐 斧 铲 锄（可用）
+ *   0~4    快捷栏 1~5：剑 镐 斧 铲 锄（满耐久）
  *   5~7    快捷栏 6~8：空着
  *   8      快捷栏 9：熟猪排（≥16）
  *   9~13   背包 1~5：备用工具（耐久满）
@@ -38,6 +38,10 @@ import java.util.function.Predicate;
  *   30~35  背包 22~27：随便
  *   40     副手：不死图腾（先放 35，再换到副手）
  * </pre>
+ *
+ * <p><b>9 个空潜影盒和熔岩桶不用去站里拿</b>：开始挖掘前玩家身上必须已经带着
+ * （见 {@code MineTaskMiningAction} 的预检查），这里只负责把它们从「玩家摆的位置」
+ * 挪到上表那几格（{@link #boxesToCollectSlots()} / {@link #lavaBucketMove()}）。
  */
 public final class MineTaskKit {
 
@@ -112,25 +116,37 @@ public final class MineTaskKit {
         list.add(new Slot(SingleStageCtx.SLIME_BOX_FULL, "黏液块盒",
             MineStationPart.SLIME_CACHE, boxOf(slime, true, 0, FULL_BOX), null));
 
-        // 背包 12：熔岩桶（拆平台前烧垃圾用）—— 站里没有专门的桶，从任务前物品暂存处拿
-        list.add(new Slot(SingleStageCtx.LAVA_BUCKET, "熔岩桶", MineStationPart.ITEM_TEMP,
-            stack -> stack.is(Items.LAVA_BUCKET),
-            id -> id.equals("minecraft:lava_bucket")));
-
-        // 背包 13~21：9 个空潜影盒（收集用）
-        for (int i = 0; i < 9; i++) {
-            int index = SingleStageCtx.COLLECT_START + i;
-            list.add(new Slot(index, "空潜影盒", MineStationPart.EMPTY_SHULKER_BOX_RECYCLER,
-                stack -> ShulkerUtils.isShulkerBox(stack) && ShulkerUtils.contents(stack).isEmpty(),
-                id -> id.endsWith("shulker_box")));
-        }
-
         // 副手：不死图腾（先放背包 28，最后换过去）
         list.add(new Slot(TOTEM_STAGING, "不死图腾", MineStationPart.TOTEM_PROVIDER,
             stack -> stack.is(Items.TOTEM_OF_UNDYING),
             id -> id.equals("minecraft:totem_of_undying")));
 
         return list;
+    }
+
+    // ------------------------------------------------------------------
+    // 玩家自带的两样东西（预检查里已经验过位置）
+    // ------------------------------------------------------------------
+
+    /** 9 个空潜影盒：从快捷栏 1~9 搬到背包 13~21。 */
+    public static List<MineTaskInventoryMoveAction.Move> boxesToCollectSlots() {
+        List<MineTaskInventoryMoveAction.Move> moves = new ArrayList<>();
+        for (int i = 0; i < 9; i++) {
+            moves.add(new MineTaskInventoryMoveAction.Move(i, SingleStageCtx.COLLECT_START + i,
+                "空潜影盒 " + (i + 1) + " → 背包 " + (13 + i)));
+        }
+        return moves;
+    }
+
+    /** 熔岩桶：从背包 1 搬到背包 12。 */
+    public static List<MineTaskInventoryMoveAction.Move> lavaBucketMove() {
+        return List.of(new MineTaskInventoryMoveAction.Move(SingleStageCtx.SPARE_START,
+            SingleStageCtx.LAVA_BUCKET, "熔岩桶 → 背包 12"));
+    }
+
+    /** 一个潜影盒是不是「空的」。 */
+    public static boolean isEmptyBox(ItemStack stack) {
+        return ShulkerUtils.isShulkerBox(stack) && ShulkerUtils.contents(stack).isEmpty();
     }
 
     // ------------------------------------------------------------------

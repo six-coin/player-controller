@@ -102,6 +102,16 @@ public final class MendingManager {
 
     private static final MendingManager INSTANCE = new MendingManager();
 
+    /**
+     * 子动作的出口：{@code null} = 交给 {@link ActionManager}（正常 {@code /pc mend}）；
+     * 非 {@code null} = 交给外层动作（嵌着跑，见 {@link #start(boolean)}）。
+     */
+    @Nullable
+    private java.util.function.Consumer<Action> sink;
+
+    /** 上一次跑完是成功还是中止（{@link #lastResult()} 是给人看的文字）。 */
+    private boolean lastOk = true;
+
     /** 现在跑到哪一步了（{@code /pc mend} 会显示）。 */
     public enum Stage {
 
@@ -210,6 +220,30 @@ public final class MendingManager {
         return stage;
     }
 
+    /** 设子动作出口（{@code null} = 恢复成交给 ActionManager）。 */
+    public void setSink(@Nullable java.util.function.Consumer<Action> value) {
+        this.sink = value;
+    }
+
+    /** 上一次跑完是成功（true）还是中止（false）。 */
+    public boolean lastOk() {
+        return lastOk;
+    }
+
+    /** 现在是不是有人在跑（嵌着跑的外层动作用）。 */
+    public boolean isRunning() {
+        return stage != Stage.IDLE;
+    }
+
+    /** 把子动作交给出口。 */
+    private void submitAction(Action action) {
+        if (sink != null) {
+            sink.accept(action);
+            return;
+        }
+        ActionManager.get().submit(action);
+    }
+
     public String lastResult() {
         return lastResult;
     }
@@ -266,6 +300,18 @@ public final class MendingManager {
      */
     @Nullable
     public String start() {
+        return start(false);
+    }
+
+    /**
+     * 开始 mending。
+     *
+     * @param allowBusy {@code true} = 允许在别的动作里嵌着跑（{@code d_start_mining} 的补货流程）。
+     *                  这时候移动 / 换物品的动作不交给 {@link ActionManager}，而是交给
+     *                  {@link #setSink(java.util.function.Consumer)} 设的那个出口，
+     *                  由外层动作当子动作驱动。
+     */
+    public String start(boolean allowBusy) {
         if (stage != Stage.IDLE) {
             return "mending 已经在跑了（现在：" + stage.text() + "）";
         }
@@ -302,8 +348,8 @@ public final class MendingManager {
             return "还没设站立点：/pc mend station stand_point set_here";
         }
 
-        // 5) 别的任务在跑就不掺和（移动和容器都是共用的）
-        if (ActionManager.get().isBusy()) {
+        // 5) 别的任务在跑就不掺和（移动和容器都是共用的）；嵌着跑的时候不管这条
+        if (!allowBusy && ActionManager.get().isBusy()) {
             Action busy = ActionManager.get().currentAction();
             return "现在还有别的任务在跑" + (busy == null ? "" : "（" + busy.name() + "）")
                 + "，等它跑完再开始";
@@ -377,6 +423,7 @@ public final class MendingManager {
 
         restoreAttack();
         lastResult = "中止：" + reason;
+        lastOk = false;
         clearRuntime();
     }
 
@@ -622,7 +669,7 @@ public final class MendingManager {
         MendingSwapAction action = new MendingSwapAction(pos);
         swapAction = action;
         stage = Stage.SWAP;
-        ActionManager.get().submit(action);
+        submitAction(action);
         // 结果由 mending 自己报（不然失败时动作和 mending 各打一行）
         action.setOutput(ResultOutput.SUBTASK);
 
@@ -759,6 +806,7 @@ public final class MendingManager {
     private void finish(String message) {
         ChatUtils.info("mending：" + message);
         lastResult = message;
+        lastOk = true;
         clearRuntime();
     }
 
@@ -790,7 +838,7 @@ public final class MendingManager {
         }
 
         PathMoveAction action = new PathMoveAction(plan.path());
-        ActionManager.get().submit(action);
+        submitAction(action);
         // 结果由 mending 自己报（不然失败时动作和 mending 各打一行）
         action.setOutput(ResultOutput.SUBTASK);
         moveAction = action;

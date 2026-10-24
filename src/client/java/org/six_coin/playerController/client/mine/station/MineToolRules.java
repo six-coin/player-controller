@@ -23,8 +23,8 @@ import org.six_coin.playerController.client.mine.MineTools;
  * 稿斧铲锄要有<em>效率 V</em>（{@code efficiency} 5 级），剑要有<em>锋利 V</em>（{@code sharpness} 5 级）。
  * 等级都是「至少」：等级比要求高也算合法。
  *
- * <p>「可用」和「待修复」的分界线是剩余耐久 {@value MineTools#MIN_DURABILITY}：
- * 不够的工具还是合法工具，只是算「待修复」，不参与「每种至少 2 件可用」的计数。
+ * <p>「可用」和「待修复」的分界线是**耐久满不满**（见 {@link #isUsable}）：
+ * 只要掉了一点耐久就是「待修复」，不参与「每种至少 2 件可用」的计数。
  */
 public final class MineToolRules {
 
@@ -122,8 +122,13 @@ public final class MineToolRules {
         return missing.length() == 0 ? null : missing.toString();
     }
 
-    /** 「可用」= 剩余耐久够（{@link MineTools#MIN_DURABILITY} 以上）。 */
+    /**
+     * 「可用」= <b>耐久是满的</b>（{@code damage == 0}）。
+     *
+     * <p>需求里点名：缓存里的工具必须满耐久，不满耐久的都算「待修复」——
+     * 待修复的不能算进「每种至少 2 件可用」，要拿去 mending 修。
+     */
     public static boolean isUsable(ItemStack stack) {
-        return MineTools.remaining(stack) >= MineTools.MIN_DURABILITY;
+        return !stack.isEmpty() && stack.isDamageableItem() && stack.getDamageValue() == 0;
     }
 }
