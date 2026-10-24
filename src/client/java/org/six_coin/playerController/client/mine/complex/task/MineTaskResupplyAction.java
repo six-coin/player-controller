@@ -70,6 +70,9 @@ public class MineTaskResupplyAction extends Action {
     /** 一满盒。 */
     private static final int FULL_BOX = 27 * 64;
 
+    /** 「不在路径点网络上 → snap 回网络」最多试几次。 */
+    private static final int MAX_NETWORK_SNAPS = 5;
+
     /** 一次从 item_temp 最多拿多少（36 组）。 */
     private static final int TRIP_LIMIT = 36 * 64;
 
@@ -131,6 +134,8 @@ public class MineTaskResupplyAction extends Action {
     private final Map<String, Integer> collectorRetries = new LinkedHashMap<>();
     /** 拆收集盒之前从 inventory_temp 借的镐子（在快捷栏第 2 格）。 */
     private boolean borrowedPickaxe;
+    /** 「不在路径点网络上 → snap 回网络」用了几次（防止死循环）。 */
+    private int networkSnaps;
 
     public MineTaskResupplyAction(String task, MineTaskRegion region, MineTaskStationData data) {
         this.task = task;
@@ -1061,6 +1066,15 @@ public class MineTaskResupplyAction extends Action {
     private void goTo(BlockPos target, String dimension, Runnable next) {
         PathPlanner.Plan plan = PathPlanner.toPosition(target, dimension);
         if (!plan.ok()) {
+            // 人不在路径点网络上（刚从摆放处 / 矿洞深处收工）就先 snap 回去，再重新规划
+            if (plan.error() != null && plan.error().contains("既不是路径点")
+                && networkSnaps < MAX_NETWORK_SNAPS) {
+                networkSnaps++;
+                ChatUtils.info("补货：现在不在路径点网络上，先 snap 到最近的路径点再走（第 "
+                    + networkSnaps + " 次）");
+                run(new MineTaskSnapNetworkAction(), () -> goTo(target, dimension, next));
+                return;
+            }
             fail("走不到 " + target.toShortString() + "：" + plan.error());
             return;
         }

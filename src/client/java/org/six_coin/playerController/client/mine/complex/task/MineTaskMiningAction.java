@@ -81,6 +81,9 @@ public class MineTaskMiningAction extends Action {
     /** 区块一直没加载的话，最多等这么久（30 秒）。 */
     private static final int CHUNK_LOAD_WAIT_TICKS = 20 * 30;
 
+    /** 「不在路径点网络上 → snap 回网络」最多试几次。 */
+    private static final int MAX_NETWORK_SNAPS = 5;
+
     /** 盔甲耐久低于这个数就去补货（修装备）。 */
     public static final int ARMOR_MIN_DURABILITY = 100;
 
@@ -118,6 +121,8 @@ public class MineTaskMiningAction extends Action {
     private int totalTicks;
     private int loadWaitTicks;
     private boolean flying;
+    /** 「不在路径点网络上 → snap 回网络」用了几次（防止死循环）。 */
+    private int networkSnaps;
 
     public MineTaskMiningAction(String task, MineTaskRegion region) {
         this.task = task;
@@ -530,17 +535,34 @@ public class MineTaskMiningAction extends Action {
 
     private void travelToRegion() {
         phase = Phase.TRAVEL;
+        ChatUtils.info("走去挖掘区起始点 " + regionStart.toShortString());
+        goToRegionStart(this::startChunk);
+    }
+
+    /**
+     * 走到挖掘区起始点。
+     *
+     * <p>人不在路径点网络上（刚从摆放处收工、或者站在矿洞深处）的时候
+     * {@code PathPlanner} 会直接报「既不是路径点」—— 这时候先 {@code snap network} 回网络再重新规划。
+     */
+    private void goToRegionStart(Runnable next) {
         PathPlanner.Plan plan = PathPlanner.toPosition(regionStart, region.dimension());
         if (!plan.ok()) {
+            if (plan.error() != null && plan.error().contains("既不是路径点")
+                && networkSnaps < MAX_NETWORK_SNAPS) {
+                networkSnaps++;
+                ChatUtils.info("不在路径点网络上，先 snap 到最近的路径点再走（第 " + networkSnaps + " 次）");
+                run(new MineTaskSnapNetworkAction(), () -> goToRegionStart(next));
+                return;
+            }
             fail("走不到挖掘区起始点 " + regionStart.toShortString() + "：" + plan.error());
             return;
         }
         if (plan.alreadyThere()) {
-            startChunk();
+            next.run();
             return;
         }
-        ChatUtils.info("走去挖掘区起始点 " + regionStart.toShortString());
-        run(new PathMoveAction(plan.path()), this::startChunk);
+        run(new PathMoveAction(plan.path()), next);
     }
 
     /** 去当前 {@link #chunkIndex} 那个区块。 */
@@ -703,16 +725,7 @@ public class MineTaskMiningAction extends Action {
     }
 
     private void afterResupply() {
-        PathPlanner.Plan plan = PathPlanner.toPosition(regionStart, region.dimension());
-        if (!plan.ok()) {
-            fail("补货完走不回挖掘区起始点 " + regionStart.toShortString() + "：" + plan.error());
-            return;
-        }
-        if (plan.alreadyThere()) {
-            backToChunk();
-            return;
-        }
-        run(new PathMoveAction(plan.path()), this::backToChunk);
+        goToRegionStart(this::backToChunk);
     }
 
     private void backToChunk() {

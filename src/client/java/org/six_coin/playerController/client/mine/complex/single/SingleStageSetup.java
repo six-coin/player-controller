@@ -222,10 +222,16 @@ class SingleStageSetup extends SingleStageStep {
     // 取圆石 + 放收集盒
     // ------------------------------------------------------------------
 
+    /**
+     * 取 21 个圆石搭平台。
+     *
+     * <p>**先拿圆石少的那一盒**：两盒里剩下多少差别很大，从少的那盒拿能先把空盒清掉，
+     * 不会出现「两盒都剩半盒」—— 那样第二盒、第三盒（背包里的备用盒）都会半满。
+     */
     private void queueTakeCobble() {
         List<BlockPos> boxes = new ArrayList<>(List.of(ctx.cobbleSpotA(), ctx.cobbleSpotB()));
         boxes.sort(Comparator.comparingInt(
-            (BlockPos box) -> ctx.data.boxCount(box, Items.COBBLESTONE)).reversed());
+            (BlockPos box) -> ctx.data.boxCount(box, Items.COBBLESTONE)));
 
         BlockPos first = boxes.get(0);
         BlockPos second = boxes.get(1);
