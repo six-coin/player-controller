@@ -36,6 +36,14 @@ public class MoveAction extends Action {
     /** 这次移动有没有武装过传送门记录（失败时只撤自己武装的那次）。 */
     private boolean armedPortal;
 
+    /**
+     * 要不要在编辑模式下把这一段记成路径点 / 边。
+     *
+     * <p>{@code /pc snap} 和挖矿里的内部 snap 都**不记**：snap 是「飞过去干活」，
+     * 不是「在这里修路」，飞过的每一格都记成路径点会把图搞得一团糟。
+     */
+    private boolean record = true;
+
     /** 自己有没有 begin 过飞行（begin/end 是引用计数的，没 begin 过就别 end）。 */
     private boolean engaged;
 
@@ -52,6 +60,12 @@ public class MoveAction extends Action {
      */
     public static MoveAction alignToCenter() {
         return new MoveAction(Direction.Axis.X, 0);
+    }
+
+    /** 这一段不记路径点（snap 用）。 */
+    public MoveAction noRecord() {
+        this.record = false;
+        return this;
     }
 
     @Override
@@ -177,7 +191,7 @@ public class MoveAction extends Action {
         }
 
         ChatUtils.debug("飞行结束");
-        if (startBlock != null && dimension != null) {
+        if (record && startBlock != null && dimension != null) {
             WaypointManager.get().recordMove(dimension, startBlock, endBlock);
         }
     }

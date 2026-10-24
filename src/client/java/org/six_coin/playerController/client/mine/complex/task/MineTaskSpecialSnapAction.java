@@ -97,7 +97,7 @@ public class MineTaskSpecialSnapAction extends Action {
             finish();
             return;
         }
-        current = new MoveAction(axes.get(index), deltas.get(index));
+        current = new MoveAction(axes.get(index), deltas.get(index)).noRecord();
         index++;
         current.start();
     }

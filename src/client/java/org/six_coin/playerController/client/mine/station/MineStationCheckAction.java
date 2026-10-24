@@ -163,7 +163,9 @@ public class MineStationCheckAction extends Action {
 
     private enum Stage {
         MOVING,
-        OPENING
+        OPENING,
+        /** 检查完了走回安全点。 */
+        RETURN
     }
 
     private final List<Target> targets = new ArrayList<>();
@@ -462,6 +464,7 @@ public class MineStationCheckAction extends Action {
         switch (stage) {
             case MOVING -> tickMove();
             case OPENING -> tickOpen(mc);
+            case RETURN -> tickReturn();
         }
     }
 
@@ -587,8 +590,48 @@ public class MineStationCheckAction extends Action {
         beginMove();
     }
 
+    /**
+     * 扫完了：先走回安全点，再结束（需求：{@code /pc mine station check} 之后人要回到 safe_point）。
+     *
+     * <p>走不回去不算检查失败 —— 检查结果照样写、照样报，只是多打一行错误。
+     */
     private void finishAll() {
         scannedAll = true;
+
+        MinePlace safe = MineStationManager.get().single(MineStationPart.SAFE_POINT);
+        if (safe == null) {
+            finish();
+            return;
+        }
+        PathPlanner.Plan plan = PathPlanner.toPosition(safe.pos(), safe.dimension());
+        if (!plan.ok() || plan.alreadyThere()) {
+            if (!plan.ok()) ChatUtils.error("检查完了，但走不回安全点：" + plan.error());
+            finish();
+            return;
+        }
+
+        ChatUtils.debug("检查完了，走回安全点 " + safe.describe());
+        stage = Stage.RETURN;
+        moveAction = new PathMoveAction(plan.path());
+        moveAction.start();
+    }
+
+    private void tickReturn() {
+        if (moveAction == null) {
+            finish();
+            return;
+        }
+        moveAction.update();
+        if (!moveAction.isFinished()) return;
+
+        String failure = moveAction.failureReason();
+        moveAction.cleanup();
+        moveAction = null;
+        if (failure != null) {
+            ChatUtils.error("检查完了，但走回安全点失败：" + failure);
+        } else {
+            ChatUtils.info("检查完了，已经回到安全点");
+        }
         finish();
     }
 

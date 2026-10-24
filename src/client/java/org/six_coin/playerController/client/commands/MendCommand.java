@@ -19,9 +19,9 @@ import org.six_coin.playerController.client.attack.AttackConfig;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.container.InventoryUtils;
-import org.six_coin.playerController.client.mending.MendingConfig;
-import org.six_coin.playerController.client.mending.MendingManager;
-import org.six_coin.playerController.client.mending.MendingPos;
+import org.six_coin.playerController.client.mend.MendConfig;
+import org.six_coin.playerController.client.mend.MendManager;
+import org.six_coin.playerController.client.mend.MendPos;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
@@ -51,18 +51,18 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
  *
  * <p>改配置的按钮都是「填命令」（点了只填进聊天栏，回车才生效）；{@code [开始]} 是直接执行的。
  */
-public final class MendingCommand {
+public final class MendCommand {
 
     private static final String ROOT = "/pc mend ";
 
-    private MendingCommand() {
+    private MendCommand() {
     }
 
     public static LiteralArgumentBuilder<FabricClientCommandSource> build() {
         return ClientCommands.literal("mend")
-            .executes(MendingCommand::status)
+            .executes(MendCommand::status)
             .then(ClientCommands.literal("start")
-                .executes(MendingCommand::start))
+                .executes(MendCommand::start))
             .then(station());
     }
 
@@ -72,20 +72,20 @@ public final class MendingCommand {
 
     private static int status(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        MendingConfig config = MendingConfig.get();
-        MendingManager manager = MendingManager.get();
+        MendConfig config = MendConfig.get();
+        MendManager manager = MendManager.get();
         AttackConfig attack = AttackConfig.get();
 
-        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7mending（文件：" + config.currentFile() + "）："));
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7mend（文件：" + config.currentFile() + "）："));
 
         MutableComponent state = Component.literal("  状态：");
-        if (manager.stage() == MendingManager.Stage.IDLE) {
+        if (manager.stage() == MendManager.Stage.IDLE) {
             state.append(Component.literal("§7没在跑"));
         } else {
             state.append(Component.literal("§a" + manager.stage().text()));
         }
         state.append(Component.literal("§8（上次：" + manager.lastResult() + "） "));
-        if (manager.stage() == MendingManager.Stage.IDLE) {
+        if (manager.stage() == MendManager.Stage.IDLE) {
             state.append(runButton("[开始]", ROOT + "start", "直接执行 /pc mend start"));
         }
         source.sendFeedback(state);
@@ -101,13 +101,13 @@ public final class MendingCommand {
 
         source.sendFeedback(Component.literal("  attack：profile=" + attack.profileName()
             + "，" + (attack.enable() ? "§a开" : "§c关") + "§8（跑起来会切到 "
-            + MendingManager.PROFILE + " 并打开，结束后还原）"));
+            + MendManager.PROFILE + " 并打开，结束后还原）"));
 
         int orbs = manager.orbCount();
         source.sendFeedback(Component.literal("  检测：每 " + PlayerControllerConfig.getMendDetectIntervalTicks()
             + " tick 一次；" + PlayerControllerConfig.getMendMaxWaitExpSeconds() + " 秒没有任何东西被修好就退出"));
-        source.sendFeedback(Component.literal("  经验球：站立点周围 " + MendingManager.ORB_RADIUS + " 格的球里超过 "
-            + MendingManager.ORB_LIMIT + " 个就先关掉攻击"
+        source.sendFeedback(Component.literal("  经验球：站立点周围 " + MendManager.ORB_RADIUS + " 格的球里超过 "
+            + MendManager.ORB_LIMIT + " 个就先关掉攻击"
             + (orbs < 0 ? "" : "（现在 " + orbs + " 个）")));
         source.sendFeedback(Component.literal("§7  §f" + ROOT + "start§7 - 开始"));
         source.sendFeedback(Component.literal("§7  §f" + ROOT + "station§7 - 站立点 / 末影箱"));
@@ -116,7 +116,7 @@ public final class MendingCommand {
 
     private static int start(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        String error = MendingManager.get().start();
+        String error = MendManager.get().start();
         if (error != null) {
             source.sendError(Component.literal(error));
             return 0;
@@ -125,7 +125,7 @@ public final class MendingCommand {
     }
 
     private static void sendStandPoint(FabricClientCommandSource source) {
-        MendingPos stand = MendingConfig.get().standPoint();
+        MendPos stand = MendConfig.get().standPoint();
         MutableComponent line = Component.literal("  站立点：");
         line.append(stand == null ? Component.literal("§c未设置") : Component.literal(stand.describe()));
         line.append(Component.literal("  "));
@@ -135,7 +135,7 @@ public final class MendingCommand {
     }
 
     private static void sendEnderChest(FabricClientCommandSource source) {
-        MendingPos chest = MendingConfig.get().enderChest();
+        MendPos chest = MendConfig.get().enderChest();
         MutableComponent line = Component.literal("  末影箱：");
         line.append(chest == null ? Component.literal("§7没设（不打开末影箱）") : Component.literal(chest.describe()));
         line.append(Component.literal("  "));
@@ -153,8 +153,8 @@ public final class MendingCommand {
         LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) return;
 
-        ItemStack sword = player.getInventory().getItem(MendingManager.FIRST_SLOT);
-        String problem = MendingManager.firstSlotProblem(player);
+        ItemStack sword = player.getInventory().getItem(MendManager.FIRST_SLOT);
+        String problem = MendManager.firstSlotProblem(player);
 
         MutableComponent line = Component.literal("  第一位（不挪）：");
         line.append(sword.isEmpty()
@@ -186,20 +186,20 @@ public final class MendingCommand {
                     return 1;
                 })
                 .then(ClientCommands.literal("set_here")
-                    .executes(MendingCommand::setStandHere))
+                    .executes(MendCommand::setStandHere))
                 .then(ClientCommands.literal("set")
-                    .then(coords(MendingCommand::setStandCoords))))
+                    .then(coords(MendCommand::setStandCoords))))
             .then(ClientCommands.literal("ender_chest")
                 .executes(context -> {
                     sendEnderChest(context.getSource());
                     return 1;
                 })
                 .then(ClientCommands.literal("set_target")
-                    .executes(MendingCommand::setChestTarget))
+                    .executes(MendCommand::setChestTarget))
                 .then(ClientCommands.literal("set")
-                    .then(coords(MendingCommand::setChestCoords)))
+                    .then(coords(MendCommand::setChestCoords)))
                 .then(ClientCommands.literal("del")
-                    .executes(MendingCommand::delChest)));
+                    .executes(MendCommand::delChest)));
     }
 
     private static int setStandHere(CommandContext<FabricClientCommandSource> context) {
@@ -221,7 +221,7 @@ public final class MendingCommand {
     }
 
     private static int setStand(FabricClientCommandSource source, String dimension, BlockPos pos) {
-        MendingConfig.get().setStandPoint(dimension, pos);
+        MendConfig.get().setStandPoint(dimension, pos);
         source.sendFeedback(Component.literal("已设置站立点 = "
             + DimensionUtils.display(dimension) + " " + pos.toShortString()));
         hintChestReach(source);
@@ -243,7 +243,7 @@ public final class MendingCommand {
     }
 
     private static int setChest(FabricClientCommandSource source, String dimension, BlockPos pos) {
-        MendingConfig.get().setEnderChest(dimension, pos);
+        MendConfig.get().setEnderChest(dimension, pos);
         source.sendFeedback(Component.literal("已设置末影箱 = "
             + DimensionUtils.display(dimension) + " " + pos.toShortString()));
         hintBlockType(source, pos, dimension);
@@ -253,11 +253,11 @@ public final class MendingCommand {
 
     private static int delChest(CommandContext<FabricClientCommandSource> context) {
         FabricClientCommandSource source = context.getSource();
-        if (MendingConfig.get().enderChest() == null) {
+        if (MendConfig.get().enderChest() == null) {
             source.sendFeedback(Component.literal("本来就没设末影箱"));
             return 1;
         }
-        MendingConfig.get().clearEnderChest();
+        MendConfig.get().clearEnderChest();
         source.sendFeedback(Component.literal("已删掉末影箱（之后只修物品栏里的东西）"));
         return 1;
     }
@@ -268,8 +268,8 @@ public final class MendingCommand {
 
     /** 站立点和末影箱得同维度、而且站在站立点上够得着（start 的时候会硬查）。 */
     private static void hintChestReach(FabricClientCommandSource source) {
-        MendingPos stand = MendingConfig.get().standPoint();
-        MendingPos chest = MendingConfig.get().enderChest();
+        MendPos stand = MendConfig.get().standPoint();
+        MendPos chest = MendConfig.get().enderChest();
         if (stand == null || chest == null) return;
 
         if (!stand.dimension().equals(chest.dimension())) {

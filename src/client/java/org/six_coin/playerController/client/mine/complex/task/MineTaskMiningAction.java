@@ -16,8 +16,9 @@ import org.six_coin.playerController.client.action.PathMoveAction;
 import org.six_coin.playerController.client.container.ContainerCacheTracker;
 import org.six_coin.playerController.client.eat.EatConfig;
 import org.six_coin.playerController.client.feature.FlightVelocity;
-import org.six_coin.playerController.client.mending.MendingConfig;
-import org.six_coin.playerController.client.mending.MendingPos;
+import org.six_coin.playerController.client.mend.MendConfig;
+import org.six_coin.playerController.client.mend.MendManager;
+import org.six_coin.playerController.client.mend.MendPos;
 import org.six_coin.playerController.client.mine.MineFilterConfig;
 import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.mine.MineTools;
@@ -53,7 +54,7 @@ import java.util.Set;
  * <ol>
  *   <li><b>预检查</b>：人在安全点、对齐、region.json 的 {@code inspected} / {@code checked}、
  *       清空 mine simple、自动进食、物品栏里正好是「快捷栏 9 个空潜影盒 + 背包第 1 格 1 个熔岩桶」、
- *       关掉容器缓存、mending 站立点和安全点双向可达、读 {@code check.json} 当 {@code station_data}；</li>
+ *       关掉容器缓存、mend 站立点和安全点双向可达、读 {@code check.json} 当 {@code station_data}；</li>
  *   <li><b>准备物品栏</b>：按 {@link MineTaskKit} 去各个容器里拿货，凑成
  *       {@code debug_chunk_miner} 要求的那一套（工具、食物、图腾、圆石盒、黏液块盒、空盒、熔岩桶）；</li>
  *   <li><b>逐个区块挖</b>：区块按 x 再 z 从小到大排；每个区块从上往下找第一个没挖干净的子区块，
@@ -261,6 +262,12 @@ public class MineTaskMiningAction extends Action {
         //    这里不特判空气，一切按当前过滤器来
         ChatUtils.debug("挖掘过滤器：" + MineFilterConfig.get().describe(MineFilterConfig.get().mode()));
 
+        // 2.5 路径点编辑模式关掉：挖矿全程到处飞，开着编辑模式会把飞过的每一格都记成路径点
+        if (WaypointManager.get().isEditMode()) {
+            WaypointManager.get().setEditMode(false);
+            ChatUtils.info("已关闭路径点编辑模式（挖矿过程中不记路）");
+        }
+
         // 6. 自动进食必须开着（没有它就挖到饿死）
         if (!EatConfig.get().enabled()) {
             EatConfig.get().setEnabled(true);
@@ -275,8 +282,15 @@ public class MineTaskMiningAction extends Action {
             return false;
         }
 
-        // 9. mending 站立点 + 和安全点双向可达
-        if (!checkMending(safe)) return false;
+        // 8.5 补货要修工具，attack 里必须有 mend 的 profile
+        if (!org.six_coin.playerController.client.attack.AttackProfiles.exists(MendManager.PROFILE)) {
+            fail("attack 里没有叫「" + MendManager.PROFILE + "」的 profile —— 补货修工具要用它"
+                + "（先 /pc attack profile add " + MendManager.PROFILE + " 建一份）");
+            return false;
+        }
+
+        // 9. mend 站立点 + 和安全点双向可达
+        if (!checkMend(safe)) return false;
 
         // 10. 读 check.json 当 station_data（不落盘）
         stationData = MineTaskStationData.load(MineStationManager.get(),
@@ -341,18 +355,18 @@ public class MineTaskMiningAction extends Action {
         return BuiltInRegistries.ITEM.getKey(stack.getItem()) + " x" + stack.getCount();
     }
 
-    /** mending 站立点必须设了、而且和安全点双向可达。 */
-    private boolean checkMending(MinePlace safe) {
-        MendingPos stand = MendingConfig.get().standPoint();
+    /** mend 站立点必须设了、而且和安全点双向可达。 */
+    private boolean checkMend(MinePlace safe) {
+        MendPos stand = MendConfig.get().standPoint();
         if (stand == null) {
-            fail("mending 没设站立点（/pc mend stand set …）—— 工具坏了没地方修");
+            fail("mend 没设站立点（/pc mend stand set …）—— 工具坏了没地方修");
             return false;
         }
 
         WaypointGraph graph = WaypointManager.get().graph();
         Waypoint standNode = graph.at(stand.dimension(), stand.pos());
         if (standNode == null) {
-            fail("mending 站立点 " + stand.describe() + " 不是路径点 —— 先把它放到路径点图上");
+            fail("mend 站立点 " + stand.describe() + " 不是路径点 —— 先把它放到路径点图上");
             return false;
         }
         Waypoint safeNode = graph.at(safe.dimension(), safe.pos());
@@ -361,7 +375,7 @@ public class MineTaskMiningAction extends Action {
             return false;
         }
         if (!graph.connectedBothWays(safeNode.id(), standNode.id())) {
-            fail("mending 站立点 " + stand.describe() + " 和安全点不是双向可达");
+            fail("mend 站立点 " + stand.describe() + " 和安全点不是双向可达");
             return false;
         }
         return true;

@@ -274,7 +274,8 @@ class SingleStageStage3 extends SingleStageStep {
         queue.sync("装收集品", () -> {
             ctx.refresh();
             if (ctx.data.count(ctx.collectorItems) == 0) return;
-            for (BlockPos box : List.of(ctx.collectSpotA(), ctx.collectSpotB())) {
+            // 装收集品也一样：先装满那一盒，装不下了才用另一盒（别搞成两盒都半满）
+            for (BlockPos box : fullerFirst(ctx.collectSpotA(), ctx.collectSpotB())) {
                 queue.child("把收集品装进 " + box.toShortString(),
                     () -> new SingleStageBoxPutAction(ctx, box, collectorFilter(), "收集品"),
                     action -> {

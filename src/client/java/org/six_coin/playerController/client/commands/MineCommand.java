@@ -525,7 +525,7 @@ public final class MineCommand {
      * {@code /pc mine task <task_name> d_start_mining}：开始挖这个任务。
      *
      * <p>这里只做「能不能开始」的快速判断（任务在不在、区域设没设、两个检查过没过），
-     * 剩下的预检查（安全点、物品栏、mending 站立点、check.json …）在
+     * 剩下的预检查（安全点、物品栏、mend 站立点、check.json …）在
      * {@link MineTaskMiningAction} 里做 —— 那些要看世界状态，放命令里不合适。
      */
     private static int startMining(CommandContext<FabricClientCommandSource> context, String name) {
@@ -558,7 +558,7 @@ public final class MineCommand {
 
         ActionManager.get().submit(new MineTaskMiningAction(name, region));
         source.sendFeedback(Component.literal("开始挖掘任务 §f" + name + "§r：" + region.describe()));
-        source.sendFeedback(Component.literal("§7  预检查（安全点 / 物品栏 / mending 站立点 / check.json）→ "
+        source.sendFeedback(Component.literal("§7  预检查（安全点 / 物品栏 / mend 站立点 / check.json）→ "
             + "备货 → 按区块逐个挖；中途要补货时会去站里补一趟"));
         return 1;
     }

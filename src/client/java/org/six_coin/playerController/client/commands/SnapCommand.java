@@ -187,7 +187,7 @@ public final class SnapCommand {
     /** 每段一个 {@link MoveAction}（和 /pc move x|y|z 完全同一套）。 */
     private static void submit(SnapUtils.Plan plan) {
         for (SnapUtils.Segment segment : plan.segments()) {
-            ActionManager.get().submit(new MoveAction(segment.axis(), segment.blocks()));
+            ActionManager.get().submit(new MoveAction(segment.axis(), segment.blocks()).noRecord());
         }
     }
 

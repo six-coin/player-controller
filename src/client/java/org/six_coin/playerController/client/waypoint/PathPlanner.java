@@ -13,7 +13,7 @@ import java.util.List;
  * <p>规则：终点已经是路径点就直接走；终点在某条边中间就先在那边新建一个路径点再走；
  * 都不是就报错。起点同理（见 {@link WaypointManager#playerStartWaypoint()}）。
  *
- * <p>命令（{@code MoveCommand}）和 mending 走的都是这里，免得两处各写一份。
+ * <p>命令（{@code MoveCommand}）和 mend 走的都是这里，免得两处各写一份。
  */
 public final class PathPlanner {
 

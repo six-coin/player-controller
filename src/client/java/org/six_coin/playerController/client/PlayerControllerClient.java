@@ -21,8 +21,8 @@ import org.six_coin.playerController.client.feature.MovePackets;
 import org.six_coin.playerController.client.feature.ScreenSuppressor;
 import org.six_coin.playerController.client.feature.ServerTickRate;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
-import org.six_coin.playerController.client.mending.MendingConfig;
-import org.six_coin.playerController.client.mending.MendingManager;
+import org.six_coin.playerController.client.mend.MendConfig;
+import org.six_coin.playerController.client.mend.MendManager;
 import org.six_coin.playerController.client.mine.MineFilterConfig;
 import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.mine.complex.MineComplexManager;
@@ -49,7 +49,7 @@ public class PlayerControllerClient implements ClientModInitializer {
         StockManager.get().load();
         AttackConfig.get().load();
         EatConfig.get().load();
-        MendingConfig.get().load();
+        MendConfig.get().load();
         MineFilterConfig.get().load();
         MineStationManager.get().load();
         MineComplexManager.get().load();
@@ -88,9 +88,9 @@ public class PlayerControllerClient implements ClientModInitializer {
         // 优先级比攻击低（攻击先占快捷栏）、比挖掘高（挖掘不能把食物格抢走）。
         ClientTickEvents.END_CLIENT_TICK.register(client -> EatManager.get().tick());
 
-        // mending：自己一套「走过去 → 开着末影箱 → 定时检测」的流程（见 MendingManager）。
+        // mend：自己一套「走过去 → 开着末影箱 → 定时检测」的流程（见 MendManager）。
         // 放在攻击后面：它每一轮会按经验球数量开关攻击，下一 tick 的攻击就能按新的开关来。
-        ClientTickEvents.END_CLIENT_TICK.register(client -> MendingManager.get().tick());
+        ClientTickEvents.END_CLIENT_TICK.register(client -> MendManager.get().tick());
 
         // 挖掘：按 /pc mine simple 选中的区域一直挖（见 MineManager）。放在攻击后面：
         // 这一 tick 攻击已经占过快捷栏 / 朝向，挖掘按优先级让开，不会把攻击的剑切走。
@@ -115,7 +115,7 @@ public class PlayerControllerClient implements ClientModInitializer {
             RotateManager.get().reset();
             AttackManager.get().reset();
             EatManager.get().reset();
-            MendingManager.get().reset();
+            MendManager.get().reset();
             MineManager.get().reset();
             HoverJitter.reset();
             ServerTickRate.onJoin();

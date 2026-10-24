@@ -1,4 +1,4 @@
-package org.six_coin.playerController.client.mending;
+package org.six_coin.playerController.client.mend;
 
 import net.minecraft.core.BlockPos;
 import org.six_coin.playerController.client.util.DimensionUtils;
@@ -7,9 +7,9 @@ import org.six_coin.playerController.client.util.DimensionUtils;
  * mend.json 里的一个坐标：{@code {"dimension": "..", "x": .., "y": .., "z": ..}}。
  *
  * <p>和 {@code stock.station.StationPos} 存的内容一样，但这里没有「编号」那套东西：
- * mending 只有两个固定的位置（站立点、末影箱），不需要排序。
+ * mend 只有两个固定的位置（站立点、末影箱），不需要排序。
  */
-public final class MendingPos {
+public final class MendPos {
 
     private String dimension;
     private int x;
@@ -17,18 +17,18 @@ public final class MendingPos {
     private int z;
 
     /** 给 Gson 用。 */
-    private MendingPos() {
+    private MendPos() {
     }
 
-    private MendingPos(String dimension, int x, int y, int z) {
+    private MendPos(String dimension, int x, int y, int z) {
         this.dimension = dimension;
         this.x = x;
         this.y = y;
         this.z = z;
     }
 
-    public static MendingPos of(String dimension, BlockPos pos) {
-        return new MendingPos(dimension, pos.getX(), pos.getY(), pos.getZ());
+    public static MendPos of(String dimension, BlockPos pos) {
+        return new MendPos(dimension, pos.getX(), pos.getY(), pos.getZ());
     }
 
     public String dimension() {
@@ -63,7 +63,7 @@ public final class MendingPos {
     @Override
     public boolean equals(Object other) {
         if (this == other) return true;
-        if (!(other instanceof MendingPos pos)) return false;
+        if (!(other instanceof MendPos pos)) return false;
         return x == pos.x && y == pos.y && z == pos.z
             && dimension != null && dimension.equals(pos.dimension);
     }

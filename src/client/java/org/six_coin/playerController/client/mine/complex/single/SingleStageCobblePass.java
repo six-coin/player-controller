@@ -78,7 +78,10 @@ class SingleStageCobblePass extends SingleStageStep {
     private Action child;
     private Phase afterChild = Phase.TAKE;
 
-    private List<BlockPos> boxes = List.of();
+    /** 取货顺序：**圆石少的排前面**（先把快空的拿完，别把两盒都搞成半满）。 */
+    private List<BlockPos> takeBoxes = List.of();
+    /** 放回顺序：**圆石多的排前面**（放满一盒再放下一盒，避免出现「半满 + 半满」）。 */
+    private List<BlockPos> putBoxes = List.of();
     private int boxIndex = 1;
     /** 放回圆石的时候另算一个下标（{@link #boxIndex} 取货时已经走到头了）。 */
     private int putIndex;
@@ -115,7 +118,8 @@ class SingleStageCobblePass extends SingleStageStep {
             return;
         }
 
-        boxes = boxesFullestFirst();
+        takeBoxes = boxesLeastFull();
+        putBoxes = boxesFullestFirst();
         boxIndex = 1;
         travelTarget = ctx.routePoint(walkLayer, 1, 1);
         ChatUtils.info(phase() + "：要放 " + pending.size() + " 个圆石，先从盒子里取");
@@ -226,13 +230,13 @@ class SingleStageCobblePass extends SingleStageStep {
 
     /** @return false = 拿完了（继续往下走） */
     private boolean takeCobble() {
-        if (boxIndex > boxes.size()) return false;
+        if (boxIndex > takeBoxes.size()) return false;
 
         ctx.refresh();
         List<SingleStageBoxGetAction.Want> wants = emptySlots();
         if (wants.isEmpty()) return false;
 
-        BlockPos box = boxes.get(boxIndex - 1);
+        BlockPos box = takeBoxes.get(boxIndex - 1);
         boxIndex++;
         startChild(new SingleStageBoxGetAction(ctx, box, COBBLE, wants, "圆石"), Phase.TAKE);
         return true;
@@ -240,12 +244,12 @@ class SingleStageCobblePass extends SingleStageStep {
 
     /** @return false = 放完了（继续往下走） */
     private boolean putBackCobble() {
-        if (putIndex >= boxes.size()) return false;
+        if (putIndex >= putBoxes.size()) return false;
 
         ctx.refresh();
         if (ctx.data.count(COBBLE_IDS) == 0) return false;
 
-        BlockPos box = boxes.get(putIndex);
+        BlockPos box = putBoxes.get(putIndex);
         putIndex++;
         startChild(new SingleStageBoxPutAction(ctx, box, COBBLE, "圆石"), Phase.PUT_BACK);
         return true;
@@ -352,7 +356,15 @@ class SingleStageCobblePass extends SingleStageStep {
         return true;
     }
 
-    /** 两个圆石盒，圆石多的排前面。 */
+    /** 两个圆石盒，圆石**少**的排前面（取货用）。 */
+    private List<BlockPos> boxesLeastFull() {
+        List<BlockPos> sorted = new ArrayList<>(List.of(ctx.cobbleSpotA(), ctx.cobbleSpotB()));
+        sorted.sort(Comparator.comparingInt(
+            (BlockPos box) -> ctx.data.boxCount(box, Items.COBBLESTONE)));
+        return sorted;
+    }
+
+    /** 两个圆石盒，圆石多的排前面（放回用）。 */
     private List<BlockPos> boxesFullestFirst() {
         List<BlockPos> sorted = new ArrayList<>(List.of(ctx.cobbleSpotA(), ctx.cobbleSpotB()));
         sorted.sort(Comparator.comparingInt(

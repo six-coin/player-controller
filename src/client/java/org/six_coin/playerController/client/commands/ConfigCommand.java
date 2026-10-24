@@ -11,7 +11,7 @@ import org.six_coin.playerController.client.attack.AttackConfig;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
 import org.six_coin.playerController.client.eat.EatConfig;
-import org.six_coin.playerController.client.mending.MendingConfig;
+import org.six_coin.playerController.client.mend.MendConfig;
 import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.mine.complex.MineComplexManager;
 import org.six_coin.playerController.client.mine.station.MineStationManager;
@@ -89,7 +89,7 @@ public final class ConfigCommand {
                     StockManager.get().switchWorld(num);
                     AttackConfig.get().switchWorld(num);
                     EatConfig.get().switchWorld(num);
-                    MendingConfig.get().switchWorld(num);
+                    MendConfig.get().switchWorld(num);
                     MineStationManager.get().switchWorld(num);
                     MineComplexManager.get().switchWorld(num);
                     MineManager.get().resumeSaved();

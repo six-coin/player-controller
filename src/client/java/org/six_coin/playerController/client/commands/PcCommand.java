@@ -81,7 +81,7 @@ public final class PcCommand {
             .then(DumpCommand.build())
             .then(AttackCommand.build())
             .then(EatCommand.build())
-            .then(MendingCommand.build())
+            .then(MendCommand.build())
             .then(MineCommand.build())
             .then(WaypointsCommand.build())
             .then(ConfigCommand.build())

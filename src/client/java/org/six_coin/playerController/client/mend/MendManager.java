@@ -1,4 +1,4 @@
-package org.six_coin.playerController.client.mending;
+package org.six_coin.playerController.client.mend;
 
 import net.minecraft.world.level.block.EnderChestBlock;
 import net.minecraft.client.Minecraft;
@@ -39,7 +39,7 @@ import java.util.Deque;
 import java.util.List;
 
 /**
- * mending：站在末影箱旁边，把要修的东西一件一件换到副手，靠 {@code /pc attack} 刷经验喂经验修补。
+ * mend：站在末影箱旁边，把要修的东西一件一件换到副手，靠 {@code /pc attack} 刷经验喂经验修补。
  *
  * <p>{@code /pc mend start} 的顺序（就是代码里的顺序）：
  *
@@ -50,7 +50,7 @@ import java.util.List;
  *   <li>手上切成第一位那把剑，记下出发的位置和 attack 的开关 / profile（收尾时还原）；</li>
  *   <li>走 {@link PathPlanner} 算出来的路到站立点；</li>
  *   <li>attack 换成 {@link #PROFILE} 并打开；</li>
- *   <li>每隔 {@code actions.mending_detect_interval_ticks} 检测一次。</li>
+ *   <li>每隔 {@code actions.mend_detect_interval_ticks} 检测一次。</li>
  * </ol>
  *
  * <p>每次检测做三件事：
@@ -64,19 +64,19 @@ import java.util.List;
  *       换到副手（第一位那把剑、盔甲都不挪：它们在装备栏里本来就会被修）。</li>
  * </ol>
  *
- * <p><b>末影箱只在换物品的时候开一趟</b>（{@link MendingSwapAction}）：界面开着的时候服务端只同步
+ * <p><b>末影箱只在换物品的时候开一趟</b>（{@link MendSwapAction}）：界面开着的时候服务端只同步
  * 那个界面里的格子，末影箱界面里没有副手格，副手的耐久在客户端就一直是旧的 ——
  * 检测会以为东西没修好。所以平时箱子是关着的，要换东西才开，换完立刻关。
  *
  * <p>退出检测以后：换回副手 → 还原 attack → 走回出发的位置。
  *
- * <p>连续 {@code actions.mending_max_wait_exp_seconds} 秒没有任何东西被修好，就当作附近没有经验来源，
+ * <p>连续 {@code actions.mend_max_wait_exp_seconds} 秒没有任何东西被修好，就当作附近没有经验来源，
  * 主动退出检测（免得一直干等）。
  *
  * <p>换东西用的是原版「和副手交换」（{@code SWAP} + 按钮 40，就是 F 键那一下）：
  * 物品栏、末影箱里的格子都能直接这样跟副手换，不需要先把东西搬到快捷栏。
  */
-public final class MendingManager {
+public final class MendManager {
 
     /** 经验球超过这个数就先把攻击关掉。 */
     public static final int ORB_LIMIT = 100;
@@ -84,8 +84,8 @@ public final class MendingManager {
     /** 只有站立点周围这么多格（球）里的经验球才数。 */
     public static final double ORB_RADIUS = 3.0;
 
-    /** mending 用的 attack profile 名字。 */
-    public static final String PROFILE = "mending";
+    /** mend 用的 attack profile 名字。 */
+    public static final String PROFILE = "mend";
 
     /**
      * 快捷栏第一位。
@@ -100,7 +100,7 @@ public final class MendingManager {
     /** 原版「和副手交换」那一下：{@code SWAP} + 这个按钮号（F 键）。 */
     private static final int SWAP_OFFHAND_BUTTON = 40;
 
-    private static final MendingManager INSTANCE = new MendingManager();
+    private static final MendManager INSTANCE = new MendManager();
 
     /**
      * 子动作的出口：{@code null} = 交给 {@link ActionManager}（正常 {@code /pc mend}）；
@@ -173,7 +173,7 @@ public final class MendingManager {
     /**
      * 末影箱里没有要修的东西了。
      *
-     * <p>只有真的开箱看过才知道（{@link MendingSwapAction} 那一趟里扫一次）；
+     * <p>只有真的开箱看过才知道（{@link MendSwapAction} 那一趟里扫一次）；
      * 没设末影箱就是 true。箱子里只会因为我们的交换变少，所以一旦是 true 就不用再看了。
      */
     private boolean chestKnownEmpty = true;
@@ -188,7 +188,7 @@ public final class MendingManager {
 
     /** 正在跑的那一趟交换。 */
     @Nullable
-    private MendingSwapAction swapAction;
+    private MendSwapAction swapAction;
 
     /** 正在跑的移动任务。 */
     @Nullable
@@ -205,10 +205,10 @@ public final class MendingManager {
     /** 上一次检测时所有要修的东西的耐久缺口（-1 = 还没有参照）。 */
     private int lastDamageSum = -1;
 
-    private MendingManager() {
+    private MendManager() {
     }
 
-    public static MendingManager get() {
+    public static MendManager get() {
         return INSTANCE;
     }
 
@@ -218,6 +218,22 @@ public final class MendingManager {
 
     public Stage stage() {
         return stage;
+    }
+
+    /**
+     * 老版本的 attack profile 叫 {@code mending}，现在统一成 {@code mend}。
+     *
+     * <p>只复制、不删原文件：万一玩家还想留着旧的，也没损失。
+     */
+    private static void migrateProfileName() {
+        if (AttackProfiles.exists(PROFILE)) return;
+        if (!AttackProfiles.exists("mending")) return;
+        try {
+            java.nio.file.Files.copy(AttackProfiles.file("mending"), AttackProfiles.file(PROFILE));
+            ChatUtils.info("attack 里的 profile「mending」已经复制成「mend」（名字统一了）");
+        } catch (java.io.IOException e) {
+            ChatUtils.error("把 attack profile「mending」复制成「mend」失败：" + e.getMessage());
+        }
     }
 
     /** 设子动作出口（{@code null} = 恢复成交给 ActionManager）。 */
@@ -257,7 +273,7 @@ public final class MendingManager {
     /** 站立点周围现在有几个经验球（没设站立点 / 没世界 / 不在那个维度就是 -1）。 */
     public int orbCount() {
         Minecraft mc = Minecraft.getInstance();
-        MendingPos stand = MendingConfig.get().standPoint();
+        MendPos stand = MendConfig.get().standPoint();
         if (stand == null || mc.level == null) return -1;
         if (!DimensionUtils.current().equals(stand.dimension())) return -1;
         return countOrbs(mc, stand);
@@ -277,11 +293,11 @@ public final class MendingManager {
         if (!sword.is(ItemTags.SWORDS)) {
             return "快捷栏第一位不是剑（现在是 " + InventoryUtils.describe(sword) + "）";
         }
-        if (!MendingItems.hasMending(sword)) {
+        if (!MendItems.hasMend(sword)) {
             return "快捷栏第一位那把剑没有经验修补（" + InventoryUtils.describe(sword) + "）";
         }
 
-        int remaining = MendingItems.remainingDurability(sword);
+        int remaining = MendItems.remainingDurability(sword);
         if (remaining <= AttackManager.MIN_DURABILITY) {
             return "快捷栏第一位那把剑剩余耐久 " + remaining + "，要大于 " + AttackManager.MIN_DURABILITY
                 + "（和攻击挑武器的门槛一样）";
@@ -304,7 +320,7 @@ public final class MendingManager {
     }
 
     /**
-     * 开始 mending。
+     * 开始 mend。
      *
      * @param allowBusy {@code true} = 允许在别的动作里嵌着跑（{@code d_start_mining} 的补货流程）。
      *                  这时候移动 / 换物品的动作不交给 {@link ActionManager}，而是交给
@@ -312,22 +328,23 @@ public final class MendingManager {
      *                  由外层动作当子动作驱动。
      */
     public String start(boolean allowBusy) {
+        migrateProfileName();
         if (stage != Stage.IDLE) {
-            return "mending 已经在跑了（现在：" + stage.text() + "）";
+            return "mend 已经在跑了（现在：" + stage.text() + "）";
         }
 
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
         if (player == null || mc.level == null) return "没有玩家";
 
-        // 1) attack 里必须有 mending 这份 profile
+        // 1) attack 里必须有 mend 这份 profile
         if (!AttackProfiles.exists(PROFILE)) {
             return "attack 里没有叫 " + PROFILE + " 的 profile，先用 /pc attack profile add " + PROFILE
                 + " 建一份（里面写清楚边上刷什么怪）";
         }
         AttackProfile profile = AttackProfile.load(PROFILE);
         if (profile == null || profile.isEmpty()) {
-            ChatUtils.info("§emending：profile「" + PROFILE + "」里一个生物都没有，"
+            ChatUtils.info("§emend：profile「" + PROFILE + "」里一个生物都没有，"
                 + "开起来也不会打任何东西（/pc attack show_all_mobs 里点 [添加]）");
         }
 
@@ -343,7 +360,7 @@ public final class MendingManager {
         }
 
         // 4) 站立点
-        MendingPos stand = MendingConfig.get().standPoint();
+        MendPos stand = MendConfig.get().standPoint();
         if (stand == null) {
             return "还没设站立点：/pc mend station stand_point set_here";
         }
@@ -358,8 +375,8 @@ public final class MendingManager {
         clearRuntime();
 
         // 手上先换成第一位那把剑（只切这一次；之后攻击自己还会按需要切）
-        if (HotbarManager.get().request(Owner.MENDING, FIRST_SLOT)) {
-            HotbarManager.get().release(Owner.MENDING);
+        if (HotbarManager.get().request(Owner.MEND, FIRST_SLOT)) {
+            HotbarManager.get().release(Owner.MEND);
         }
 
         // 记下出发的位置和攻击状态，收尾时还原
@@ -383,11 +400,11 @@ public final class MendingManager {
                 finishSilently();
                 return error;
             }
-            ChatUtils.info("mending：已经在站立点上，直接开始");
+            ChatUtils.info("mend：已经在站立点上，直接开始");
             return null;
         }
 
-        ChatUtils.info("mending：先去站立点 " + stand.describe());
+        ChatUtils.info("mend：先去站立点 " + stand.describe());
         return null;
     }
 
@@ -397,7 +414,7 @@ public final class MendingManager {
             clearRuntime();
             return;
         }
-        ChatUtils.debug("进世界：mending 已重置（原来在：" + stage.text() + "）");
+        ChatUtils.debug("进世界：mend 已重置（原来在：" + stage.text() + "）");
         restoreAttack();
         lastResult = "被重置（进世界 / 断线）";
         clearRuntime();
@@ -407,7 +424,7 @@ public final class MendingManager {
     public void fail(String reason) {
         if (stage == Stage.IDLE) return;
 
-        ChatUtils.error("mending 中止：" + reason);
+        ChatUtils.error("mend 中止：" + reason);
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
 
@@ -472,11 +489,11 @@ public final class MendingManager {
             fail(error);
             return;
         }
-        ChatUtils.info("mending：到站立点了");
+        ChatUtils.info("mend：到站立点了");
     }
 
     private void tickLoop(Minecraft mc, LocalPlayer player) {
-        MendingPos stand = MendingConfig.get().standPoint();
+        MendPos stand = MendConfig.get().standPoint();
         if (stand == null) {
             exitLoop("站立点被删掉了");
             return;
@@ -530,18 +547,18 @@ public final class MendingManager {
      * <p>副手的耐久只有「没有容器界面开着」的时候才是准的，所以这里能直接看副手修好没有；
      * 末影箱里的东西要等真的开箱那一趟才看（{@link #swapStep}）。
      *
-     * <p>「副手已经修满了」是按 {@link MendingItems#needsRepair} 判断的：
+     * <p>「副手已经修满了」是按 {@link MendItems#needsRepair} 判断的：
      * 副手里要是坏了一把**没有经验修补**的剑，它永远修不满，但也修不了 ——
      * 那种也算「让出来了」（换出去），不然整轮会卡在它身上。
      */
-    private void detect(Minecraft mc, LocalPlayer player, MendingPos stand) {
+    private void detect(Minecraft mc, LocalPlayer player, MendPos stand) {
         // 1) 经验球太多就先别打了，等捡起来一些再继续
         int orbs = countOrbs(mc, stand);
         setAttack(orbs <= ORB_LIMIT, "站立点周围 " + orbs + " 个经验球");
 
         // 2) 物品栏里还有多少要修的
         Scan scan = scan(player, null);
-        ChatUtils.debug("mending：还要修 %d 件，合计缺口 %d，经验球 %d 个，副手 %s",
+        ChatUtils.debug("mend：还要修 %d 件，合计缺口 %d，经验球 %d 个，副手 %s",
             scan.repairable(), scan.damageSum(), orbs,
             InventoryUtils.describe(player.getOffhandItem()));
 
@@ -558,10 +575,10 @@ public final class MendingManager {
         }
 
         // 3) 副手还在修就等（末影箱保持关着，副手的耐久才准）
-        if (MendingItems.needsRepair(player.getOffhandItem())) return;
+        if (MendItems.needsRepair(player.getOffhandItem())) return;
 
         // 末影箱被删掉 / 改成没设了：里面当然没东西要修
-        if (MendingConfig.get().enderChest() == null) chestKnownEmpty = true;
+        if (MendConfig.get().enderChest() == null) chestKnownEmpty = true;
 
         // 4) 一件都不剩了（物品栏没有了，末影箱也确定没有了）就收尾
         if (!scan.needsRepair() && chestKnownEmpty) {
@@ -579,7 +596,7 @@ public final class MendingManager {
     }
 
     /** 数站立点周围（半径 {@value #ORB_RADIUS} 的球）里的经验球。 */
-    private static int countOrbs(Minecraft mc, MendingPos stand) {
+    private static int countOrbs(Minecraft mc, MendPos stand) {
         if (mc.level == null) return 0;
 
         Vec3 center = PlayerUtils.blockCenter(stand.pos());
@@ -618,11 +635,11 @@ public final class MendingManager {
 
         for (int index = 0; index <= Inventory.SLOT_OFFHAND; index++) {
             ItemStack stack = inventory.getItem(index);
-            if (!MendingItems.needsRepair(stack)) continue;
+            if (!MendItems.needsRepair(stack)) continue;
 
             needsRepair = true;
             repairable++;
-            damageSum += MendingItems.damage(stack);
+            damageSum += MendItems.damage(stack);
 
             // 只搬快捷栏第 2 格起、以及背包 27 格：
             // 第一位（常驻的剑）和盔甲（36~39）、副手（40）都不挪
@@ -634,12 +651,12 @@ public final class MendingManager {
             List<Slot> slots = InventoryUtils.containerSlots(chestHandler);
             for (int index = 0; index < slots.size(); index++) {
                 ItemStack stack = slots.get(index).getItem();
-                if (!MendingItems.needsRepair(stack)) continue;
+                if (!MendItems.needsRepair(stack)) continue;
 
                 needsRepair = true;
                 repairable++;
                 chestRepairable++;
-                damageSum += MendingItems.damage(stack);
+                damageSum += MendItems.damage(stack);
                 if (candidate == null) candidate = new SlotKey(Side.CONTAINER, index);
             }
         }
@@ -653,37 +670,37 @@ public final class MendingManager {
 
     /** 这一趟要不要开末影箱：设了、而且（还没看过里面 / 临时格就在里面）。 */
     private boolean needsChest() {
-        if (MendingConfig.get().enderChest() == null) return false;
+        if (MendConfig.get().enderChest() == null) return false;
         if (tempSlot != null && tempSlot.side() == Side.CONTAINER) return true;
         return !chestKnownEmpty;
     }
 
     private void startSwap(Minecraft mc, boolean openChest) {
-        MendingPos chest = MendingConfig.get().enderChest();
+        MendPos chest = MendConfig.get().enderChest();
         BlockPos pos = openChest && chest != null ? chest.pos() : null;
 
         swaps.clear();
         swapPlanned = false;
         settleTicks = 0;
 
-        MendingSwapAction action = new MendingSwapAction(pos);
+        MendSwapAction action = new MendSwapAction(pos);
         swapAction = action;
         stage = Stage.SWAP;
         submitAction(action);
-        // 结果由 mending 自己报（不然失败时动作和 mending 各打一行）
+        // 结果由 mend 自己报（不然失败时动作和 mend 各打一行）
         action.setOutput(ResultOutput.SUBTASK);
 
-        ChatUtils.debug("mending：开一趟交换（%s）", pos == null ? "只点物品栏" : "末影箱 " + pos.toShortString());
+        ChatUtils.debug("mend：开一趟交换（%s）", pos == null ? "只点物品栏" : "末影箱 " + pos.toShortString());
     }
 
     /**
-     * 一趟交换里的一步（由 {@link MendingSwapAction} 每 tick 调一次）。
+     * 一趟交换里的一步（由 {@link MendSwapAction} 每 tick 调一次）。
      *
      * @param chestOpen 这一趟是不是开着末影箱（开着才能看箱子里的东西）
      * @return {@code true} = 这一趟还没跑完；{@code false} = 可以关界面了
      */
     boolean swapStep(LocalPlayer player, AbstractContainerMenu handler, boolean chestOpen) {
-        // mending 已经被中止 / 重置了：别再点了，让动作自己收尾关界面
+        // mend 已经被中止 / 重置了：别再点了，让动作自己收尾关界面
         if (stage == Stage.IDLE) return false;
 
         if (settleTicks > 0) {
@@ -708,7 +725,7 @@ public final class MendingManager {
         Scan scan = scan(player, chestOpen ? handler : null);
         if (chestOpen) {
             chestKnownEmpty = scan.chestRepairable() == 0;
-            ChatUtils.debug("mending：末影箱里%s", chestKnownEmpty
+            ChatUtils.debug("mend：末影箱里%s", chestKnownEmpty
                 ? "没有要修的了"
                 : "还有 " + scan.chestRepairable() + " 件要修");
         }
@@ -752,7 +769,7 @@ public final class MendingManager {
     // ------------------------------------------------------------------
 
     private void exitLoop(String reason) {
-        ChatUtils.info("mending：停止检测（" + reason + "）");
+        ChatUtils.info("mend：停止检测（" + reason + "）");
         lastResult = "收尾：" + reason;
         exiting = true;
 
@@ -784,7 +801,7 @@ public final class MendingManager {
             return;
         }
 
-        ChatUtils.info("mending：收尾了，走回出发的位置 " + target.toShortString());
+        ChatUtils.info("mend：收尾了，走回出发的位置 " + target.toShortString());
     }
 
     private void tickMoveBack() {
@@ -804,7 +821,7 @@ public final class MendingManager {
     }
 
     private void finish(String message) {
-        ChatUtils.info("mending：" + message);
+        ChatUtils.info("mend：" + message);
         lastResult = message;
         lastOk = true;
         clearRuntime();
@@ -830,7 +847,7 @@ public final class MendingManager {
     private String beginMove(BlockPos target, String dimension, Stage movingStage) {
         PathPlanner.Plan plan = PathPlanner.toPosition(target, dimension);
         if (!plan.ok()) return plan.error();
-        if (plan.info() != null) ChatUtils.debug("mending：%s", plan.info());
+        if (plan.info() != null) ChatUtils.debug("mend：%s", plan.info());
 
         if (plan.alreadyThere()) {
             moveAction = null;
@@ -839,7 +856,7 @@ public final class MendingManager {
 
         PathMoveAction action = new PathMoveAction(plan.path());
         submitAction(action);
-        // 结果由 mending 自己报（不然失败时动作和 mending 各打一行）
+        // 结果由 mend 自己报（不然失败时动作和 mend 各打一行）
         action.setOutput(ResultOutput.SUBTASK);
         moveAction = action;
         stage = movingStage;
@@ -853,10 +870,10 @@ public final class MendingManager {
         LocalPlayer player = mc.player;
         if (player == null || mc.level == null) return "没有玩家";
 
-        MendingPos stand = MendingConfig.get().standPoint();
+        MendPos stand = MendConfig.get().standPoint();
         if (stand == null) return "站立点被删掉了";
 
-        MendingPos chest = MendingConfig.get().enderChest();
+        MendPos chest = MendConfig.get().enderChest();
         if (chest != null) {
             if (!chest.dimension().equals(stand.dimension())) {
                 return "末影箱（" + chest.describe() + "）和站立点（" + stand.describe() + "）不在一个维度";
@@ -888,7 +905,7 @@ public final class MendingManager {
         chestKnownEmpty = chest == null;
 
         stage = Stage.LOOP;
-        ChatUtils.debug("mending：到站立点，开始检测（末影箱 %s）",
+        ChatUtils.debug("mend：到站立点，开始检测（末影箱 %s）",
             chest == null ? "没设" : "还没看过里面");
         return null;
     }
@@ -898,7 +915,7 @@ public final class MendingManager {
         AttackConfig config = AttackConfig.get();
         if (config.enable() == enable) return;
         config.setEnable(enable);
-        ChatUtils.debug("mending：%s，攻击%s", why, enable ? "打开" : "关掉");
+        ChatUtils.debug("mend：%s，攻击%s", why, enable ? "打开" : "关掉");
     }
 
     /** 还原出发前的 profile 和开关。 */
@@ -911,7 +928,7 @@ public final class MendingManager {
             if (AttackProfiles.exists(attackProfileBefore)) {
                 config.switchProfile(attackProfileBefore);
             } else {
-                ChatUtils.debug("mending：原来的 profile（%s）没了，留着现在的", attackProfileBefore);
+                ChatUtils.debug("mend：原来的 profile（%s）没了，留着现在的", attackProfileBefore);
             }
         }
         if (config.enable() != attackEnableBefore) config.setEnable(attackEnableBefore);

@@ -19,7 +19,7 @@ import org.six_coin.playerController.client.mine.MineTools;
  * 工具缓存里「什么算合法工具」。
  *
  * <p>合法的工具：剑 / 镐 / 斧 / 铲 / 锄，钻石或下界合金材质，
- * <b>必须</b>有经验修补（{@code mending}）、耐久 III（{@code unbreaking} 3 级），
+ * <b>必须</b>有经验修补（{@code mend}）、耐久 III（{@code unbreaking} 3 级），
  * 稿斧铲锄要有<em>效率 V</em>（{@code efficiency} 5 级），剑要有<em>锋利 V</em>（{@code sharpness} 5 级）。
  * 等级都是「至少」：等级比要求高也算合法。
  *
@@ -126,7 +126,7 @@ public final class MineToolRules {
      * 「可用」= <b>耐久是满的</b>（{@code damage == 0}）。
      *
      * <p>需求里点名：缓存里的工具必须满耐久，不满耐久的都算「待修复」——
-     * 待修复的不能算进「每种至少 2 件可用」，要拿去 mending 修。
+     * 待修复的不能算进「每种至少 2 件可用」，要拿去 mend 修。
      */
     public static boolean isUsable(ItemStack stack) {
         return !stack.isEmpty() && stack.isDamageableItem() && stack.getDamageValue() == 0;

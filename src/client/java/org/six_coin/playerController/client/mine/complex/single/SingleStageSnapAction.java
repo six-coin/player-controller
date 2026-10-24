@@ -83,7 +83,7 @@ class SingleStageSnapAction extends SingleStageStep {
             return;
         }
         SnapUtils.Segment segment = segments.get(index++);
-        current = new MoveAction(segment.axis(), segment.blocks());
+        current = new MoveAction(segment.axis(), segment.blocks()).noRecord();
         current.start();
     }
 

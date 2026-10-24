@@ -7,8 +7,8 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.commands.SharedSuggestionProvider;
 import org.six_coin.playerController.client.container.CachedContainer;
 import org.six_coin.playerController.client.container.ContainerCacheManager;
-import org.six_coin.playerController.client.mending.MendingConfig;
-import org.six_coin.playerController.client.mending.MendingPos;
+import org.six_coin.playerController.client.mend.MendConfig;
+import org.six_coin.playerController.client.mend.MendPos;
 import org.six_coin.playerController.client.mine.station.MinePlace;
 import org.six_coin.playerController.client.mine.station.MineStationManager;
 import org.six_coin.playerController.client.stock.station.StationManager;
@@ -40,9 +40,9 @@ public final class DimensionSuggestions {
         for (StationPos pos : StationManager.get().allPositions()) {
             dimensions.add(pos.dimension());
         }
-        MendingPos standPoint = MendingConfig.get().standPoint();
+        MendPos standPoint = MendConfig.get().standPoint();
         if (standPoint != null) dimensions.add(standPoint.dimension());
-        MendingPos enderChest = MendingConfig.get().enderChest();
+        MendPos enderChest = MendConfig.get().enderChest();
         if (enderChest != null) dimensions.add(enderChest.dimension());
         for (CachedContainer container : ContainerCacheManager.get().all()) {
             dimensions.add(container.dimension());

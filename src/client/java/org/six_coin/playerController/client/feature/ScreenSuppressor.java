@@ -7,7 +7,7 @@ package org.six_coin.playerController.client.feature;
  * 用引用计数管理，避免嵌套使用时提前放开。
  *
  * <p>占用方都是「开一个箱子、点几下、关掉」这种动作（见 {@code ContainerSession} 和
- * {@code mending/MendingSwapAction}），所以计数不会跨很久：动作一结束就还回来。
+ * {@code mend/MendSwapAction}），所以计数不会跨很久：动作一结束就还回来。
  */
 public final class ScreenSuppressor {
 

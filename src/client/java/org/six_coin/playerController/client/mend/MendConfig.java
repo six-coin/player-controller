@@ -1,4 +1,4 @@
-package org.six_coin.playerController.client.mending;
+package org.six_coin.playerController.client.mend;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -17,7 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * mending 的两个位置，记在 {@code config/player-controller/world_<n>/mend.json}：
+ * mend 的两个位置，记在 {@code config/player-controller/world_<n>/mend.json}：
  *
  * <pre>
  * {
@@ -29,7 +29,7 @@ import java.nio.file.Path;
  * <p>{@code ender_chest} 可以不设（那就不打开末影箱，只看物品栏）。
  * 放 level 目录下是因为不同存档 / 服务器的工作站位置不一样，换世界（{@code /pc config level <n>}）会跟着换。
  */
-public final class MendingConfig {
+public final class MendConfig {
 
     private static final Gson GSON = new GsonBuilder()
         .setPrettyPrinting()
@@ -38,25 +38,25 @@ public final class MendingConfig {
 
     private static final String FILE_NAME = "mend.json";
 
-    private static final MendingConfig INSTANCE = new MendingConfig();
+    private static final MendConfig INSTANCE = new MendConfig();
 
     /** 盘上那一份（字段名就是文件里的键名）。 */
     private static final class Data {
         @SerializedName("stand_point")
-        private MendingPos standPoint;
+        private MendPos standPoint;
 
         @SerializedName("ender_chest")
-        private MendingPos enderChest;
+        private MendPos enderChest;
     }
 
     private Data data = new Data();
     private int loadedWorld = -1;
     private boolean loadedOk = false;
 
-    private MendingConfig() {
+    private MendConfig() {
     }
 
-    public static MendingConfig get() {
+    public static MendConfig get() {
         return INSTANCE;
     }
 
@@ -82,7 +82,7 @@ public final class MendingConfig {
         if (!Files.exists(path)) {
             loadedOk = true;
             save();
-            ChatUtils.debug("已创建 mending 配置：" + path);
+            ChatUtils.debug("已创建 mend 配置：" + path);
             return;
         }
 
@@ -101,7 +101,7 @@ public final class MendingConfig {
             }
 
             loadedOk = true;
-            ChatUtils.debug("已读取 mending 配置：" + path + "（站立点 "
+            ChatUtils.debug("已读取 mend 配置：" + path + "（站立点 "
                 + (data.standPoint == null ? "未设置" : data.standPoint.describe())
                 + "，末影箱 " + (data.enderChest == null ? "未设置" : data.enderChest.describe()) + "）");
         } catch (Exception e) {
@@ -117,7 +117,7 @@ public final class MendingConfig {
     public void switchWorld(int level) {
         save();
         load(level);
-        ChatUtils.info("mending 配置已切到 world_" + level + "（站立点 "
+        ChatUtils.info("mend 配置已切到 world_" + level + "（站立点 "
             + (standPoint() == null ? "未设置" : standPoint().describe()) + "）");
     }
 
@@ -149,23 +149,23 @@ public final class MendingConfig {
 
     /** 站立点（没设是 null）。 */
     @Nullable
-    public MendingPos standPoint() {
+    public MendPos standPoint() {
         return data.standPoint;
     }
 
     /** 末影箱（没设是 null，这时不打开末影箱）。 */
     @Nullable
-    public MendingPos enderChest() {
+    public MendPos enderChest() {
         return data.enderChest;
     }
 
     public void setStandPoint(String dimension, BlockPos pos) {
-        data.standPoint = MendingPos.of(dimension, pos);
+        data.standPoint = MendPos.of(dimension, pos);
         save();
     }
 
     public void setEnderChest(String dimension, BlockPos pos) {
-        data.enderChest = MendingPos.of(dimension, pos);
+        data.enderChest = MendPos.of(dimension, pos);
         save();
     }
 

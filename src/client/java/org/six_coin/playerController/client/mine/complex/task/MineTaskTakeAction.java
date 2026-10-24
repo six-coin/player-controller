@@ -40,6 +40,8 @@ public class MineTaskTakeAction extends Action {
     private final String label;
     /** {@code >= 0} = 只从容器里的这一格拿（按位置拿潜影盒时用）；{@code -1} = 按 filter 找。 */
     private final int containerSlot;
+    /** 那一格本来就是空的也算正常结束（只是没拿到东西），不算失败。 */
+    private boolean tolerant;
 
     private final ContainerSession session;
 
@@ -88,6 +90,12 @@ public class MineTaskTakeAction extends Action {
         this.filter = filter;
         this.label = label;
         this.session = new ContainerSession(container.pos());
+    }
+
+    /** 那一格空着也算正常结束（借工具时用：借不到就空手干活）。 */
+    public MineTaskTakeAction tolerant() {
+        this.tolerant = true;
+        return this;
     }
 
     /** 实际拿走的那一叠；没拿到是 null。 */
@@ -230,6 +238,11 @@ public class MineTaskTakeAction extends Action {
         // 第一步：找一叠符合条件的东西
         Slot source = findSource();
         if (source == null) {
+            if (tolerant) {
+                ChatUtils.debug("%s 里没有%s，跳过", container.pos().toShortString(), label);
+                finish();
+                return;
+            }
             fail(container.part().display() + " #" + container.id() + "（"
                 + container.pos().toShortString() + "）里没有" + label
                 + "（station_data 里记着 " + container.items() + "）");

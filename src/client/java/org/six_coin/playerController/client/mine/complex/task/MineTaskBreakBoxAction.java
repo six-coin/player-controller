@@ -13,9 +13,8 @@ import org.six_coin.playerController.client.util.ShulkerUtils;
 /**
  * 拆掉摆在世界里的一个潜影盒，并等它**进物品栏**。
  *
- * <p>用空手拆（快捷栏第 1 格）：补货第一步已经把工具都放进 inventory_temp 了，
- * 这时候手上什么都没有；潜影盒硬度 2.0，空手大概 3 秒一个，9 个盒子 30 秒左右 ——
- * 补货是低频操作，可以接受。
+ * <p>用哪一格拆由调用方给：补货第一步已经把工具都放进 inventory_temp 了，所以那边会先从
+ * 暂存处把镐子借出来（借不到才空手）。
  */
 public class MineTaskBreakBoxAction extends Action {
 
@@ -23,6 +22,7 @@ public class MineTaskBreakBoxAction extends Action {
     private static final int PICKUP_WAIT_TICKS = 100;
 
     private final BlockPos pos;
+    private final int hotbarIndex;
     private final String label;
 
     @Nullable
@@ -31,7 +31,15 @@ public class MineTaskBreakBoxAction extends Action {
     private int waitTicks;
 
     public MineTaskBreakBoxAction(BlockPos pos, String label) {
+        this(pos, 0, label);
+    }
+
+    /**
+     * @param hotbarIndex 用快捷栏第几格拆（补货里是「从物品栏暂存处借来的镐子」那一格）
+     */
+    public MineTaskBreakBoxAction(BlockPos pos, int hotbarIndex, String label) {
         this.pos = pos.immutable();
+        this.hotbarIndex = hotbarIndex;
         this.label = label;
     }
 
@@ -49,7 +57,7 @@ public class MineTaskBreakBoxAction extends Action {
             return;
         }
         boxesBefore = countBoxes(player);
-        miner = new MineBlockAction(pos, 0);
+        miner = new MineBlockAction(pos, hotbarIndex);
         miner.start();
     }
 

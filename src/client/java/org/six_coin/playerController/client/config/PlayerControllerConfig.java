@@ -250,7 +250,7 @@ public final class PlayerControllerConfig {
         /**
          * mend：多久没有任何东西被修好就放弃，单位：秒。
          *
-         * <p>见 {@code mending/MendingManager}：检测循环里连续这么多秒所有装备的耐久都没涨过，
+         * <p>见 {@code mend/MendManager}：检测循环里连续这么多秒所有装备的耐久都没涨过，
          * 就判定「附近没有经验来源」，退出检测走回原位。
          */
         @SerializedName("mend_max_wait_exp_seconds")

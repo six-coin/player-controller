@@ -129,6 +129,8 @@ public class MineTaskResupplyAction extends Action {
     private int mendRounds;
     /** 每个产物收集盒连着「满了」几次（活塞一直不换新的就报错）。 */
     private final Map<String, Integer> collectorRetries = new LinkedHashMap<>();
+    /** 拆收集盒之前从 inventory_temp 借的镐子（在快捷栏第 2 格）。 */
+    private boolean borrowedPickaxe;
 
     public MineTaskResupplyAction(String task, MineTaskRegion region, MineTaskStationData data) {
         this.task = task;
@@ -335,22 +337,53 @@ public class MineTaskResupplyAction extends Action {
         });
     }
 
+    /**
+     * 拆 9 个收集盒。
+     *
+     * <p>空手拆一个要 3 秒，所以先从 inventory_temp 把镐子借出来（快捷栏第 2 格，
+     * 也就是它本来的位置）；借不到才空手。拆完再放回原格。
+     */
     private void breakAllBoxes() {
         boxIndex = 0;
-        breakNextBox();
+        goToAccess(inventoryTemp, () -> {
+            MineTaskTakeAction take = new MineTaskTakeAction(inventoryTemp,
+                SingleStageCtx.HOTBAR_PICKAXE, SingleStageCtx.HOTBAR_PICKAXE + 27, "镐子").tolerant();
+            run(take, () -> {
+                borrowedPickaxe = take.taken() != null;
+                if (!borrowedPickaxe) {
+                    ChatUtils.debug("物品栏暂存处的快捷栏第 2 格没有镐子，空手拆收集盒");
+                }
+                breakNextBox();
+            });
+        });
     }
 
     private void breakNextBox() {
         if (boxIndex >= 9) {
-            putBoxesBack();
+            returnPickaxe();
             return;
         }
         MineTaskStationData.Placement spot = unloading.get(boxIndex);
         goToPlacement(spot, () -> run(
-            new MineTaskBreakBoxAction(spot.pos(), "收集盒 " + (boxIndex + 1)),
+            new MineTaskBreakBoxAction(spot.pos(), SingleStageCtx.HOTBAR_PICKAXE, "收集盒 " + (boxIndex + 1)),
             () -> {
                 boxIndex++;
                 breakNextBox();
+            }));
+    }
+
+    /** 把借来的镐子放回 inventory_temp 的快捷栏第 2 格（箱子第 28 格）。 */
+    private void returnPickaxe() {
+        if (!borrowedPickaxe) {
+            putBoxesBack();
+            return;
+        }
+        goToAccess(inventoryTemp, () -> run(
+            new MineTaskContainerAction(inventoryTemp, MineTaskContainerAction.Mode.SYNC_TO_CONTAINER,
+                ANY, 0, Set.of(SingleStageCtx.HOTBAR_PICKAXE), "把借的镐子放回去"),
+            () -> {
+                borrowedPickaxe = false;
+                putBoxesBack();
             }));
     }
 
@@ -758,7 +791,7 @@ public class MineTaskResupplyAction extends Action {
 
     /** 不够用：把所有不满的工具拿去 mend，修好再放回来，反复直到没有要修的。 */
     private void mendTools() {
-        // 先借一把剑（mending 要求快捷栏第 1 格是带经验修补、剩余耐久 > 100 的剑）
+        // 先借一把剑（mend 要求快捷栏第 1 格是带经验修补、剩余耐久 > 100 的剑）
         MineTaskStationData.ContainerInfo cache = data.firstContainer(MineStationPart.TOOL_CACHE);
         if (cache == null) {
             fail("没有工具缓存");
@@ -784,7 +817,7 @@ public class MineTaskResupplyAction extends Action {
             return;
         }
         if (++mendRounds > 5) {
-            fail("修了 5 轮工具缓存里还是有不满耐久的工具（mending 没修好？）");
+            fail("修了 5 轮工具缓存里还是有不满耐久的工具（mend 没修好？）");
             return;
         }
 
@@ -869,8 +902,8 @@ public class MineTaskResupplyAction extends Action {
     /**
      * 盔甲耐久低了也去修一趟（{@code d_start_mining} 就是在盔甲 &lt; 100 的时候叫补货的）。
      *
-     * <p>mending 修的是「穿在身上 + 手上」的东西，所以盔甲不用脱，人站到站立点刷经验就行。
-     * 前提是快捷栏第 1 格有一把合用的剑（mending 的硬要求）：没有就从工具缓存借一把，
+     * <p>mend 修的是「穿在身上 + 手上」的东西，所以盔甲不用脱，人站到站立点刷经验就行。
+     * 前提是快捷栏第 1 格有一把合用的剑（mend 的硬要求）：没有就从工具缓存借一把，
      * 修完再放回去。
      */
     private void startArmor() {
@@ -886,7 +919,7 @@ public class MineTaskResupplyAction extends Action {
 
         MineTaskStationData.ContainerInfo cache = data.firstContainer(MineStationPart.TOOL_CACHE);
         if (cache == null) {
-            fail("盔甲要修，但没有工具缓存（借不到 mending 要用的剑）");
+            fail("盔甲要修，但没有工具缓存（借不到 mend 要用的剑）");
             return;
         }
 
