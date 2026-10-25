@@ -6,6 +6,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.inventory.ContainerInput;
+import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.container.ContainerClicks;
 import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.InventoryUtils;
@@ -34,6 +35,9 @@ class SingleStageInventoryAction extends SingleStageStep {
 
     /** 「等容器关干净」最多等这么多 tick，等不到就直接干（不能卡死）。 */
     private static final int SETTLE_WAIT_TICKS = 40;
+
+    /** 一次「挪一格」最多点几次（服务端把这一下撤销了的话）。 */
+    private static final int MAX_MOVE_ATTEMPTS = 3;
 
     enum Kind {
         /** 点物品栏某一格、按「数字键」换到某个快捷栏格（交换）。 */
@@ -82,6 +86,10 @@ class SingleStageInventoryAction extends SingleStageStep {
     private int retryTicks;
     /** 等容器关干净等了多少 tick。 */
     private int settleWaitTicks;
+    /** 正在等这一下「挪格子」的结果（还剩几 tick）。 */
+    private int verifyLeft;
+    /** 这一格挪了几次。 */
+    private int moveAttempts;
 
     /** 一个操作这一 tick 的结果。 */
     private enum Result {
@@ -142,6 +150,8 @@ class SingleStageInventoryAction extends SingleStageStep {
                 return;
             }
             retryTicks = 0;
+            verifyLeft = 0;
+            moveAttempts = 0;
             index++;
         }
         finish();
@@ -217,6 +227,23 @@ class SingleStageInventoryAction extends SingleStageStep {
             return Result.RETRY;
         }
 
+        // 点完不能当完：等一个来回再核对。服务端要是把这一下撤销了（关容器的瞬间点出去、
+        // 状态号对不上……），客户端这边会留一个**幽灵**（以为挪好了，其实没有），
+        // 之后按快照干活就会撞「这一格怎么是空的 / 被别的东西占着」，盒子也会这么丢。
+        if (verifyLeft > 0) {
+            if (--verifyLeft > 0) return Result.RETRY;
+            if (from.getItem().isEmpty() && !to.getItem().isEmpty()) {
+                moveAttempts = 0;
+                return Result.DONE;
+            }
+            if (++moveAttempts >= MAX_MOVE_ATTEMPTS) {
+                fail("第 " + op.a() + " 格挪到第 " + op.b() + " 格点了 " + moveAttempts
+                    + " 次都没生效（服务端一直把这一下撤销）");
+                return Result.FAILED;
+            }
+            ChatUtils.debug("第 %d 格 → 第 %d 格被服务端撤销了，再点一次", op.a(), op.b());
+        }
+
         if (!ContainerClicks.click(handler, from, 0, ContainerInput.PICKUP, "拿起")) {
             return Result.FAILED;
         }
@@ -229,7 +256,8 @@ class SingleStageInventoryAction extends SingleStageStep {
                 return Result.FAILED;
             }
         }
-        return Result.DONE;
+        verifyLeft = Math.max(2, PlayerControllerConfig.getNetworkDelayTicks());
+        return Result.RETRY;
     }
 
     /**

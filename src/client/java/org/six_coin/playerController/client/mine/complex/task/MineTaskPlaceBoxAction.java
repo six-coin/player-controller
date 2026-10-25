@@ -17,6 +17,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.container.ContainerClicks;
+import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.hotbar.HotbarManager;
 import org.six_coin.playerController.client.owner.Owner;
@@ -40,6 +41,9 @@ public class MineTaskPlaceBoxAction extends Action {
     /** 最多点几次。 */
     private static final int MAX_ATTEMPTS = 6;
 
+    /** 「等容器关干净」最多等这么多 tick（关界面之后马上点物品栏，包会被服务端丢掉）。 */
+    private static final int SETTLE_WAIT_TICKS = 40;
+
     private final int invSlot;
     private final BlockPos target;
     private final String label;
@@ -48,6 +52,7 @@ public class MineTaskPlaceBoxAction extends Action {
     private int step;
     private int waitTicks;
     private int attempts;
+    private int settleWaitTicks;
     private boolean hotbarHeld;
 
     public MineTaskPlaceBoxAction(int invSlot, BlockPos target, String label) {
@@ -115,6 +120,9 @@ public class MineTaskPlaceBoxAction extends Action {
             step = 1;
             return;
         }
+
+        // 刚关掉容器的话先等一下：服务端那边还没关，点物品栏的包会被丢掉（点完就白点）
+        if (!ContainerSession.inventorySettled() && ++settleWaitTicks <= SETTLE_WAIT_TICKS) return;
 
         if (player.containerMenu != player.inventoryMenu) {
             fail("现在开着别的界面，没法把盒子挪到快捷栏");

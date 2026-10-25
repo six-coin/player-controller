@@ -25,6 +25,7 @@ import org.six_coin.playerController.client.mine.station.MineStationPart;
 import org.six_coin.playerController.client.mine.station.MineToolRules;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
+import org.six_coin.playerController.client.util.ShulkerUtils;
 import org.six_coin.playerController.client.waypoint.PathPlanner;
 
 import java.util.ArrayDeque;
@@ -323,8 +324,24 @@ public class MineTaskResupplyAction extends Action {
         }
 
         int which = unloadBoxes.get(boxIndex);
-        MineTaskStationData.Placement spot = unloading.get(which);
         int inventorySlot = SingleStageCtx.COLLECT_START + which;
+
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null) {
+            fail("玩家不存在");
+            return;
+        }
+        // 数盒子的时候这一格还有盒子，现在没了 —— 客户端和服务端对不上（或者中途吸进别的地方去了）。
+        // 跳过这一个，别把整趟补货搞挂（丢的那一个会体现在「空盒不够 9 个」的警告里）
+        if (!ShulkerUtils.isShulkerBox(player.getInventory().getItem(inventorySlot))) {
+            ChatUtils.error("物品栏第 " + inventorySlot + " 格已经没有潜影盒了（数的时候还有），跳过收集盒 "
+                + (which + 1));
+            boxIndex++;
+            placeNextBox();
+            return;
+        }
+
+        MineTaskStationData.Placement spot = unloading.get(which);
         goToPlacement(spot, () -> run(
             new MineTaskPlaceBoxAction(inventorySlot, spot.pos(), "收集盒 " + (which + 1)),
             () -> {
@@ -416,6 +433,17 @@ public class MineTaskResupplyAction extends Action {
         }
         int which = unloadBoxes.get(boxIndex);
         MineTaskStationData.Placement spot = unloading.get(which);
+
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null
+            && !(mc.level.getBlockState(spot.pos()).getBlock() instanceof ShulkerBoxBlock)) {
+            ChatUtils.error("摆放处 " + spot.pos().toShortString() + " 上已经没有潜影盒了（收集盒 "
+                + (which + 1) + "），跳过");
+            boxIndex++;
+            breakNextBox();
+            return;
+        }
+
         goToPlacement(spot, () -> run(
             new MineTaskBreakBoxAction(spot.pos(), "收集盒 " + (which + 1)),
             () -> {
@@ -437,12 +465,14 @@ public class MineTaskResupplyAction extends Action {
             if (MineTaskKit.isEmptyBox(player.getInventory().getItem(slot))) boxSlots.add(slot);
         }
         if (boxSlots.size() != 9) {
-            fail("拆完收集盒之后物品栏里有 " + boxSlots.size() + " 个空盒（应该是 9 个）");
-            return;
+            // 不直接失败：少的那几个是丢了（多半是中途某次点击被服务端丢了），
+            // 先按现有的放回去，下一轮 debug_chunk_miner 的检查会明确报「背包 X 是空的」
+            ChatUtils.error("拆完收集盒之后物品栏里有 " + boxSlots.size()
+                + " 个空盒（应该是 9 个）—— 少的几个丢了，先按有的放回去");
         }
 
         List<MineTaskInventoryMoveAction.Move> moves = new ArrayList<>();
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < Math.min(9, boxSlots.size()); i++) {
             int from = boxSlots.get(i);
             int to = SingleStageCtx.COLLECT_START + i;
             if (from == to) continue;
