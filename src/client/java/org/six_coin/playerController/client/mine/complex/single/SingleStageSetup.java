@@ -287,9 +287,19 @@ class SingleStageSetup extends SingleStageStep {
         return empty;
     }
 
+    /**
+     * 放盒子用的快捷栏格。
+     *
+     * <p>先找 6~8 里空着的；都占着就退回第一格**不是潜影盒 / 工具**的 —— 那一格里的东西
+     * 多半是搭平台时吸上来的圆石，挪盒子的时候 {@link SingleStageInventoryAction} 会把它
+     * 就地扔掉（以前这里直接报「第 5 格被 cobblestone 占着」）。
+     */
     private int firstFreeHotbar() {
-        for (int i = SingleStageCtx.HOTBAR_FREE_1; i <= SingleStageCtx.HOTBAR_FREE_3; i++) {
-            if (ctx.live(i).isEmpty()) return i;
+        for (int slot = SingleStageCtx.HOTBAR_FREE_1; slot <= SingleStageCtx.HOTBAR_FREE_3; slot++) {
+            if (ctx.live(slot).isEmpty()) return slot;
+        }
+        for (int slot = SingleStageCtx.HOTBAR_FREE_1; slot <= SingleStageCtx.HOTBAR_FREE_3; slot++) {
+            if (SingleStageInventoryAction.junk(ctx.live(slot))) return slot;
         }
         return -1;
     }

@@ -787,10 +787,7 @@ class SingleStageStage1 extends SingleStageStep {
     }
 
     private int firstFreeHotbar() {
-        for (int slot = SingleStageCtx.HOTBAR_FREE_1; slot <= SingleStageCtx.HOTBAR_FREE_3; slot++) {
-            if (ctx.live(slot).isEmpty()) return slot;
-        }
-        return -1;
+        return ctx.hotbarSlotForBox();
     }
 
     /** 换盒子的那一串：挖掉最空的那盒 → 吸进来 → 把背包里最多的那盒放上去 → 挖下来的装回背包。 */

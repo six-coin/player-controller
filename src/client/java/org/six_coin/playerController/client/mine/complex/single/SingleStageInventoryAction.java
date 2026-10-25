@@ -7,8 +7,11 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.inventory.ContainerInput;
 import org.six_coin.playerController.client.container.ContainerClicks;
+import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.InventoryUtils;
+import org.six_coin.playerController.client.mine.station.MineToolRules;
 import org.six_coin.playerController.client.util.ChatUtils;
+import org.six_coin.playerController.client.util.ShulkerUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,6 +25,12 @@ import java.util.List;
  * <p>点击是本地预测、立即生效的，所以一串操作在一个 tick 里就能走完。
  */
 class SingleStageInventoryAction extends SingleStageStep {
+
+    /** 一下操作最多等这么久（3 秒）：扔东西 / 挪东西要等服务端确认。 */
+    private static final int MAX_RETRY_TICKS = 60;
+
+    /** 没生效的话隔几个 tick 再点一次。 */
+    private static final int RESEND_TICKS = 5;
 
     enum Kind {
         /** 点物品栏某一格、按「数字键」换到某个快捷栏格（交换）。 */
@@ -66,6 +75,18 @@ class SingleStageInventoryAction extends SingleStageStep {
 
     private final List<Op> ops;
     private int index;
+    /** 当前这一下等了几个 tick（扔东西要等服务端把那一格清掉）。 */
+    private int retryTicks;
+
+    /** 一个操作这一 tick 的结果。 */
+    private enum Result {
+        /** 完成了，下一个。 */
+        DONE,
+        /** 还没生效（等服务端），下一 tick 再试。 */
+        RETRY,
+        /** 出错了（已经 {@code fail} 过）。 */
+        FAILED
+    }
 
     SingleStageInventoryAction(SingleStageCtx ctx, List<Op> ops) {
         super(ctx);
@@ -86,6 +107,9 @@ class SingleStageInventoryAction extends SingleStageStep {
             return;
         }
 
+        // 刚关掉容器的话先等一下：服务端那边还没关，点物品栏的包会被丢掉
+        if (!ContainerSession.inventorySettled()) return;
+
         AbstractContainerMenu handler = player.containerMenu;
         if (handler != player.inventoryMenu) {
             fail("现在开着别的界面，没法整理物品栏");
@@ -102,66 +126,114 @@ class SingleStageInventoryAction extends SingleStageStep {
         }
 
         while (index < ops.size()) {
-            Op op = ops.get(index++);
-            if (!apply(handler, player, op)) return;
+            Op op = ops.get(index);
+            Result result = apply(handler, player, op);
+            if (result == Result.FAILED) return;
+            if (result == Result.RETRY) {
+                if (++retryTicks > MAX_RETRY_TICKS) {
+                    fail(op.note() + " 等了 " + MAX_RETRY_TICKS + " tick 还没生效");
+                }
+                return;
+            }
+            retryTicks = 0;
+            index++;
         }
         finish();
     }
 
     // ------------------------------------------------------------------
 
-    private boolean apply(AbstractContainerMenu handler, LocalPlayer player, Op op) {
-        switch (op.kind()) {
+    private Result apply(AbstractContainerMenu handler, LocalPlayer player, Op op) {
+        return switch (op.kind()) {
             case SWAP -> {
                 Slot slot = InventoryUtils.inventorySlot(handler, player.getInventory(), op.a());
                 if (slot == null) {
                     fail("找不到物品栏第 " + op.a() + " 格");
-                    return false;
+                    yield Result.FAILED;
                 }
-                return ContainerClicks.click(handler, slot, op.b(), ContainerInput.SWAP, op.note());
+                yield ContainerClicks.click(handler, slot, op.b(), ContainerInput.SWAP, op.note())
+                    ? Result.DONE : Result.FAILED;
             }
-            case MOVE -> {
-                return move(handler, player, op);
-            }
-            case THROW -> {
-                Slot slot = InventoryUtils.inventorySlot(handler, player.getInventory(), op.a());
-                if (slot == null) {
-                    fail("找不到物品栏第 " + op.a() + " 格");
-                    return false;
-                }
-                if (slot.getItem().isEmpty()) return true;
-                return ContainerClicks.click(handler, slot, 1, ContainerInput.THROW, op.note());
-            }
-            default -> {
-                return true;
-            }
-        }
+            case MOVE -> move(handler, player, op);
+            case THROW -> throwStack(handler, player, op);
+        };
     }
 
-    private boolean move(AbstractContainerMenu handler, LocalPlayer player, Op op) {
+    /**
+     * 整叠扔掉。
+     *
+     * <p>点一下不算完：**要等服务端把这一格真的清掉**（客户端预测和服务端之间有一趟往返，
+     * 点完立刻去看的话那一格往往还有东西）。所以这里返回 {@link Result#RETRY} 让动作下一 tick
+     * 再看，隔几个 tick 还没清掉就再点一次。
+     */
+    private Result throwStack(AbstractContainerMenu handler, LocalPlayer player, Op op) {
+        Slot slot = InventoryUtils.inventorySlot(handler, player.getInventory(), op.a());
+        if (slot == null) {
+            fail("找不到物品栏第 " + op.a() + " 格");
+            return Result.FAILED;
+        }
+        if (slot.getItem().isEmpty()) return Result.DONE;
+
+        if (retryTicks % RESEND_TICKS == 0
+            && !ContainerClicks.click(handler, slot, 1, ContainerInput.THROW, op.note())) {
+            return Result.FAILED;
+        }
+        return Result.RETRY;
+    }
+
+    private Result move(AbstractContainerMenu handler, LocalPlayer player, Op op) {
         Slot from = InventoryUtils.inventorySlot(handler, player.getInventory(), op.a());
         Slot to = InventoryUtils.inventorySlot(handler, player.getInventory(), op.b());
         if (from == null || to == null) {
             fail("找不到物品栏第 " + (from == null ? op.a() : op.b()) + " 格");
-            return false;
+            return Result.FAILED;
         }
-        if (from.getItem().isEmpty()) return true;
+        if (from.getItem().isEmpty()) return Result.DONE;
 
         ItemStack source = from.getItem();
         ItemStack target = to.getItem();
         if (!target.isEmpty() && !ItemStack.isSameItemSameComponents(target, source)) {
-            fail("要挪到的那一格（第 " + op.b() + " 格）被 " + SingleStageData.idOf(target) + " 占着");
-            return false;
+            // 目标格被别的东西占着。占位的多半是吸上来的圆石（搭平台、拆平台掉的）——
+            // **就地扔掉**，等它真的空了再挪；盒子 / 工具这种值钱的不能扔，直接报错
+            if (!junk(target)) {
+                fail("要挪到的那一格（第 " + op.b() + " 格）被 " + SingleStageData.idOf(target) + " 占着");
+                return Result.FAILED;
+            }
+            if (retryTicks == 0) {
+                ChatUtils.info("第 " + op.b() + " 格被 " + SingleStageData.idOf(target)
+                    + " 占着，就地扔掉再挪");
+            }
+            if (retryTicks % RESEND_TICKS == 0
+                && !ContainerClicks.click(handler, to, 1, ContainerInput.THROW,
+                "扔掉第 " + op.b() + " 格占位的 " + SingleStageData.idOf(target))) {
+                return Result.FAILED;
+            }
+            return Result.RETRY;
         }
 
-        if (!ContainerClicks.click(handler, from, 0, ContainerInput.PICKUP, "拿起")) return false;
-        if (!ContainerClicks.click(handler, to, 0, ContainerInput.PICKUP, op.note())) return false;
+        if (!ContainerClicks.click(handler, from, 0, ContainerInput.PICKUP, "拿起")) {
+            return Result.FAILED;
+        }
+        if (!ContainerClicks.click(handler, to, 0, ContainerInput.PICKUP, op.note())) {
+            return Result.FAILED;
+        }
         if (!handler.getCarried().isEmpty()) {
             // 目标格塞不下整叠：剩下的放回原格，别把东西丢在光标上
             if (!ContainerClicks.click(handler, from, 0, ContainerInput.PICKUP, "剩下的放回去")) {
-                return false;
+                return Result.FAILED;
             }
         }
-        return true;
+        return Result.DONE;
+    }
+
+    /**
+     * 这一叠是不是「可以就地扔掉」的垃圾。
+     *
+     * <p>潜影盒和工具都不能扔（扔了就真没了）；别的东西（圆石、泥土、砂砾……）都是挖矿时
+     * 顺手吸上来的，占了要用的格子就该扔掉。
+     */
+    static boolean junk(ItemStack stack) {
+        if (ShulkerUtils.isShulkerBox(stack)) return false;
+        return MineToolRules.kindOf(stack) == null;
     }
 }

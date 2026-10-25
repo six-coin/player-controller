@@ -158,6 +158,23 @@ public final class SingleStageCtx {
         return detail.levels() - 1;
     }
 
+    /**
+     * 放盒子用的快捷栏格。
+     *
+     * <p>先找 6~8 里空着的；都占着就退回第一格「可以就地扔掉」的（搭平台 / 拆平台吸上来的
+     * 圆石、泥土之类）—— {@link SingleStageInventoryAction} 挪盒子的时候会把它就地扔掉；
+     * 三格都放着潜影盒 / 工具才返回 -1。
+     */
+    public int hotbarSlotForBox() {
+        for (int slot = HOTBAR_FREE_1; slot <= HOTBAR_FREE_3; slot++) {
+            if (live(slot).isEmpty()) return slot;
+        }
+        for (int slot = HOTBAR_FREE_1; slot <= HOTBAR_FREE_3; slot++) {
+            if (SingleStageInventoryAction.junk(live(slot))) return slot;
+        }
+        return -1;
+    }
+
     // ------------------------------------------------------------------
     // 初始子区块里的固定位置
     // ------------------------------------------------------------------

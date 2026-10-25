@@ -41,6 +41,16 @@ public final class ContainerSession {
     /** 等容器界面出来最多等这么多 tick。 */
     private static final int MAX_OPEN_WAIT_TICKS = 60;
 
+    /**
+     * 上一次关掉容器的时刻（{@code level.getGameTime()}）。
+     *
+     * <p>关界面之后**不能马上点物品栏**：{@code closeContainer()} 只是把包发出去，服务端要过一会儿
+     * 才真的把界面关掉。这中间点物品栏格子的包带的是 {@code containerId = 0}，服务端那边还在
+     * 容器里 → 整包被丢掉（{@code handleContainerClick} 第一行就 return），然后关界面时又把物品栏
+     * 整份同步回来 —— 点出去的那一下（扔东西 / 挪格子）就这么被撤销了。
+     */
+    private static long closedAt = Long.MIN_VALUE;
+
     private final BlockPos pos;
     /** 等的是哪种界面；null = 只要是容器界面（不是玩家自己的那个）就行。 */
     @Nullable
@@ -67,6 +77,18 @@ public final class ContainerSession {
 
     public BlockPos pos() {
         return pos;
+    }
+
+    /**
+     * 现在能不能安全地点物品栏（关容器之后要等一个来回）。
+     *
+     * <p>见 {@link #closedAt}：不等的话点出去的那一下会被服务端丢掉、然后被关界面的同步撤销。
+     */
+    public static boolean inventorySettled() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return true;
+        long wait = Math.max(1, PlayerControllerConfig.getNetworkDelayTicks());
+        return mc.level.getGameTime() - closedAt >= wait;
     }
 
     // ------------------------------------------------------------------
@@ -201,6 +223,7 @@ public final class ContainerSession {
         }
         if (mc.player != null && handler != null && mc.player.containerMenu == handler) {
             mc.player.closeContainer();
+            if (mc.level != null) closedAt = mc.level.getGameTime();
         }
         if (holding) {
             ScreenSuppressor.release();

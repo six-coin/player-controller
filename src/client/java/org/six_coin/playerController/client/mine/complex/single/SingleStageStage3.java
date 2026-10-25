@@ -404,9 +404,6 @@ class SingleStageStage3 extends SingleStageStep {
     }
 
     private int firstFreeHotbar() {
-        for (int i = SingleStageCtx.HOTBAR_FREE_1; i <= SingleStageCtx.HOTBAR_FREE_3; i++) {
-            if (ctx.live(i).isEmpty()) return i;
-        }
-        return -1;
+        return ctx.hotbarSlotForBox();
     }
 }

@@ -7,6 +7,7 @@ import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.container.ContainerClicks;
+import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
 
@@ -47,6 +48,9 @@ public class MineTaskInventoryMoveAction extends Action {
             fail("玩家不存在");
             return;
         }
+
+        // 刚关掉容器的话先等一下：服务端那边还没关，点物品栏的包会被丢掉
+        if (!ContainerSession.inventorySettled()) return;
 
         AbstractContainerMenu handler = player.containerMenu;
         if (handler != player.inventoryMenu) {

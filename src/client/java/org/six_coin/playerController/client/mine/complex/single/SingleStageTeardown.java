@@ -215,10 +215,7 @@ class SingleStageTeardown extends SingleStageStep {
     }
 
     private int firstFreeHotbar() {
-        for (int slot = SingleStageCtx.HOTBAR_FREE_1; slot <= SingleStageCtx.HOTBAR_FREE_3; slot++) {
-            if (ctx.live(slot).isEmpty()) return slot;
-        }
-        return -1;
+        return ctx.hotbarSlotForBox();
     }
 
     /** 内容多的排前面。 */
