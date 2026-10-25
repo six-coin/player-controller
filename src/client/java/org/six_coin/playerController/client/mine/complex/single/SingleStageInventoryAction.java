@@ -198,6 +198,9 @@ class SingleStageInventoryAction extends SingleStageStep {
     }
 
     private Result move(AbstractContainerMenu handler, LocalPlayer player, Op op) {
+        // 源格就是目标格：什么都不用做（点两下等于白点，核对也会误判成「没挪成功」）
+        if (op.a() == op.b()) return Result.DONE;
+
         Slot from = InventoryUtils.inventorySlot(handler, player.getInventory(), op.a());
         Slot to = InventoryUtils.inventorySlot(handler, player.getInventory(), op.b());
         if (from == null || to == null) {

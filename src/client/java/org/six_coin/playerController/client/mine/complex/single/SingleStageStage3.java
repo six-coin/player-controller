@@ -352,7 +352,9 @@ class SingleStageStage3 extends SingleStageStep {
             List<ItemStack> contents = ctx.data.box(broken);
             Map<Integer, String> before = ctx.boxSignatures();
             int boxesBefore = ctx.shulkerBoxCount();
-            int slot = broken.equals(ctx.collectSpotB()) ? ctx.collectSlot + 1 : ctx.collectSlot;
+            // 这个位置的家（A / B 各自记着，别用 collectSlot + 1 猜）
+            boolean spotB = broken.equals(ctx.collectSpotB());
+            int home = spotB ? ctx.collectSlotB() : ctx.collectSlotA();
 
             queue.child("快挖掉装满的收集盒 " + broken.toShortString(),
                 () -> MineBlockAction.fastEmpty(broken).owner(Owner.MINE_TASK));
@@ -370,13 +372,18 @@ class SingleStageStage3 extends SingleStageStep {
                     queue.cancel();
                     return;
                 }
-                queue.child("把盒子挪到物品栏第 " + slot + " 格",
+                queue.child("把盒子挪到物品栏第 " + home + " 格",
                     () -> new SingleStageInventoryAction(ctx,
-                        List.of(SingleStageInventoryAction.move(found, slot))));
+                        List.of(SingleStageInventoryAction.move(found, home))));
             });
 
             queue.sync("放新的收集盒", () -> {
-                int source = ctx.collectSlot + 2;
+                int source = ctx.spareSlot();
+                if (source > SingleStageCtx.COLLECT_END) {
+                    fail("备用收集盒用完了（9 个盒子都换过一轮了，现在到第 " + source + " 格）");
+                    queue.cancel();
+                    return;
+                }
                 ItemStack spare = ctx.live(source);
                 if (!ShulkerUtils.isShulkerBox(spare)) {
                     fail("物品栏第 " + source + " 格没有备用的收集盒了（现在放着 "
@@ -397,10 +404,12 @@ class SingleStageStage3 extends SingleStageStep {
                         List.of(SingleStageInventoryAction.move(source, hotbar))));
                 queue.child("放到 " + broken.toShortString(),
                     () -> new SingleStagePlaceAction(ctx, broken, hotbar));
-                queue.sync("记缓存", () -> ctx.data.setBox(broken, newContents));
+                queue.sync("记缓存", () -> {
+                    ctx.data.setBox(broken, newContents);
+                    // 新盒子的家在它原来待的那一格（不是「隔壁」）
+                    ctx.rehomeCollectBox(spotB, source);
+                });
             });
-
-            queue.sync("收集位 +1", () -> ctx.collectSlot++);
         });
     }
 

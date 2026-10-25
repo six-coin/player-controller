@@ -109,8 +109,9 @@ class SingleStageTeardown extends SingleStageStep {
         // 收集盒 → 当前的两个收集位（多的在前）
         queue.sync("拆收集盒", () -> {
             List<BlockPos> boxes = byContent(ctx.collectSpotA(), ctx.collectSpotB());
-            queueBreak(boxes.get(0), new int[]{ctx.collectSlot, ctx.collectSlot + 1});
-            queueBreak(boxes.get(1), new int[]{ctx.collectSlot, ctx.collectSlot + 1});
+            int[] homes = {ctx.collectSlotA(), ctx.collectSlotB()};
+            queueBreak(boxes.get(0), homes);
+            queueBreak(boxes.get(1), homes);
         });
 
         // 拆完之后再确认一遍「多的在前」
@@ -142,7 +143,7 @@ class SingleStageTeardown extends SingleStageStep {
             SingleStageCtx.COBBLE_BOX_FULL}, report));
         ops.addAll(orderOps(new int[]{SingleStageCtx.SLIME_BOX_A, SingleStageCtx.SLIME_BOX_B,
             SingleStageCtx.SLIME_BOX_FULL}, report));
-        ops.addAll(orderOps(new int[]{ctx.collectSlot, ctx.collectSlot + 1}, report));
+        ops.addAll(orderOps(new int[]{ctx.collectSlotA(), ctx.collectSlotB()}, report));
 
         if (ops.isEmpty()) {
             ChatUtils.debug("盒子顺序本来就是递减的（" + String.join("，", report) + "）");

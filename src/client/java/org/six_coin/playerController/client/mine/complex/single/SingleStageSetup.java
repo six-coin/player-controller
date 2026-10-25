@@ -266,7 +266,7 @@ class SingleStageSetup extends SingleStageStep {
                 queue.cancel();
                 return;
             }
-            ctx.collectSlot = slot;
+            ctx.setCollectSlots(slot);
             ChatUtils.info("收集盒用物品栏第 " + slot + "、" + (slot + 1) + " 格"
                 + "（收集位从 " + slot + " 开始）");
             queuePlaceBox(ctx.collectSpotA(), slot, "收集", false);

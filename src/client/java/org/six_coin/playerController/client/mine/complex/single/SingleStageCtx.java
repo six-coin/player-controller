@@ -8,6 +8,7 @@ import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.mine.MineFilter;
 import org.six_coin.playerController.client.mine.MineRegion;
+import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
@@ -126,8 +127,25 @@ public final class SingleStageCtx {
     /** 子区块数据缓存（物品栏 + 六个盒子）。 */
     public final SingleStageData data;
 
-    /** 当前空收集潜影盒位（{@link #COLLECT_START} 起，每换一次 +1）。 */
+    /**
+     * 收集盒 A / B **各自的家**在物品栏哪一格（换盒子的时候会变），以及下一个备用盒在哪一格。
+     *
+     * <p><b>为什么不能写死「A = collectSlot、B = collectSlot + 1，每换一次 +1」</b>：
+     * 换盒子的流程是「打掉 A 的满盒 → 满盒放回 A 的家 → 从备用位拿一盒放到 A」。
+     * 拿来的那盒原来在 `spareSlot`，所以**它的家就是 spareSlot**；而 B 的家还是原来那一格。
+     * 以前直接 `collectSlot++`，等于假设「新盒子的家在隔壁」，换一次就对不上一次：
+     * <ul>
+     *   <li>盒子实际的家和 {@link #collectSlotA()} / {@link #collectSlotB()} 说的不一样；</li>
+     *   <li>下一次换盒子会把满盒挪到**别人的格子**上（撞上已有的盒子）；</li>
+     *   <li>更糟：{@link #expectedEmptySlots()} 里带着这两个格子，扔垃圾的时候
+     *       会把躺在里面的**满盒直接扔进熔岩烧掉**（盒子就是这么丢的）。</li>
+     * </ul>
+     */
     public int collectSlot = COLLECT_START;
+    /** 收集盒 B 的家（不一定是 {@code collectSlot + 1}）。 */
+    public int collectSlotB = COLLECT_START + 1;
+    /** 下一个备用收集盒在哪一格（从 B 的家往上走，取一个少一个）。 */
+    public int spareSlot = COLLECT_START + 2;
 
     /**
      * 已经放到平台上的那几个盒子原来是物品栏的哪几格（圆石 + 黏液块）。
@@ -273,7 +291,36 @@ public final class SingleStageCtx {
     }
 
     public int collectSlotB() {
-        return collectSlot + 1;
+        return collectSlotB;
+    }
+
+    /** 下一个备用收集盒在哪一格。 */
+    public int spareSlot() {
+        return spareSlot;
+    }
+
+    /** 摆收集盒之前定下 A / B 的家（B = A + 1，备用从 B + 1 开始）。 */
+    public void setCollectSlots(int slotA) {
+        this.collectSlot = slotA;
+        this.collectSlotB = slotA + 1;
+        this.spareSlot = slotA + 2;
+    }
+
+    /**
+     * 换完一个收集盒：那个位置的新盒子是从 {@code spare} 格拿来的，所以它的家变成 {@code spare}，
+     * 备用指针往上走一格。
+     *
+     * @param spotB 换的是 B 还是 A
+     */
+    public void rehomeCollectBox(boolean spotB, int spare) {
+        if (spotB) {
+            collectSlotB = spare;
+        } else {
+            collectSlot = spare;
+        }
+        spareSlot = spare + 1;
+        ChatUtils.debug("收集盒 %s 的家改成第 %d 格（下一个备用盒在第 %d 格）",
+            spotB ? "B" : "A", spare, spareSlot);
     }
 
     // ------------------------------------------------------------------
@@ -505,7 +552,8 @@ public final class SingleStageCtx {
     }
 
     /**
-     * 「理应是空位」的那些格子：快捷栏 6~8、背包 22~27、放了盒子出去的那几格、当前两个收集盒的格子。
+     * 「理应是空位」的那些格子：快捷栏 6~8、背包 22~27、放了盒子出去的那几格、当前两个收集盒的家
+     * （盒子在世界上，所以它们的家一定是空的）。
      *
      * <p>卸货的时候这些格子里的东西会被扔掉 —— 它们本来就不该有东西。
      */
@@ -519,7 +567,7 @@ public final class SingleStageCtx {
             if (!slots.contains(slot)) slots.add(slot);
         }
         if (!slots.contains(collectSlot)) slots.add(collectSlot);
-        if (!slots.contains(collectSlot + 1)) slots.add(collectSlot + 1);
+        if (!slots.contains(collectSlotB)) slots.add(collectSlotB);
         return slots;
     }
 
