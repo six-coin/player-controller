@@ -573,7 +573,7 @@ public final class MineCommand {
      * <p><b>临时的调试功能</b>（以后会删）：需求里的单段挖掘，实现在
      * {@link MineComplexSingleStageN}（{@code mine/complex/single/} 下）。
      *
-     * @param detail 必填的 JSON，格式见 {@link SingleStageDetail}：
+     * detail 是必填的 JSON，格式见 {@link SingleStageDetail}：
      *               <pre>
      * {"item_collector_list": ["minecraft:coal"],
      *  "north": "cobblestone", "south": "cobblestone",
