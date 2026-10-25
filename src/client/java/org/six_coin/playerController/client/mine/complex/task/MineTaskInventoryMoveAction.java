@@ -25,11 +25,16 @@ import java.util.List;
  */
 public class MineTaskInventoryMoveAction extends Action {
 
+    /** 「等容器关干净」最多等这么多 tick，等不到就直接干（不能卡死）。 */
+    private static final int SETTLE_WAIT_TICKS = 40;
+
     /** 一次搬运：{@code from} / {@code to} 都是 {@code PlayerInventory} 下标。 */
     public record Move(int from, int to, String note) {
     }
 
     private final List<Move> moves;
+    /** 等容器关干净等了多少 tick。 */
+    private int settleWaitTicks;
 
     public MineTaskInventoryMoveAction(List<Move> moves) {
         this.moves = List.copyOf(moves);
@@ -50,7 +55,8 @@ public class MineTaskInventoryMoveAction extends Action {
         }
 
         // 刚关掉容器的话先等一下：服务端那边还没关，点物品栏的包会被丢掉
-        if (!ContainerSession.inventorySettled()) return;
+        // （最多等 SETTLE_WAIT_TICKS，等不到就直接干 —— 宁可点一下被丢，也不能卡着不动）
+        if (!ContainerSession.inventorySettled() && ++settleWaitTicks <= SETTLE_WAIT_TICKS) return;
 
         AbstractContainerMenu handler = player.containerMenu;
         if (handler != player.inventoryMenu) {

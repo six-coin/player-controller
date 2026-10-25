@@ -32,6 +32,9 @@ class SingleStageInventoryAction extends SingleStageStep {
     /** 没生效的话隔几个 tick 再点一次。 */
     private static final int RESEND_TICKS = 5;
 
+    /** 「等容器关干净」最多等这么多 tick，等不到就直接干（不能卡死）。 */
+    private static final int SETTLE_WAIT_TICKS = 40;
+
     enum Kind {
         /** 点物品栏某一格、按「数字键」换到某个快捷栏格（交换）。 */
         SWAP,
@@ -77,6 +80,8 @@ class SingleStageInventoryAction extends SingleStageStep {
     private int index;
     /** 当前这一下等了几个 tick（扔东西要等服务端把那一格清掉）。 */
     private int retryTicks;
+    /** 等容器关干净等了多少 tick。 */
+    private int settleWaitTicks;
 
     /** 一个操作这一 tick 的结果。 */
     private enum Result {
@@ -108,7 +113,8 @@ class SingleStageInventoryAction extends SingleStageStep {
         }
 
         // 刚关掉容器的话先等一下：服务端那边还没关，点物品栏的包会被丢掉
-        if (!ContainerSession.inventorySettled()) return;
+        // （最多等 SETTLE_WAIT_TICKS，等不到就直接干 —— 宁可点一下被丢，也不能卡着不动）
+        if (!ContainerSession.inventorySettled() && ++settleWaitTicks <= SETTLE_WAIT_TICKS) return;
 
         AbstractContainerMenu handler = player.containerMenu;
         if (handler != player.inventoryMenu) {
