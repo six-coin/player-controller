@@ -17,6 +17,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
+import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.ActionManager;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.mine.MineFilter;
@@ -27,10 +28,16 @@ import org.six_coin.playerController.client.mine.complex.MineComplexManager;
 import org.six_coin.playerController.client.mine.complex.MineRegionInspectAction;
 import org.six_coin.playerController.client.mine.complex.MineTaskRegion;
 import org.six_coin.playerController.client.mine.complex.task.MineTaskMiningAction;
+import org.six_coin.playerController.client.mine.complex.task.MineTaskResupplyAction;
+import org.six_coin.playerController.client.mine.complex.task.MineTaskStationData;
+import org.six_coin.playerController.client.mine.debug.DebugInventory;
+import org.six_coin.playerController.client.mine.debug.DebugInventoryAction;
 import org.six_coin.playerController.client.mine.station.MineStationCheckAction;
+import org.six_coin.playerController.client.mine.station.MineStationManager;
 import org.six_coin.playerController.client.mine.complex.single.MineComplexSingleStageN;
 import org.six_coin.playerController.client.mine.complex.single.SingleStageDetail;
 import org.six_coin.playerController.client.util.DimensionUtils;
+import org.six_coin.playerController.client.util.PlayerUtils;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -68,6 +75,10 @@ import static org.six_coin.playerController.client.commands.CommandStyle.runButt
  * /pc mine task &lt;task_name&gt; c_station_check   跑一遍 /pc mine station check，通过就写 checked: true
  * /pc mine task &lt;task_name&gt; d_start_mining    开始挖（预检查 → 备货 → 按区块逐个挖）
  *                                            （{@code /pc mine complex task <task_name> …} 是同一套）
+ *
+ * /pc mine debug_full_inventory               【调试】把物品栏生成成完全符合 debug_chunk_miner 的样子
+ * /pc mine debug_restock_inventory            【调试】把物品栏生成成「什么都要补货」的样子
+ * /pc mine debug_restock [task_name]          【调试】手动跑一趟补货（要站在挖掘区起始点）
  * </pre>
  *
  * <p>simple 的范围会记进 {@code world_<n>/mine.json}，重新进世界自动接回来
@@ -97,6 +108,16 @@ public final class MineCommand {
             .then(ClientCommands.literal("debug_chunk_miner")
                 .then(ClientCommands.argument("detail", StringArgumentType.greedyString())
                     .executes(MineCommand::debugChunkMiner)))
+            .then(ClientCommands.literal("debug_full_inventory")
+                .executes(MineCommand::debugFullInventory))
+            .then(ClientCommands.literal("debug_restock_inventory")
+                .executes(MineCommand::debugRestockInventory))
+            .then(ClientCommands.literal("debug_restock")
+                .executes(context -> debugRestock(context, null))
+                .then(ClientCommands.argument("task_name", StringArgumentType.word())
+                    .suggests(MineCommand::suggestTasks)
+                    .executes(context -> debugRestock(context,
+                        StringArgumentType.getString(context, "task_name")))))
             .then(ClientCommands.literal("complex")
                 .executes(MineCommand::complexStatus)
                 .then(addTask())
@@ -415,6 +436,12 @@ public final class MineCommand {
             + "\"north\":\"cobblestone\",\"south\":\"cobblestone\",\"west\":\"auto\",\"east\":\"auto\","
             + "\"bottom\":\"auto\",\"levels\":8}"));
         source.sendFeedback(Component.literal("§7    §8五个方向只有 cobblestone / auto 两种；levels = 挖几层（1~8，实际挖 2×levels 格）"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
+            + "debug_full_inventory§7 - §c【调试】§7把物品栏生成成完全符合 debug_chunk_miner 的样子"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
+            + "debug_restock_inventory§7 - §c【调试】§7把物品栏生成成「什么都要补货」的样子"));
+        source.sendFeedback(Component.literal("§7  §f" + ROOT
+            + "debug_restock [task_name]§7 - §c【调试】§7手动跑一趟补货（要站在挖掘区起始点）"));
         source.sendFeedback(Component.literal("§7  范围记在 mine.json 里，重新进世界会接着挖（/pc mine cancel 才会清掉）"));
         return 1;
     }
@@ -560,6 +587,132 @@ public final class MineCommand {
         source.sendFeedback(Component.literal("开始挖掘任务 §f" + name + "§r：" + region.describe()));
         source.sendFeedback(Component.literal("§7  预检查（安全点 / 物品栏 / mend 站立点 / check.json）→ "
             + "备货 → 按区块逐个挖；中途要补货时会去站里补一趟"));
+        return 1;
+    }
+
+    // ------------------------------------------------------------------
+    // debug 物品栏 / 手动补货
+    // ------------------------------------------------------------------
+
+    /** {@code /pc mine debug_full_inventory}：把物品栏摆成完全符合 debug_chunk_miner 的样子。 */
+    private static int debugFullInventory(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        if (source.getPlayer() == null) {
+            source.sendError(Component.literal("没有玩家"));
+            return 0;
+        }
+        if (ActionManager.get().isBusy()) {
+            source.sendError(Component.literal("还有动作在跑（先 /pc mine cancel，或者等它跑完）"));
+            return 0;
+        }
+
+        ActionManager.get().submit(new DebugInventoryAction("完整物品栏",
+            DebugInventory.full(), true));
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7开始生成完整物品栏："
+            + "工具（钻石 + 经验修补 / 耐久 III / 效率 V）、圆石盒 / 黏液块盒全满、"
+            + "9 个空收集盒、熟猪排、熔岩桶、副手图腾；盔甲不动"));
+        source.sendFeedback(Component.literal("§7  用 /item replace 按槽位放（每 tick 一条），"
+            + "跑完会自动跑一遍 debug_chunk_miner 的物品栏检查"));
+        return 1;
+    }
+
+    /** {@code /pc mine debug_restock_inventory}：把物品栏摆成「什么都要补货」的样子。 */
+    private static int debugRestockInventory(CommandContext<FabricClientCommandSource> context) {
+        FabricClientCommandSource source = context.getSource();
+        if (source.getPlayer() == null) {
+            source.sendError(Component.literal("没有玩家"));
+            return 0;
+        }
+        if (ActionManager.get().isBusy()) {
+            source.sendError(Component.literal("还有动作在跑（先 /pc mine cancel，或者等它跑完）"));
+            return 0;
+        }
+
+        ActionManager.get().submit(new DebugInventoryAction("待补货物品栏",
+            DebugInventory.restock(), false));
+        source.sendFeedback(Component.literal("§8[§bPC§8]§r §7开始生成「待补货」物品栏："
+            + "快捷栏 1~5 满耐久、背包 1~5 耐久 99、圆石盒 / 黏液块盒「半空空」、"
+            + "收集盒（深板岩 / 青金石 / 方解石 + 紫水晶块）、食物只有 8 个、副手空；盔甲不动"));
+        source.sendFeedback(Component.literal("§7  生成完可以直接 " + ROOT
+            + "debug_restock 手动跑一趟补货"));
+        return 1;
+    }
+
+    /**
+     * {@code /pc mine debug_restock [task_name]}：手动跑一趟补货。
+     *
+     * <p>就是 {@code d_start_mining} 里挖完一个子区块之后走的那一趟（{@link MineTaskResupplyAction}），
+     * 所以入口约定也一样：**人必须站在挖掘区起始点 {@code (x1, y2+1, z1)}**。
+     */
+    private static int debugRestock(CommandContext<FabricClientCommandSource> context,
+                                    @Nullable String taskName) {
+        FabricClientCommandSource source = context.getSource();
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
+            source.sendError(Component.literal("没有玩家或世界"));
+            return 0;
+        }
+        if (ActionManager.get().isBusy()) {
+            source.sendError(Component.literal("还有动作在跑（先 /pc mine cancel，或者等它跑完）"));
+            return 0;
+        }
+
+        MineComplexManager manager = MineComplexManager.get();
+        String name = taskName;
+        if (name == null) {
+            List<String> withRegion = new ArrayList<>();
+            for (String task : manager.tasks()) {
+                if (manager.region(task) != null) withRegion.add(task);
+            }
+            if (withRegion.size() != 1) {
+                source.sendError(Component.literal("要写任务名（设过挖掘区的任务有 "
+                    + withRegion.size() + " 个" + (withRegion.isEmpty() ? ""
+                    : "：" + String.join("、", withRegion)) + "）"));
+                return 0;
+            }
+            name = withRegion.get(0);
+        }
+
+        if (!manager.has(name)) {
+            source.sendError(Component.literal("没有这个挖掘任务：" + name
+                + "（先 " + ROOT + "complex add_task " + name + "）"));
+            return 0;
+        }
+        MineTaskRegion region = manager.region(name);
+        if (region == null) {
+            source.sendError(Component.literal("挖掘任务 " + name + " 还没设区域（"
+                + ROOT + "task " + name + " a_set_region …）"));
+            return 0;
+        }
+        if (!region.dimension().equals(DimensionUtils.current())) {
+            source.sendError(Component.literal("挖掘区在 " + DimensionUtils.display(region.dimension())
+                + "，你现在在 " + DimensionUtils.display(DimensionUtils.current())));
+            return 0;
+        }
+
+        BlockPos here = PlayerUtils.currentBlockPos();
+        if (here == null || !here.equals(region.headPos())) {
+            source.sendError(Component.literal("要站在挖掘区起始点 " + region.headPos().toShortString()
+                + "（现在在 " + (here == null ? "？" : here.toShortString()) + "）"));
+            return 0;
+        }
+
+        MineTaskStationData stationData = MineTaskStationData.load(MineStationManager.get(),
+            MineStationManager.get().currentCheckFile());
+        if (stationData == null) {
+            source.sendError(Component.literal("读不到 station_data（原因见上面几条；"
+                + "先 " + ROOT + "station check 并且通过）"));
+            return 0;
+        }
+
+        ActionManager.get().submit(new MineTaskResupplyAction(name, region, stationData).suspendCache());
+        if (MineManager.get().cancel()) {
+            source.sendFeedback(Component.literal("§7  （顺手停掉了正在跑的 mine simple，不然它会和补货抢快捷栏）"));
+        }
+        source.sendFeedback(Component.literal("开始手动补货：任务 §f" + name + "§r，"
+            + region.describe()));
+        source.sendFeedback(Component.literal("§7  流程：回安全点 → 卸货 → 补材料 → 换工具 → "
+            + "盔甲 → 拿吃的 → 拿回东西"));
         return 1;
     }
 

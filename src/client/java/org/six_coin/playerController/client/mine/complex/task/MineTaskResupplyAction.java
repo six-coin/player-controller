@@ -13,6 +13,7 @@ import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.PathMoveAction;
+import org.six_coin.playerController.client.container.ContainerCacheTracker;
 import org.six_coin.playerController.client.container.ContainerTypes;
 import org.six_coin.playerController.client.feature.FlightVelocity;
 import org.six_coin.playerController.client.mine.MineTools;
@@ -144,11 +145,24 @@ public class MineTaskResupplyAction extends Action {
     private final Map<String, Integer> collectorRetries = new LinkedHashMap<>();
     /** 「不在路径点网络上 → snap 回网络」用了几次（防止死循环）。 */
     private int networkSnaps;
+    /** 自己挂起 / 恢复容器缓存的自动刷新（挖掘主控已经挂起过了，那边不用这个）。 */
+    private boolean ownsCacheSuspend;
 
     public MineTaskResupplyAction(String task, MineTaskRegion region, MineTaskStationData data) {
         this.task = task;
         this.region = region;
         this.data = data;
+    }
+
+    /**
+     * 自己把容器缓存的自动刷新挂起（{@code /pc mine debug_restock} 单独跑的时候用）。
+     *
+     * <p>挖掘主控（{@code MineTaskMiningAction}）在开任务的时候已经挂起过了，那边不要调这个 ——
+     * 挂起是个布尔量，嵌套着用会在补货结束时把主控的挂起一起解掉。
+     */
+    public MineTaskResupplyAction suspendCache() {
+        this.ownsCacheSuspend = true;
+        return this;
     }
 
     @Override
@@ -169,6 +183,8 @@ public class MineTaskResupplyAction extends Action {
         }
 
         if (!prepare()) return;
+
+        if (ownsCacheSuspend) ContainerCacheTracker.setSuspended(true);
 
         FlightVelocity.begin();
         flying = true;
@@ -218,6 +234,10 @@ public class MineTaskResupplyAction extends Action {
         if (flying) {
             FlightVelocity.end();
             flying = false;
+        }
+        if (ownsCacheSuspend) {
+            ContainerCacheTracker.setSuspended(false);
+            ownsCacheSuspend = false;
         }
     }
 
