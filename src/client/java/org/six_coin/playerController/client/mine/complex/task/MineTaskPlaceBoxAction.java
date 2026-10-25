@@ -101,8 +101,8 @@ public class MineTaskPlaceBoxAction extends Action {
     @Override
     protected void onEnd() {
         if (hotbarHeld) {
-            HotbarManager.get().release(Owner.MINE);
-            RotateManager.get().release(Owner.MINE);
+            HotbarManager.get().release(Owner.MINE_TASK);
+            RotateManager.get().release(Owner.MINE_TASK);
             hotbarHeld = false;
         }
     }
@@ -162,7 +162,7 @@ public class MineTaskPlaceBoxAction extends Action {
     }
 
     private void beginPlace(Minecraft mc) {
-        if (!HotbarManager.get().request(Owner.MINE, hotbarSlot)) {
+        if (!HotbarManager.get().request(Owner.MINE_TASK, hotbarSlot)) {
             fail("快捷栏第 " + (hotbarSlot + 1) + " 格现在不让切过去（别的功能在用）");
             return;
         }
@@ -205,7 +205,7 @@ public class MineTaskPlaceBoxAction extends Action {
         Vec3 hitPos = Vec3.atCenterOf(target).add(0, 0.5, 0);
         BlockHitResult hit = new BlockHitResult(hitPos, side, target, false);
 
-        RotateManager.get().rotateTo(Owner.MINE, hitPos);
+        RotateManager.get().rotateTo(Owner.MINE_TASK, hitPos);
         ChatUtils.debug("摆%s：%s（点它自己，手上 %s）", label, target.toShortString(),
             InventoryUtils.describe(player.getInventory().getItem(hotbarSlot)));
         mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit);

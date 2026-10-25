@@ -7,6 +7,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -61,7 +62,7 @@ class SingleStageBoxGetAction extends SingleStageStep {
         this.filter = filter;
         this.wants = List.copyOf(wants);
         this.what = what;
-        this.session = new ContainerSession(this.box);
+        this.session = new ContainerSession(this.box).withOwner(Owner.MINE_TASK);
     }
 
     /** 实际拿到了几叠。 */

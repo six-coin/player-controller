@@ -8,6 +8,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.container.ContainerSession;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -46,7 +47,7 @@ class SingleStageBoxPutAction extends SingleStageStep {
         this.box = box.immutable();
         this.filter = filter;
         this.what = what;
-        this.session = new ContainerSession(this.box);
+        this.session = new ContainerSession(this.box).withOwner(Owner.MINE_TASK);
     }
 
     /** 是盒子满了才停的（false = 物品栏里没有符合条件的东西了）。 */

@@ -4,6 +4,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.ItemStack;
+import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.stock.MineBlockAction;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -64,7 +65,7 @@ public class MineTaskBreakBoxAction extends Action {
         boxesBefore = countBoxes(player);
         boxSlotsBefore.clear();
         boxSlotsBefore.addAll(boxSlots(player));
-        miner = MineBlockAction.fastEmpty(pos);
+        miner = MineBlockAction.fastEmpty(pos).owner(Owner.MINE_TASK);
         miner.start();
     }
 

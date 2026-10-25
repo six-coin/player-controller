@@ -187,12 +187,11 @@ public final class SingleStageCheck {
             problems.add("副手是 " + SingleStageData.idOf(offhand) + "，要放不死图腾");
         }
 
-        // 背包 1~5：备用剑 / 备用镐 ×3 / 备用铲，耐久必须满
+        // 背包 1~5：备用剑 / 备用镐 ×3 / 备用铲。
+        // 剑、铲每格都必须满耐久；镐子是**三把共用一份耐久**（见 pickaxeSpares）
         toolSlot(data, problems, SingleStageCtx.SPARE_SWORD, MineToolRules.Kind.SWORD, "背包 1", TOOL_FULL);
-        toolSlot(data, problems, SingleStageCtx.SPARE_PICKAXE_1, MineToolRules.Kind.PICKAXE, "背包 2", TOOL_FULL);
-        toolSlot(data, problems, SingleStageCtx.SPARE_PICKAXE_2, MineToolRules.Kind.PICKAXE, "背包 3", TOOL_FULL);
+        pickaxeSpares(data, problems);
         toolSlot(data, problems, SingleStageCtx.SPARE_SHOVEL, MineToolRules.Kind.SHOVEL, "背包 4", TOOL_FULL);
-        toolSlot(data, problems, SingleStageCtx.SPARE_PICKAXE_3, MineToolRules.Kind.PICKAXE, "背包 5", TOOL_FULL);
 
         // 背包 6~8：圆石。9~11：黏液块 / 树脂块。两组规则一样：
         // 第一盒必须满（1728）、第二盒至少 5 组（320）、第三盒不要求；
@@ -266,6 +265,33 @@ public final class SingleStageCheck {
                     + "的，18~21 必须是空潜影盒");
             }
         }
+    }
+
+    /**
+     * 背包 2 / 3 / 5 的三把备用镐子。
+     *
+     * <p>每一格都必须是镐子（种类 / 附魔），但**耐久是三把共用一份的**：挖矿的时候是
+     * 「手上那把快坏了就换下一把，换下来的坏镐子占着它原来那一格」，所以背包里有一两把
+     * 96/1561 的坏镐子完全正常 —— 三把**全都**不满耐久才需要回去补货。
+     */
+    private static void pickaxeSpares(SingleStageData data, List<String> problems) {
+        int[] slots = SingleStageCtx.SPARE_PICKAXES;
+        String[] labels = {"背包 2", "背包 3", "背包 5"};
+        for (int i = 0; i < slots.length; i++) {
+            toolSlot(data, problems, slots[i], MineToolRules.Kind.PICKAXE, labels[i], 0);
+        }
+
+        List<String> remainings = new ArrayList<>();
+        for (int i = 0; i < slots.length; i++) {
+            ItemStack stack = data.stack(slots[i]);
+            if (MineToolRules.kindOf(stack) != MineToolRules.Kind.PICKAXE) continue;  // 已经报过了
+            if (stack.getDamageValue() == 0) return;                                  // 还有一把满的
+            remainings.add(labels[i] + " 剩 " + (stack.getMaxDamage() - stack.getDamageValue())
+                + "/" + stack.getMaxDamage());
+        }
+        if (remainings.isEmpty()) return;      // 三格都不是镐子，上面的检查已经报过
+        problems.add("背包 2 / 3 / 5 的备用镐子都不满耐久（" + String.join("、", remainings)
+            + "）—— 三把都换过一轮了");
     }
 
     /** 一个潜影盒的装满程度。 */

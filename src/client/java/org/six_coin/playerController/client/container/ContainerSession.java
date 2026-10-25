@@ -59,6 +59,8 @@ public final class ContainerSession {
     /** 等的是哪种界面；null = 只要是容器界面（不是玩家自己的那个）就行。 */
     @Nullable
     private final Class<? extends AbstractContainerMenu> expected;
+    /** 转头记在谁名下（{@link Owner#priority()} 决定谁抢得过谁）。 */
+    private Owner owner = Owner.STOCK;
 
     private AbstractContainerMenu handler;
     private int openWaitTicks;
@@ -84,6 +86,17 @@ public final class ContainerSession {
     }
 
     /**
+     * 这次会话的转头 / 快捷栏记在谁名下（默认 {@link Owner#STOCK}）。
+     *
+     * <p>挖掘任务那边要换成 {@link Owner#MINE_TASK}：不然日志里会出现莫名其妙的「STOCK 占用」，
+     * 而且会和 {@code /pc stock} 抢同一份优先级。
+     */
+    public ContainerSession withOwner(Owner owner) {
+        this.owner = owner;
+        return this;
+    }
+
+    /**
      * 现在能不能安全地点物品栏（关容器之后要等一个来回）。
      *
      * <p>见 {@link #closedAtNanos}：不等的话点出去的那一下会被服务端丢掉、然后被关界面的同步撤销。
@@ -102,7 +115,7 @@ public final class ContainerSession {
             ScreenSuppressor.acquire();
             holding = true;
         }
-        ContainerOpener.open(mc, player, pos);
+        ContainerOpener.open(mc, player, pos, owner);
     }
 
     /**
@@ -233,9 +246,9 @@ public final class ContainerSession {
             ScreenSuppressor.release();
             holding = false;
         }
-        // 开容器的时候是用 Owner.STOCK 转的头（见 ContainerOpener），必须在这里还回去：
-        // 不还的话 STOCK 会一直占着朝向，之后 mine / attack 的转头全都被
-        // 「不让转头：现在是 STOCK 在用」挡掉（挖掘会一直卡在 ROTATE_DENIED）。
-        RotateManager.get().release(Owner.STOCK);
+        // 开容器的时候是用 owner 转的头（见 ContainerOpener），必须在这里还回去：
+        // 不还的话它会一直占着朝向，之后 mine / attack 的转头全都被
+        // 「不让转头：现在是 X 在用」挡掉（挖掘会一直卡在 ROTATE_DENIED）。
+        RotateManager.get().release(owner);
     }
 }

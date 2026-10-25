@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.stock.MineBlockAction;
 import org.six_coin.playerController.client.util.ChatUtils;
@@ -803,7 +804,7 @@ class SingleStageStage1 extends SingleStageStep {
             + " 换成背包第 " + swapReserve + " 格那盒");
 
         swapQueue.child("快挖掉 " + swapSpot.toShortString(),
-            () -> MineBlockAction.fastEmpty(swapSpot));
+            () -> MineBlockAction.fastEmpty(swapSpot).owner(Owner.MINE_TASK));
         swapQueue.child("snap 到 " + swapSpot.toShortString(),
             () -> new SingleStageSnapAction(ctx, swapSpot));
         swapQueue.child("等物品栏吸到盒子",

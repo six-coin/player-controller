@@ -53,6 +53,9 @@ public class MineBlockAction extends Action {
     /** 快挖时实际用的那一格快捷栏（-1 = 还没定）。 */
     private int hand = -1;
 
+    /** 快捷栏 / 转头记在谁名下（默认备货；挖掘任务那边换成 {@link Owner#MINE_TASK}）。 */
+    private Owner owner = Owner.STOCK;
+
     /**
      * 挖之前那一格是什么方块。
      *
@@ -89,6 +92,12 @@ public class MineBlockAction extends Action {
      */
     public static MineBlockAction fastEmpty(BlockPos pos) {
         return new MineBlockAction(pos, -1, true);
+    }
+
+    /** 换一个 owner：挖掘任务用 {@link Owner#MINE_TASK}，别跟 {@code /pc stock} 抢。 */
+    public MineBlockAction owner(Owner owner) {
+        this.owner = owner;
+        return this;
     }
 
     @Override
@@ -131,14 +140,14 @@ public class MineBlockAction extends Action {
                 + "（挖潜影盒要用空手）");
             return;
         }
-        if (!HotbarManager.get().request(Owner.STOCK, slot)) {
+        if (!HotbarManager.get().request(owner, slot)) {
             fail("快捷栏第 " + (slot + 1) + " 格现在不让切过去（别的功能在用）");
             return;
         }
 
         ItemStack tool = player.getInventory().getItem(slot);
         side = PlayerUtils.facingSide(pos);
-        RotateManager.get().rotateTo(Owner.STOCK, pos);
+        RotateManager.get().rotateTo(owner, pos);
 
         original = state.getBlock();
         ChatUtils.debug("%s %s（%s，面 %s，手上 %s）", fast ? "快挖" : "开始挖",
@@ -181,7 +190,7 @@ public class MineBlockAction extends Action {
             }
             ChatUtils.debug("快挖 %s 没碎，再发一次（第 %d 次）", pos.toShortString(), fastTries);
             // 这中间 mine simple 可能把快捷栏抢回去了，重新切一次再发
-            if (hand >= 0) HotbarManager.get().request(Owner.STOCK, hand);
+            if (hand >= 0) HotbarManager.get().request(owner, hand);
             breakNow(mc, mc.player, pos);
             return;
         }
@@ -197,8 +206,8 @@ public class MineBlockAction extends Action {
 
     @Override
     protected void onEnd() {
-        HotbarManager.get().release(Owner.STOCK);
-        RotateManager.get().release(Owner.STOCK);
+        HotbarManager.get().release(owner);
+        RotateManager.get().release(owner);
 
         Minecraft mc = Minecraft.getInstance();
         if (mc.gameMode == null || mc.level == null) return;

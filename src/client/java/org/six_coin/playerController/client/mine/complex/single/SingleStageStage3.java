@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.stock.MineBlockAction;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
@@ -354,7 +355,7 @@ class SingleStageStage3 extends SingleStageStep {
             int slot = broken.equals(ctx.collectSpotB()) ? ctx.collectSlot + 1 : ctx.collectSlot;
 
             queue.child("快挖掉装满的收集盒 " + broken.toShortString(),
-                () -> MineBlockAction.fastEmpty(broken));
+                () -> MineBlockAction.fastEmpty(broken).owner(Owner.MINE_TASK));
             queue.child("snap 到 " + broken.toShortString(),
                 () -> new SingleStageSnapAction(ctx, broken));
             queue.child("等物品栏吸到盒子",

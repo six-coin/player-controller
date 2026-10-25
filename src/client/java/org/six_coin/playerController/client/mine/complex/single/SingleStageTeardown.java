@@ -5,6 +5,7 @@ import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.BlockPos;
+import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.mine.MineManager;
 import org.six_coin.playerController.client.mine.MineRegion;
 import org.six_coin.playerController.client.stock.MineBlockAction;
@@ -241,7 +242,7 @@ class SingleStageTeardown extends SingleStageStep {
             int boxesBefore = ctx.shulkerBoxCount();
 
             queue.child("快挖掉 " + spot.toShortString(),
-                () -> MineBlockAction.fastEmpty(spot));
+                () -> MineBlockAction.fastEmpty(spot).owner(Owner.MINE_TASK));
             queue.child("snap 到 " + spot.toShortString(),
                 () -> new SingleStageSnapAction(ctx, spot));
             // 必须等物品栏真的把盒子吸进来（个数 +1 且认得出是哪一格）才回临时站立点，

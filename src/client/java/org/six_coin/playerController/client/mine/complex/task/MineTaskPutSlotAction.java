@@ -9,6 +9,7 @@ import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.container.ContainerSession;
+import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
@@ -51,7 +52,7 @@ public class MineTaskPutSlotAction extends Action {
         this.inventorySlot = inventorySlot;
         this.containerSlot = containerSlot;
         this.label = label;
-        this.session = new ContainerSession(container.pos());
+        this.session = new ContainerSession(container.pos()).withOwner(Owner.MINE_TASK);
     }
 
     @Override
@@ -130,16 +131,8 @@ public class MineTaskPutSlotAction extends Action {
             return;
         }
 
-        if (source.getItem().isEmpty()) {
-            fail("物品栏第 " + inventorySlot + " 格是空的，没" + label + "可放");
-            return;
-        }
-        if (!target.getItem().isEmpty()) {
-            fail("容器第 " + containerSlot + " 格被 " + InventoryUtils.describe(target.getItem())
-                + " 占着（应该是空的）");
-            return;
-        }
-
+        // 东西已经在光标上了：直接放进目标格。
+        // **这一步必须在「源格是不是空的」之前判断** —— 拿起来之后源格本来就是空的。
         if (step == 1) {
             if (session.handler().getCarried().isEmpty()) {
                 if (++stepWaitTicks > MAX_STEP_WAIT_TICKS) {
@@ -147,7 +140,6 @@ public class MineTaskPutSlotAction extends Action {
                 }
                 return;
             }
-            ItemStack stack = session.handler().getCarried();
             if (!session.click(target, 0, ContainerInput.PICKUP, "把" + label + "放进容器第 "
                 + containerSlot + " 格")) {
                 fail("点不了容器第 " + containerSlot + " 格");
@@ -155,6 +147,16 @@ public class MineTaskPutSlotAction extends Action {
             }
             step = 2;
             stepWaitTicks = 0;
+            return;
+        }
+
+        if (source.getItem().isEmpty()) {
+            fail("物品栏第 " + inventorySlot + " 格是空的，没" + label + "可放");
+            return;
+        }
+        if (!target.getItem().isEmpty()) {
+            fail("容器第 " + containerSlot + " 格被 " + InventoryUtils.describe(target.getItem())
+                + " 占着（应该是空的）");
             return;
         }
 

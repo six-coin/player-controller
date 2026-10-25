@@ -27,7 +27,15 @@ public enum Owner {
     MEND(3),
 
     /** 备货：优先级最高，跑备货的时候别人的请求都不作数。 */
-    STOCK(4);
+    STOCK(4),
+
+    /**
+     * 挖掘任务（{@code d_start_mining} 那一整套：补货、搭/拆临时工作站、拆潜影盒）。
+     *
+     * <p>比 {@link #STOCK} 还高：它是长时间跑的全自动流程，抢不过别人就会半路失败
+     * （备货是 {@code /pc stock} 那套，和挖掘任务是两件事，别混着用）。
+     */
+    MINE_TASK(5);
 
     private final int priority;
 

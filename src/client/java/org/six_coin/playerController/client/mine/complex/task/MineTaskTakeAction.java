@@ -10,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.container.ContainerSession;
+import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
@@ -89,7 +90,7 @@ public class MineTaskTakeAction extends Action {
         this.containerSlot = containerSlot;
         this.filter = filter;
         this.label = label;
-        this.session = new ContainerSession(container.pos());
+        this.session = new ContainerSession(container.pos()).withOwner(Owner.MINE_TASK);
     }
 
     /** 那一格空着也算正常结束（换工具时用：那一格本来就没东西也正常）。 */

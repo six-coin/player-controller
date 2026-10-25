@@ -17,6 +17,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.action.PathMoveAction;
 import org.six_coin.playerController.client.container.ContainerSession;
@@ -443,7 +444,7 @@ public class MineStationCheckAction extends Action {
             return;
         }
 
-        session = new ContainerSession(target.pos());
+        session = new ContainerSession(target.pos()).withOwner(Owner.MINE_TASK);
         session.open(client, player);
         stage = Stage.OPENING;
     }

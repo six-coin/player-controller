@@ -10,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.container.ContainerSession;
+import org.six_coin.playerController.client.owner.Owner;
 import org.six_coin.playerController.client.container.InventoryUtils;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
@@ -149,7 +150,7 @@ public class MineTaskContainerAction extends Action {
         this.invSlots = Set.copyOf(invSlots);
         this.what = what;
         this.allowClose = allowClose;
-        this.session = new ContainerSession(this.pos);
+        this.session = new ContainerSession(this.pos).withOwner(Owner.MINE_TASK);
     }
 
     /** 搬走了几个（{@link Mode#COUNT} 时没意义）。 */
