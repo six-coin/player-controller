@@ -699,15 +699,11 @@ public class MineTaskResupplyAction extends Action {
     /** 这一种材料补完了：物品栏里还剩的同类东西放回 item_temp，然后下一步。 */
     private void finishMaterial(Material material, Runnable next) {
         LocalPlayer player = Minecraft.getInstance().player;
-        MineTaskStationData.ContainerInfo source = itemTempWith(material.filter());
-        if (player != null && source != null && hasMatching(player, material.filter())) {
-            goToAccess(source, () -> run(
-                new MineTaskContainerAction(source, MineTaskContainerAction.Mode.TO_CONTAINER,
-                    material.filter(), 0, Set.of(), "剩下的" + material.label() + "放回 item_temp"),
-                next));
+        if (player == null || !hasMatching(player, material.filter())) {
+            next.run();
             return;
         }
-        next.run();
+        dumpToItemTemp(material.filter(), "剩下的" + material.label(), next);
     }
 
     /** item_temp 里没货了：去缓存拿 3 盒倒进 item_temp，再回到上面的循环。 */
@@ -783,29 +779,88 @@ public class MineTaskResupplyAction extends Action {
                 () -> fetchBoxes(material, cache, index + 1, next)))));
     }
 
-    /** 临时摆放处那 3 个盒子：倒进物品栏 → 放进 item_temp。 */
+    /** 临时摆放处那 3 个盒子：逐个倒进物品栏 → 放进 item_temp。 */
     private void dumpTempBoxes(Material material, int index, Runnable next) {
         if (index >= 3) {
             next.run();
             return;
         }
-
         MineTaskStationData.Placement spot = temp.get(index);
-        goToPlacement(spot, () -> run(
-            new MineTaskContainerAction(spot.pos(), MineTaskContainerAction.Mode.TO_INVENTORY,
-                ANY, 0, Set.of(), "把临时盒倒进物品栏"),
-            () -> {
-                MineTaskStationData.ContainerInfo target = data.firstContainer(MineStationPart.ITEM_TEMP);
-                if (target == null) {
-                    fail("station_data 里没有任务前物品暂存处（item_temp）");
+        emptyTempBox(material, spot, () -> dumpTempBoxes(material, index + 1, next));
+    }
+
+    /**
+     * 把一个临时盒**倒空**。
+     *
+     * <p>一次「倒进物品栏」可能只倒进去一部分（物品栏满了）：那就先把物品栏里的材料塞进
+     * item_temp，回来接着倒，直到盒子真的空了。不这样的话剩下的材料会跟着盒子被拆下来 ——
+     * 变成一个「不是空盒」的潜影盒卡在物品栏里（回收处不收，下一轮检查也过不了）。
+     */
+    private void emptyTempBox(Material material, MineTaskStationData.Placement spot, Runnable next) {
+        goToPlacement(spot, () -> {
+            MineTaskContainerAction take = new MineTaskContainerAction(spot.pos(),
+                MineTaskContainerAction.Mode.TO_INVENTORY, ANY, 0, Set.of(), "把临时盒倒进物品栏");
+            run(take, () -> {
+                LocalPlayer player = Minecraft.getInstance().player;
+                if (take.inventoryFull() && player != null && hasMatching(player, material.filter())) {
+                    ChatUtils.debug("物品栏满了，先把%s塞进 item_temp，回来接着倒", material.label());
+                    dumpToItemTemp(material.filter(), material.label(),
+                        () -> emptyTempBox(material, spot, next));
                     return;
                 }
-                goToAccess(target, () -> run(
-                    new MineTaskContainerAction(target,
-                        MineTaskContainerAction.Mode.TO_CONTAINER, material.filter(), 0, Set.of(),
-                        "把" + material.label() + "放进 item_temp"),
-                    () -> dumpTempBoxes(material, index + 1, next)));
-            }));
+                dumpToItemTemp(material.filter(), material.label(), next);
+            });
+        });
+    }
+
+    /**
+     * 把物品栏里的东西全部塞进 {@code item_temp} —— **一个个容器试过去**，装满一个换下一个。
+     *
+     * <p>{@code item_temp} 是列表（可以配好几个大箱子）。以前只认第一个（{@code firstContainer}），
+     * 第一个满了就一个都塞不进去：倒临时盒的时候 1728 个只进去 1408 个，剩下的把物品栏撑满，
+     * 紧接着拆盒子连盒子都捡不起来（「等了 5 秒，物品栏里没多出潜影盒」）。
+     *
+     * @param filter 只搬这些东西（{@code ANY} = 全搬）
+     */
+    private void dumpToItemTemp(Predicate<ItemStack> filter, String what, Runnable next) {
+        List<MineTaskStationData.ContainerInfo> containers =
+            data.containers(MineStationPart.ITEM_TEMP);
+        if (containers.isEmpty()) {
+            fail("station_data 里没有任务前物品暂存处（item_temp）");
+            return;
+        }
+        dumpToItemTemp(containers, 0, filter, what, next);
+    }
+
+    private void dumpToItemTemp(List<MineTaskStationData.ContainerInfo> containers, int index,
+                                Predicate<ItemStack> filter, String what, Runnable next) {
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null) {
+            fail("玩家不存在");
+            return;
+        }
+        if (!hasMatching(player, filter)) {
+            next.run();
+            return;
+        }
+        if (index >= containers.size()) {
+            fail("item_temp 的 " + containers.size() + " 个容器都塞满了，" + what
+                + " 还有一部分在物品栏里（腾点地方，或者多加一个 item_temp）");
+            return;
+        }
+
+        MineTaskStationData.ContainerInfo target = containers.get(index);
+        goToAccess(target, () -> {
+            MineTaskContainerAction put = new MineTaskContainerAction(target,
+                MineTaskContainerAction.Mode.TO_CONTAINER, filter, 0, Set.of(),
+                "把" + what + "放进 item_temp #" + target.id());
+            run(put, () -> {
+                if (put.moved() == 0 && put.containerFull()) {
+                    ChatUtils.debug("item_temp #%d 满了，换下一个", target.id());
+                }
+                dumpToItemTemp(containers, index + 1, filter, what, next);
+            });
+        });
     }
 
     /** 拆掉临时摆放处的 3 个空盒，放回空潜影盒回收处。 */
