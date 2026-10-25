@@ -1359,18 +1359,14 @@ public class MineTaskResupplyAction extends Action {
     }
 
     /**
-     * 走到摆放处（站到它上面那一格）。
+     * 走到摆放处 —— **一定要站到盒子上面那一格**。
      *
-     * <p>**已经在触及范围内就不走了**：潜影盒是浮空的，站上去 / 拆放的时候人会被顶高半格，
-     * 于是 {@code PathPlanner} 会报「你现在所在的 X 既不是路径点」—— 明明伸手就够得着，
-     * 没必要为此先 snap 回网络再飞回来。够不着才走（走的时候如果发现不在网络上，{@link #goTo}
-     * 会先 snap 回最近的路径点）。
+     * <p>不能因为「已经够得着」就不走：拆盒子的时候掉落物是从盒子那一格往上吸的，
+     * 人站在旁边（虽然够得着）就捡不到，拆完等 5 秒直接失败。所以这里老老实实走。
+     *
+     * <p>人不在路径点网络上（被潜影盒顶高半格之类）时 {@link #goTo} 会先 snap 回最近的路径点。
      */
     private void goToPlacement(MineTaskStationData.Placement spot, Runnable next) {
-        if (PlayerUtils.isWithinReach(spot.pos())) {
-            next.run();
-            return;
-        }
         BlockPos target = spot.access() != null ? spot.access() : spot.pos().above();
         goTo(target, spot.dimension(), next);
     }
