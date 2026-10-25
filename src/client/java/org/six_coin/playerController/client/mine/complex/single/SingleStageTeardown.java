@@ -243,8 +243,8 @@ class SingleStageTeardown extends SingleStageStep {
             Map<Integer, String> before = ctx.boxSignatures();
             int boxesBefore = ctx.shulkerBoxCount();
 
-            queue.child("挖掉 " + spot.toShortString(),
-                () -> new MineBlockAction(spot, SingleStageCtx.HOTBAR_PICKAXE));
+            queue.child("快挖掉 " + spot.toShortString(),
+                () -> MineBlockAction.fastEmpty(spot));
             queue.child("snap 到 " + spot.toShortString(),
                 () -> new SingleStageSnapAction(ctx, spot));
             // 必须等物品栏真的把盒子吸进来（个数 +1 且认得出是哪一格）才回临时站立点，

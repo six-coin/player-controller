@@ -92,7 +92,7 @@ public class MineTaskTakeAction extends Action {
         this.session = new ContainerSession(container.pos());
     }
 
-    /** 那一格空着也算正常结束（借工具时用：借不到就空手干活）。 */
+    /** 那一格空着也算正常结束（换工具时用：那一格本来就没东西也正常）。 */
     public MineTaskTakeAction tolerant() {
         this.tolerant = true;
         return this;

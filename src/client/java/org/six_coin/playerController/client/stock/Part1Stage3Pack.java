@@ -552,10 +552,12 @@ final class Part1Stage3Pack extends StockStep {
         });
 
         // 这一段飞行整段持有（引用计数），中途不关飞行
-        pushChild("挖掉摆放处 #" + placementId + " 的潜影盒",
+        // 盒子用**空手快挖**（同一 tick START+STOP）：不吃镐子耐久，也不占挖的那几 tick。
+        // 空手格用 PICKUP_HOTBAR（上面已经验过是空的），挖下来的盒子正好落在那一格。
+        pushChild("快挖掉摆放处 #" + placementId + " 的潜影盒",
             () -> {
                 beginFlightHold();
-                return new MineBlockAction(spot.pos(), PICKAXE_HOTBAR);
+                return MineBlockAction.fastEmpty(spot.pos(), PICKUP_HOTBAR);
             },
             action -> state.clearPlacement(placementId));
 

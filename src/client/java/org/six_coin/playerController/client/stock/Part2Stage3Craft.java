@@ -1326,10 +1326,11 @@ final class Part2Stage3Craft extends StockStep {
             ChatUtils.debug("挖之前物品栏里有 " + boxesBeforePickup + " 个潜影盒");
         });
 
-        pushChild("挖掉摆放处 #" + placementId + " 的潜影盒",
+        // 盒子用**空手快挖**（同一 tick START+STOP），空手格用 PICKUP_HOTBAR（验过是空的）
+        pushChild("快挖掉摆放处 #" + placementId + " 的潜影盒",
             () -> {
                 beginFlightHold();
-                return new MineBlockAction(spot.pos(), PICKAXE_HOTBAR);
+                return MineBlockAction.fastEmpty(spot.pos(), PICKUP_HOTBAR);
             },
             action -> {
                 state.clearPlacement(placementId);

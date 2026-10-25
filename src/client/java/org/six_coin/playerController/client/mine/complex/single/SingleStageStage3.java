@@ -353,8 +353,8 @@ class SingleStageStage3 extends SingleStageStep {
             int boxesBefore = ctx.shulkerBoxCount();
             int slot = broken.equals(ctx.collectSpotB()) ? ctx.collectSlot + 1 : ctx.collectSlot;
 
-            queue.child("挖掉装满的收集盒 " + broken.toShortString(),
-                () -> new MineBlockAction(broken, SingleStageCtx.HOTBAR_PICKAXE));
+            queue.child("快挖掉装满的收集盒 " + broken.toShortString(),
+                () -> MineBlockAction.fastEmpty(broken));
             queue.child("snap 到 " + broken.toShortString(),
                 () -> new SingleStageSnapAction(ctx, broken));
             queue.child("等物品栏吸到盒子",

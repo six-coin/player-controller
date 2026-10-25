@@ -25,6 +25,10 @@ import org.six_coin.playerController.client.mine.MineTools;
  *
  * <p>「可用」和「待修复」的分界线是**耐久满不满**（见 {@link #isUsable}）：
  * 只要掉了一点耐久就是「待修复」，不参与「每种至少 2 件可用」的计数。
+ *
+ * <p>挖掘任务里真正在用的工具（快捷栏 / 背包那几格）不是这个标准：斧头、锄头掉到
+ * {@value #AXE_HOE_MIN_DURABILITY} 以下才换，剑 / 镐 / 铲掉到 {@value #TOOL_MIN_DURABILITY}
+ * 以下才换（见 {@link #minDurability}）。
  */
 public final class MineToolRules {
 
@@ -58,6 +62,29 @@ public final class MineToolRules {
 
     /** 每种至少要几件「可用」的。 */
     public static final int REQUIRED_PER_KIND = 2;
+
+    /** 镐子要用 4 把（快捷栏 1 把 + 背包 3 把备用），缓存里至少得备这么多。 */
+    public static final int REQUIRED_PICKAXES = 4;
+
+    /** 剑 / 镐 / 铲：剩这么点耐久就该换了（它们用得多，换得勤）。 */
+    public static final int TOOL_MIN_DURABILITY = 200;
+
+    /**
+     * 斧头 / 锄头：剩 {@value #AXE_HOE_MIN_DURABILITY} 耐久以上都算能用。
+     *
+     * <p>这两种用得很少，要求「满耐久」的话每掉一点就得回一趟补货，不值当。
+     */
+    public static final int AXE_HOE_MIN_DURABILITY = 1200;
+
+    /**
+     * 这种工具「还能用」的最低剩余耐久 —— debug 前的检查和补货共用这一套。
+     *
+     * <p>斧头 / 锄头 {@value #AXE_HOE_MIN_DURABILITY}，其余 {@value #TOOL_MIN_DURABILITY}。
+     */
+    public static int minDurability(Kind kind) {
+        return kind == Kind.AXE || kind == Kind.HOE
+            ? AXE_HOE_MIN_DURABILITY : TOOL_MIN_DURABILITY;
+    }
 
     private MineToolRules() {
     }

@@ -90,8 +90,14 @@ public class MineTaskContainerAction extends Action {
     private int countedEmpty;
     /** {@link Mode#COUNT}：里面有几个潜影盒。 */
     private int countedBoxes;
-    /** {@link Mode#COUNT} 数到的工具：容器第几格、什么种类、还剩多少耐久。 */
-    public record ToolEntry(int slot, MineToolRules.Kind kind, int remaining, String itemId) {
+    /** {@link Mode#COUNT} 数到的工具：容器第几格、什么种类、还剩多少耐久、耐久上限。 */
+    public record ToolEntry(int slot, MineToolRules.Kind kind, int remaining, int maxDamage,
+                            String itemId) {
+
+        /** 耐久是满的。 */
+        public boolean full() {
+            return remaining >= maxDamage;
+        }
     }
 
     /** {@link Mode#COUNT}：每种工具里满耐久的 / 要修的各几件。 */
@@ -298,6 +304,7 @@ public class MineTaskContainerAction extends Action {
             MineToolRules.Kind kind = MineToolRules.kindOf(stack);
             if (kind != null) {
                 tools.add(new ToolEntry(index, kind, MineTools.remaining(stack),
+                    stack.getMaxDamage(),
                     BuiltInRegistries.ITEM.getKey(stack.getItem()).toString()));
             }
             if (kind != null && MineToolRules.isLegal(stack)) {

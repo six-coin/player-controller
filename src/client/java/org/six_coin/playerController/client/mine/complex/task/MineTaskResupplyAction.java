@@ -42,15 +42,17 @@ import java.util.function.Predicate;
  * <p>入口约定：<b>人一定在挖掘区起始点</b>（挖掘主控只有这一个入口）。整个过程分五步：
  * <ol>
  *   <li><b>卸货</b>：把除了 9 个收集盒以外的东西原样放进 {@code inventory_temp}（大箱子，
- *       前三行 = 背包 27 格、第四行 = 快捷栏，位置一一对应）；把 9 个收集盒摆到 9 个
- *       {@code unloading_shulker_box_placement} 上；逐个倒进物品栏 → 按物品去对应的
- *       {@code item_collector} 装盒（满了就等 1 秒，活塞会换一个新的）；最后把 9 个空盒拆回来、
- *       放回大箱子 13~21 格。</li>
+ *       前三行 = 背包 27 格、第四行 = 快捷栏，位置一一对应）；把<b>有东西的</b>收集盒摆到
+ *       {@code unloading_shulker_box_placement} 上（<b>空盒不摆</b>）；逐个倒进物品栏 → 按物品去对应的
+ *       {@code item_collector} 装盒（满了就等 1 秒，活塞会换一个新的）；最后把摆出去的盒子
+ *       <b>空手快挖</b>拆回来、放回大箱子 13~21 格。</li>
  *   <li><b>补材料</b>：把大箱子 6~8 的圆石盒、9~11 的黏液块盒摆到
- *       {@code supplement_shulker_box_placement} 的 6 个位置；不够就从 {@code item_temp} 里补，
- *       item_temp 也空了就去缓存拿 3 盒倒进 item_temp 再补。</li>
- *   <li><b>换 / 修工具</b>：大箱子里耐久 &lt; 200 的工具换成满耐久的；缓存里满耐久的够就直接换，
- *       不够就把所有不满的工具拿去 {@code /pc mend} 修一轮再换。</li>
+ *       {@code supplement_shulker_box_placement} 的 6 个位置；<b>先用物品栏里现成的</b>
+ *       （卸货倒出来的树脂块 / 圆石），不够再从 {@code item_temp} 里补，item_temp 也空了就去缓存
+ *       拿 3 盒倒进 item_temp 再补；补满之后把这 3 个盒子<b>空手快挖</b>拆回来按位置放回大箱子。</li>
+ *   <li><b>换 / 修工具</b>：按位置核对 10 个工具格（背包 1~5 + 快捷栏 1~5）：
+ *       斧头 / 锄头剩 &lt; 1200、剑 / 镐 / 铲剩 &lt; 200、备用格不满耐久 → 换新；
+ *       缓存里满耐久的够就直接换，不够就把所有不满的工具拿去 {@code /pc mend} 修一轮再换。</li>
  *   <li><b>拿吃的</b>：食物不满 64 就去 {@code food_provider} 补到 64。</li>
  *   <li><b>拿回东西</b>：大箱子 1~27 格搬回背包 27 格、28~36 格搬回快捷栏，然后回安全点。</li>
  * </ol>
@@ -76,19 +78,19 @@ public class MineTaskResupplyAction extends Action {
     /** 一次从 item_temp 最多拿多少（36 组）。 */
     private static final int TRIP_LIMIT = 36 * 64;
 
+    /** 补一种材料最多循环几轮（每一轮 = 装一盒 / 拿一趟 / 搬一次缓存）。 */
+    private static final int MAX_FILL_ROUNDS = 400;
+
     private static final Predicate<ItemStack> ANY = stack -> !stack.isEmpty();
     private static final Predicate<ItemStack> COBBLE = stack -> stack.is(Items.COBBLESTONE);
     private static final Predicate<ItemStack> SLIME =
         stack -> stack.is(Items.SLIME_BLOCK) || stack.is(Items.RESIN_BLOCK);
+    private static final Predicate<ItemStack> SLIME_BLOCK = stack -> stack.is(Items.SLIME_BLOCK);
+    private static final Predicate<ItemStack> RESIN_BLOCK = stack -> stack.is(Items.RESIN_BLOCK);
     private static final Predicate<ItemStack> TOOL = stack -> MineToolRules.kindOf(stack) != null;
     private static final Predicate<ItemStack> WORN_TOOL = stack -> {
         MineToolRules.Kind kind = MineToolRules.kindOf(stack);
         return kind != null && stack.getDamageValue() > 0;
-    };
-    /** 耐久 &lt; 200 的工具（要换掉的）。 */
-    private static final Predicate<ItemStack> TIRED_TOOL = stack -> {
-        MineToolRules.Kind kind = MineToolRules.kindOf(stack);
-        return kind != null && MineTools.remaining(stack) < 200;
     };
 
     /** 一种材料（圆石 / 黏液块）。 */
@@ -120,20 +122,26 @@ public class MineTaskResupplyAction extends Action {
 
     /** 卸货 / 换货的进度。 */
     private int boxIndex;
+    /** 这一趟真正要摆出去卸的收集盒（下标 = 物品栏 21~29 里的第几个；空盒不摆）。 */
+    private final List<Integer> unloadBoxes = new ArrayList<>();
     /** 补充盒里现在各有多少（下标 = supplement 的下标）。 */
     private final Map<Integer, Integer> boxCounts = new LinkedHashMap<>();
+    /** 补充盒里装的是哪一种（黏液块 / 树脂块；下标同上）。混装过不了 debug 的检查。 */
+    private final Map<Integer, String> boxTypes = new LinkedHashMap<>();
+    /** 补材料循环跑了几轮（防止死循环）。 */
+    private int fillRounds;
+    /** 连着几轮「一点都没装进去」（盒子满了 / 只剩别的种类）。 */
+    private int stallRounds;
     /** 缓存倒进 item_temp 的轮数（防止死循环）。 */
     private int fetchRounds;
-    /** 这一轮要换的工具种类。 */
-    private final List<MineToolRules.Kind> toolKinds = new ArrayList<>();
+    /** 要换的工具：大箱子第几格 → 要换成的种类（按位置核对，空的 / 放错的也算）。 */
+    private final Map<Integer, MineToolRules.Kind> tiredSlots = new LinkedHashMap<>();
     /** 修工具时临时借的那把剑（在快捷栏第 1 格）。 */
     private boolean borrowedSword;
     /** 已经修了几轮（防止「修不完 → 再拿 → 再修」死循环）。 */
     private int mendRounds;
     /** 每个产物收集盒连着「满了」几次（活塞一直不换新的就报错）。 */
     private final Map<String, Integer> collectorRetries = new LinkedHashMap<>();
-    /** 拆收集盒之前从 inventory_temp 借的镐子（在快捷栏第 2 格）。 */
-    private boolean borrowedPickaxe;
     /** 「不在路径点网络上 → snap 回网络」用了几次（防止死循环）。 */
     private int networkSnaps;
 
@@ -257,21 +265,42 @@ public class MineTaskResupplyAction extends Action {
     }
 
     private void placeAllBoxes() {
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null) {
+            fail("玩家不存在");
+            return;
+        }
+
+        // 需求：**空盒不摆**。只摆里面真的有东西的收集盒（空盒留在物品栏里，最后原样放回去）
+        unloadBoxes.clear();
+        for (int i = 0; i < 9; i++) {
+            if (!MineTaskKit.isEmptyBox(player.getInventory().getItem(SingleStageCtx.COLLECT_START + i))) {
+                unloadBoxes.add(i);
+            }
+        }
+        if (unloadBoxes.isEmpty()) {
+            ChatUtils.info("9 个收集盒都是空的，跳过卸货");
+            putBoxesBack();
+            return;
+        }
+        ChatUtils.info("要卸的收集盒 " + unloadBoxes.size() + " 个（另外 "
+            + (9 - unloadBoxes.size()) + " 个是空盒，不摆）");
         boxIndex = 0;
         placeNextBox();
     }
 
     private void placeNextBox() {
-        if (boxIndex >= 9) {
+        if (boxIndex >= unloadBoxes.size()) {
             boxIndex = 0;
             unloadNextBox();
             return;
         }
 
-        MineTaskStationData.Placement spot = unloading.get(boxIndex);
-        int inventorySlot = SingleStageCtx.COLLECT_START + boxIndex;
+        int which = unloadBoxes.get(boxIndex);
+        MineTaskStationData.Placement spot = unloading.get(which);
+        int inventorySlot = SingleStageCtx.COLLECT_START + which;
         goToPlacement(spot, () -> run(
-            new MineTaskPlaceBoxAction(inventorySlot, spot.pos(), "收集盒 " + (boxIndex + 1)),
+            new MineTaskPlaceBoxAction(inventorySlot, spot.pos(), "收集盒 " + (which + 1)),
             () -> {
                 boxIndex++;
                 placeNextBox();
@@ -279,24 +308,25 @@ public class MineTaskResupplyAction extends Action {
     }
 
     private void unloadNextBox() {
-        if (boxIndex >= 9) {
+        if (boxIndex >= unloadBoxes.size()) {
             boxIndex = 0;
             breakAllBoxes();
             return;
         }
 
-        MineTaskStationData.Placement spot = unloading.get(boxIndex);
+        int which = unloadBoxes.get(boxIndex);
+        MineTaskStationData.Placement spot = unloading.get(which);
         goToPlacement(spot, () -> {
             MineTaskContainerAction count = new MineTaskContainerAction(spot.pos(),
                 MineTaskContainerAction.Mode.COUNT, ANY, 0, Set.of(), "看看收集盒里有什么");
             run(count, () -> {
                 if (count.countedEmpty() >= count.countedSlots()) {
-                    ChatUtils.debug("第 %d 个收集盒是空的，跳过", boxIndex + 1);
+                    ChatUtils.debug("第 %d 个收集盒是空的，跳过", which + 1);
                     boxIndex++;
                     unloadNextBox();
                     return;
                 }
-                ChatUtils.info("第 " + (boxIndex + 1) + " 个收集盒里有："
+                ChatUtils.info("第 " + (which + 1) + " 个收集盒里有："
                     + MineTaskContainerAction.describeItems(count.counted()));
                 data.recordPlacementBox(MineStationPart.UNLOADING_PLACEMENT, spot.pos(), count.counted());
                 run(new MineTaskContainerAction(spot.pos(),
@@ -343,52 +373,28 @@ public class MineTaskResupplyAction extends Action {
     }
 
     /**
-     * 拆 9 个收集盒。
+     * 拆摆出去的收集盒。
      *
-     * <p>空手拆一个要 3 秒，所以先从 inventory_temp 把镐子借出来（快捷栏第 2 格，
-     * 也就是它本来的位置）；借不到才空手。拆完再放回原格。
+     * <p>**空手快挖**（{@link MineTaskBreakBoxAction} 自己就是快挖），不再从 inventory_temp
+     * 借镐子 —— 借镐子那一套既慢又吃耐久。
      */
     private void breakAllBoxes() {
         boxIndex = 0;
-        goToAccess(inventoryTemp, () -> {
-            MineTaskTakeAction take = new MineTaskTakeAction(inventoryTemp,
-                SingleStageCtx.HOTBAR_PICKAXE, SingleStageCtx.HOTBAR_PICKAXE + 27, "镐子").tolerant();
-            run(take, () -> {
-                borrowedPickaxe = take.taken() != null;
-                if (!borrowedPickaxe) {
-                    ChatUtils.debug("物品栏暂存处的快捷栏第 2 格没有镐子，空手拆收集盒");
-                }
-                breakNextBox();
-            });
-        });
+        breakNextBox();
     }
 
     private void breakNextBox() {
-        if (boxIndex >= 9) {
-            returnPickaxe();
-            return;
-        }
-        MineTaskStationData.Placement spot = unloading.get(boxIndex);
-        goToPlacement(spot, () -> run(
-            new MineTaskBreakBoxAction(spot.pos(), SingleStageCtx.HOTBAR_PICKAXE, "收集盒 " + (boxIndex + 1)),
-            () -> {
-                boxIndex++;
-                breakNextBox();
-            }));
-    }
-
-    /** 把借来的镐子放回 inventory_temp 的快捷栏第 2 格（箱子第 28 格）。 */
-    private void returnPickaxe() {
-        if (!borrowedPickaxe) {
+        if (boxIndex >= unloadBoxes.size()) {
             putBoxesBack();
             return;
         }
-        goToAccess(inventoryTemp, () -> run(
-            new MineTaskContainerAction(inventoryTemp, MineTaskContainerAction.Mode.SYNC_TO_CONTAINER,
-                ANY, 0, Set.of(SingleStageCtx.HOTBAR_PICKAXE), "把借的镐子放回去"),
+        int which = unloadBoxes.get(boxIndex);
+        MineTaskStationData.Placement spot = unloading.get(which);
+        goToPlacement(spot, () -> run(
+            new MineTaskBreakBoxAction(spot.pos(), "收集盒 " + (which + 1)),
             () -> {
-                borrowedPickaxe = false;
-                putBoxesBack();
+                boxIndex++;
+                breakNextBox();
             }));
     }
 
@@ -440,10 +446,25 @@ public class MineTaskResupplyAction extends Action {
         restockMaterial(COBBLE_MAT, () -> restockMaterial(SLIME_MAT, this::startTools));
     }
 
+    /**
+     * 一种材料的一整轮：摆盒子 → 数盒子 → 补满 → 剩下的材料放回 item_temp
+     * → **把盒子拆回来按位置放回大箱子**。
+     *
+     * <p>「拆回来」这一步以前漏了：盒子在摆放处补满之后就留在世界里，玩家物品栏里还是
+     * 那几个用空了的盒子，所以下一轮挖掘当场报错，树脂块 / 圆石也只能堆在物品栏里。
+     *
+     * <p>顺序上**先**把剩下的材料放回 item_temp：物品栏腾出空位，拆下来的盒子才吸得进来。
+     */
     private void restockMaterial(Material material, Runnable next) {
         goToAccess(inventoryTemp, () -> placeSupplementBoxes(material, 0, () -> {
             boxCounts.clear();
-            countSupplementBoxes(material, 0, () -> fillLoop(material, next));
+            boxTypes.clear();
+            fillRounds = 0;
+            stallRounds = 0;
+            countSupplementBoxes(material, 0, () ->
+                fillLoop(material, () ->
+                    finishMaterial(material, () ->
+                        returnSupplementBoxes(material, 0, next))));
         }));
     }
 
@@ -470,7 +491,7 @@ public class MineTaskResupplyAction extends Action {
                 () -> placeSupplementBoxes(material, index + 1, next)))));
     }
 
-    /** 数一下补充摆放处那 3 个盒子里各有多少。 */
+    /** 数一下补充摆放处那 3 个盒子里各有多少（顺便记下装的是黏液块还是树脂块）。 */
     private void countSupplementBoxes(Material material, int index, Runnable next) {
         if (index >= 3) {
             next.run();
@@ -483,54 +504,170 @@ public class MineTaskResupplyAction extends Action {
                 MineTaskContainerAction.Mode.COUNT, ANY, 0, Set.of(), "数" + material.label());
             run(count, () -> {
                 boxCounts.put(slot, materialCount(material, count.counted()));
+                boxTypes.put(slot, typeOf(material, count.counted()));
                 data.recordPlacementBox(MineStationPart.SUPPLEMENT_PLACEMENT, spot.pos(), count.counted());
                 countSupplementBoxes(material, index + 1, next);
             });
         });
     }
 
-    /** 缺口 → 从 item_temp 拿 → 往盒子里装，直到 3 个盒子都满 / item_temp 没货。 */
+    /**
+     * 补满 3 个盒子。
+     *
+     * <p>顺序：<b>物品栏里现成的</b>（卸货倒出来的树脂块 / 圆石）→ {@code item_temp} 里拿 →
+     * 缓存搬 3 盒倒进 {@code item_temp} 再拿。以前只看 {@code item_temp}，卸货倒进物品栏的
+     * 那一堆根本装不进盒子，所以「补不满、还留一背包树脂块」。
+     */
     private void fillLoop(Material material, Runnable next) {
-        int deficit = deficit(material);
-        if (deficit <= 0) {
-            finishMaterial(material, next);
-            return;
-        }
-
-        MineTaskStationData.ContainerInfo source = itemTempWith(material.filter());
-        if (source == null) {
-            fetchFromCache(material, () -> fillLoop(material, next));
-            return;
-        }
-
-        goToAccess(source, () -> run(
-            new MineTaskContainerAction(source, MineTaskContainerAction.Mode.TO_INVENTORY,
-                material.filter(), Math.min(TRIP_LIMIT, deficit), Set.of(),
-                "从 item_temp 拿" + material.label()),
-            () -> distributeToBoxes(material, next)));
-    }
-
-    private void distributeToBoxes(Material material, Runnable next) {
         int index = firstDeficientBox(material);
         if (index < 0) {
             next.run();
             return;
         }
+        if (++fillRounds > MAX_FILL_ROUNDS) {
+            fail("补" + material.label() + "补了 " + fillRounds + " 轮还是没满（盒子装不进去了？）");
+            return;
+        }
 
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null) {
+            fail("玩家不存在");
+            return;
+        }
+
+        Predicate<ItemStack> filter = filterForBox(material, index, player);
+
+        // 1. 物品栏里还有同类东西 → 直接装进盒子（少跑一趟 item_temp）
+        if (hasMatching(player, filter)) {
+            distributeToBox(material, index, filter, next);
+            return;
+        }
+
+        // 2. item_temp 里有 → 拿一趟（最多 36 组）
+        MineTaskStationData.ContainerInfo source = itemTempWith(filter);
+        if (source != null) {
+            int need = Math.min(TRIP_LIMIT, deficit(material));
+            goToAccess(source, () -> {
+                MineTaskContainerAction take = new MineTaskContainerAction(source,
+                    MineTaskContainerAction.Mode.TO_INVENTORY, filter, need, Set.of(),
+                    "从 item_temp 拿" + material.label());
+                run(take, () -> {
+                    if (take.moved() == 0) {
+                        fail("item_temp 里的" + material.label() + "拿不出来（物品栏满了？）");
+                        return;
+                    }
+                    fillLoop(material, next);
+                });
+            });
+            return;
+        }
+
+        // 3. 都没有 → 从缓存搬 3 盒过来，回来接着补
+        fetchFromCache(material, filter, () -> fillLoop(material, next));
+    }
+
+    /** 把物品栏里的材料装进第 {@code index} 个盒子，装完回 {@link #fillLoop}。 */
+    private void distributeToBox(Material material, int index, Predicate<ItemStack> filter,
+                                 Runnable next) {
         MineTaskStationData.Placement spot = supplement.get(index);
         goToPlacement(spot, () -> {
             MineTaskContainerAction put = new MineTaskContainerAction(spot.pos(),
-                MineTaskContainerAction.Mode.TO_CONTAINER, material.filter(), 0, Set.of(),
+                MineTaskContainerAction.Mode.TO_CONTAINER, filter, 0, Set.of(),
                 "往盒子里装" + material.label());
             run(put, () -> {
                 MineTaskContainerAction count = new MineTaskContainerAction(spot.pos(),
                     MineTaskContainerAction.Mode.COUNT, ANY, 0, Set.of(), "数" + material.label());
                 run(count, () -> {
-                    boxCounts.put(index, materialCount(material, count.counted()));
-                    distributeToBoxes(material, next);
+                    int before = boxCounts.getOrDefault(index, 0);
+                    int now = materialCount(material, count.counted());
+                    boxCounts.put(index, now);
+                    String type = typeOf(material, count.counted());
+                    if (type != null) boxTypes.put(index, type);
+                    data.recordPlacementBox(MineStationPart.SUPPLEMENT_PLACEMENT, spot.pos(),
+                        count.counted());
+
+                    if (now <= before) {
+                        // 一点都没装进去（盒子满了 / 只剩别的种类占着格子）→ 当它满的，别死循环
+                        ChatUtils.debug("第 %d 个%s盒装不进去了（%d → %d），按满的算",
+                            index - material.placementStart() + 1, material.label(), before, now);
+                        boxCounts.put(index, FULL_BOX);
+                        if (++stallRounds > 3) {
+                            fail("3 个" + material.label() + "盒都装不进去了，物品栏里还有"
+                                + material.label());
+                            return;
+                        }
+                    } else {
+                        stallRounds = 0;
+                    }
+                    fillLoop(material, next);
                 });
             });
         });
+    }
+
+    /**
+     * 把补满的 3 个盒子拆回来，按位置放回大箱子 6~8 / 9~11（拆是**空手快挖**）。
+     *
+     * <p>盒子被吸到哪一格是随机的，所以用 {@link MineTaskPutSlotAction} 直接「物品栏那一格 →
+     * 箱子那一格」，不靠 {@code SYNC_TO_CONTAINER}（那个要求东西先在对应的物品栏格）。
+     */
+    private void returnSupplementBoxes(Material material, int index, Runnable next) {
+        if (index >= 3) {
+            next.run();
+            return;
+        }
+        int chestSlot = material.firstChestSlot() + index;
+        MineTaskStationData.Placement spot = supplement.get(material.placementStart() + index);
+
+        goToPlacement(spot, () -> {
+            MineTaskBreakBoxAction breakBox = new MineTaskBreakBoxAction(spot.pos(),
+                material.label() + "盒 " + (index + 1));
+            run(breakBox, () -> {
+                int found = breakBox.pickedSlot();
+                if (found < 0) {
+                    fail("拆回来的" + material.label() + "盒不知道吸到哪一格了（物品栏满了？）");
+                    return;
+                }
+                ChatUtils.debug("拆回来的%s盒在第 %d 格，放回大箱子第 %d 格",
+                    material.label(), found, chestSlot + 1);
+                goToAccess(inventoryTemp, () -> run(
+                    new MineTaskPutSlotAction(inventoryTemp, found, chestSlot,
+                        material.label() + "盒"),
+                    () -> returnSupplementBoxes(material, index + 1, next)));
+            });
+        });
+    }
+
+    /**
+     * 这个盒子该装哪一种：黏液块 / 树脂块跟着盒子现在装的走（不许混装），
+     * 空盒就先按「物品栏里现成的那种」定下来，定了就不再变。
+     */
+    private Predicate<ItemStack> filterForBox(Material material, int index, LocalPlayer player) {
+        if (material != SLIME_MAT) return material.filter();
+
+        String type = boxTypes.get(index);
+        if (type == null) {
+            if (hasMatching(player, SLIME_BLOCK)) {
+                type = "minecraft:slime_block";
+            } else if (hasMatching(player, RESIN_BLOCK)) {
+                type = "minecraft:resin_block";
+            }
+        }
+        if (type == null) return SLIME;      // 两种都没有：先不定，等从 item_temp 拿到货再定
+        boxTypes.put(index, type);
+
+        String decided = type;
+        return stack -> idOf(stack).equals(decided);
+    }
+
+    /** 这个盒子里装的是黏液块还是树脂块（空盒 / 圆石盒返回 null）。 */
+    @Nullable
+    private static String typeOf(Material material, Map<String, Integer> items) {
+        if (material != SLIME_MAT) return null;
+        for (String id : items.keySet()) {
+            if ("minecraft:slime_block".equals(id) || "minecraft:resin_block".equals(id)) return id;
+        }
+        return null;
     }
 
     /** 这一种材料补完了：物品栏里还剩的同类东西放回 item_temp，然后下一步。 */
@@ -548,7 +685,7 @@ public class MineTaskResupplyAction extends Action {
     }
 
     /** item_temp 里没货了：去缓存拿 3 盒倒进 item_temp，再回到上面的循环。 */
-    private void fetchFromCache(Material material, Runnable next) {
+    private void fetchFromCache(Material material, Predicate<ItemStack> filter, Runnable next) {
         if (++fetchRounds > 3) {
             failAtSafePoint("从" + material.cache().display() + "补了 3 轮还是不够" + material.label());
             return;
@@ -569,12 +706,28 @@ public class MineTaskResupplyAction extends Action {
                         + " 盒" + material.label() + "（要 3 盒）");
                     return;
                 }
+                if (!containsAny(count.counted(), filter)) {
+                    // 缓存是「整份只有一种」的：盒子要的是另一种，再搬也没用
+                    failAtSafePoint(material.cache().display() + " 里没有能装进这个盒子的"
+                        + material.label() + "（缓存里是 " + MineTaskContainerAction.describeItems(count.counted())
+                        + "）—— 盒子里的那一种和缓存对不上");
+                    return;
+                }
                 ChatUtils.info("item_temp 里没" + material.label() + "了：从"
                     + material.cache().display() + "搬 3 盒过来");
                 fetchBoxes(material, cache, 0, () -> dumpTempBoxes(material, 0,
                     () -> recycleTempBoxes(material, 0, next)));
             });
         });
+    }
+
+    /** 这个容器里有没有符合 {@code filter} 的东西。 */
+    private static boolean containsAny(Map<String, Integer> items, Predicate<ItemStack> filter) {
+        for (String id : items.keySet()) {
+            Item item = itemOf(id);
+            if (item != null && filter.test(item.getDefaultInstance())) return true;
+        }
+        return false;
     }
 
     /** 从缓存拿 3 个盒子摆到临时摆放处。 */
@@ -680,40 +833,131 @@ public class MineTaskResupplyAction extends Action {
     // 第三步：换 / 修工具
     // ------------------------------------------------------------------
 
+    /**
+     * 换工具：<b>按位置</b>把 10 个工具格（背包 1~5 + 快捷栏 1~5）逐个核对一遍。
+     *
+     * <p>门槛（和 debug 前的检查同一套，见 {@link MineToolRules#minDurability}）：
+     * 斧头 / 锄头剩 ≥{@value MineToolRules#AXE_HOE_MIN_DURABILITY}，剑 / 镐 / 铲剩
+     * ≥{@value MineToolRules#TOOL_MIN_DURABILITY}；备用格（背包 1~5）要求满耐久
+     * —— 备用格不满说明是挖矿时换下来的，也一并换新。
+     */
     private void startTools() {
         ChatUtils.info("补货 3/5：换工具 / 修工具");
         goToAccess(inventoryTemp, () -> {
             MineTaskContainerAction scan = new MineTaskContainerAction(inventoryTemp,
                 MineTaskContainerAction.Mode.COUNT, ANY, 0, Set.of(), "看看有哪些工具要换");
             run(scan, () -> {
-                toolKinds.clear();
-                for (MineTaskContainerAction.ToolEntry entry : scan.tools()) {
-                    if (entry.slot() > 4) continue;          // 只有背包 1~5 会到 <200
-                    if (entry.remaining() >= 200) continue;
-                    if (!toolKinds.contains(entry.kind())) toolKinds.add(entry.kind());
-                }
-                if (toolKinds.isEmpty()) {
-                    ChatUtils.info("没有耐久 <200 的工具，跳过换工具");
+                planTiredTools(scan);
+                if (tiredSlots.isEmpty()) {
+                    ChatUtils.info("工具都够用（斧头 / 锄头 ≥"
+                        + MineToolRules.AXE_HOE_MIN_DURABILITY + "，其他 ≥"
+                        + MineToolRules.TOOL_MIN_DURABILITY + "，备用满耐久），跳过换工具");
                     startArmor();
                     return;
                 }
 
-                ChatUtils.info("要换的工具：" + toolKinds);
-                MineTaskContainerAction take = new MineTaskContainerAction(inventoryTemp,
-                    MineTaskContainerAction.Mode.TO_INVENTORY, TIRED_TOOL, 0, Set.of(),
-                    "把要换的工具拿出来");
-                run(take, () -> {
-                    if (take.moved() == 0) {
-                        fail("要把 " + toolKinds + " 拿去换，但物品栏放不下（或者大箱子里已经没有这些工具）");
-                        return;
-                    }
-                    checkToolCache();
-                });
+                ChatUtils.info("要换的工具：" + describeTired());
+                takeTiredOut(new ArrayList<>(tiredSlots.entrySet()), 0, this::putTiredIntoCache);
             });
         });
     }
 
-    /** 数一遍所有工具缓存里「满耐久」的工具够不够。 */
+    /** 哪些工具格要换：空的 / 放错种类 / 耐久低于门槛的都算。 */
+    private void planTiredTools(MineTaskContainerAction scan) {
+        tiredSlots.clear();
+        Map<Integer, MineTaskContainerAction.ToolEntry> bySlot = new LinkedHashMap<>();
+        for (MineTaskContainerAction.ToolEntry entry : scan.tools()) bySlot.put(entry.slot(), entry);
+
+        for (int chestSlot : TOOL_CHEST_SLOTS) {
+            MineToolRules.Kind kind = expectedTool(chestSlot);
+            if (kind == null) continue;
+            MineTaskContainerAction.ToolEntry entry = bySlot.get(chestSlot);
+            if (entry == null || entry.kind() != kind) {
+                // 空的 / 放的是别的东西（比如上一版的斧头）：也要换成对的
+                tiredSlots.put(chestSlot, kind);
+                continue;
+            }
+            // 备用格（背包 1~5）必须满耐久，掉了一点就是挖矿时换下来的旧工具
+            if (chestSlot <= 4) {
+                if (!entry.full()) tiredSlots.put(chestSlot, kind);
+                continue;
+            }
+            if (entry.remaining() < MineToolRules.minDurability(kind)) {
+                tiredSlots.put(chestSlot, kind);
+            }
+        }
+    }
+
+    /** 「大箱子第 5 格（背包 6）→ 圆石盒」这种一行。 */
+    private String describeTired() {
+        List<String> parts = new ArrayList<>();
+        for (Map.Entry<Integer, MineToolRules.Kind> entry : tiredSlots.entrySet()) {
+            parts.add(chestLabel(entry.getKey()) + "=" + entry.getValue().label());
+        }
+        return String.join("、", parts);
+    }
+
+    private static String chestLabel(int chestSlot) {
+        return chestSlot < 27
+            ? "背包 " + (chestSlot + 1)
+            : "快捷栏 " + (chestSlot - 26);
+    }
+
+    /** 补货时要按位置核对的工具格（大箱子下标）：背包 1~5 + 快捷栏 1~5。 */
+    private static final int[] TOOL_CHEST_SLOTS = {0, 1, 2, 3, 4, 27, 28, 29, 30, 31};
+
+    /**
+     * 这个工具格里应该是哪种工具。
+     *
+     * <p>背包 1~5 = 备用剑 / 备用镐 / 备用镐 / 备用铲 / 备用镐；快捷栏 1~5 = 剑 / 镐 / 斧 / 铲 / 锄。
+     */
+    private static MineToolRules.Kind expectedTool(int chestSlot) {
+        return switch (chestSlot) {
+            case 0, 27 -> MineToolRules.Kind.SWORD;
+            case 1, 2, 4, 28 -> MineToolRules.Kind.PICKAXE;
+            case 3, 30 -> MineToolRules.Kind.SHOVEL;
+            case 29 -> MineToolRules.Kind.AXE;
+            case 31 -> MineToolRules.Kind.HOE;
+            default -> null;
+        };
+    }
+
+    /** 把要换的工具按位置从大箱子里拿出来（放到物品栏的临时空格里）。 */
+    private void takeTiredOut(List<Map.Entry<Integer, MineToolRules.Kind>> entries, int index,
+                              Runnable next) {
+        if (index >= entries.size()) {
+            next.run();
+            return;
+        }
+        int chestSlot = entries.get(index).getKey();
+        MineToolRules.Kind kind = entries.get(index).getValue();
+
+        LocalPlayer player = Minecraft.getInstance().player;
+        int free = player == null ? -1 : firstFreeSlotForTool(player);
+        if (free < 0) {
+            fail("物品栏没有空格，拿不出" + chestLabel(chestSlot) + "的旧" + kind.label());
+            return;
+        }
+
+        goToAccess(inventoryTemp, () -> run(
+            new MineTaskTakeAction(inventoryTemp, free, chestSlot, "旧" + kind.label()).tolerant(),
+            () -> takeTiredOut(entries, index + 1, next)));
+    }
+
+    /** 旧的工具都塞进工具缓存（修好还能用）。 */
+    private void putTiredIntoCache() {
+        MineTaskStationData.ContainerInfo cache = data.firstContainer(MineStationPart.TOOL_CACHE);
+        if (cache == null) {
+            fail("没有工具缓存，换下来的旧工具没地方放");
+            return;
+        }
+        goToAccess(cache, () -> run(
+            new MineTaskContainerAction(cache, MineTaskContainerAction.Mode.TO_CONTAINER,
+                stack -> MineToolRules.kindOf(stack) != null, 0, Set.of(), "把旧工具放进缓存"),
+            this::checkToolCache));
+    }
+
+    /** 数一遍所有工具缓存里「满耐久」的工具够不够（按要换的件数算）。 */
     private void checkToolCache() {
         List<MineTaskStationData.ContainerInfo> caches = data.containers(MineStationPart.TOOL_CACHE);
         if (caches.isEmpty()) {
@@ -744,54 +988,56 @@ public class MineTaskResupplyAction extends Action {
     }
 
     private void afterToolCheck(Map<MineToolRules.Kind, Integer> totals) {
-        boolean enough = true;
-        for (MineToolRules.Kind kind : toolKinds) {
-            if (totals.getOrDefault(kind, 0) < 1) {
-                enough = false;
-                break;
+        Map<MineToolRules.Kind, Integer> need = new LinkedHashMap<>();
+        for (MineToolRules.Kind kind : tiredSlots.values()) need.merge(kind, 1, Integer::sum);
+
+        List<String> missing = new ArrayList<>();
+        for (Map.Entry<MineToolRules.Kind, Integer> entry : need.entrySet()) {
+            int have = totals.getOrDefault(entry.getKey(), 0);
+            if (have < entry.getValue()) {
+                missing.add(entry.getKey().label() + " " + have + "/" + entry.getValue());
             }
         }
-        if (enough) {
+
+        if (missing.isEmpty()) {
             ChatUtils.info("工具缓存里的满耐久工具够用，直接换");
-            swapTools();
+            takeNewTools(0, this::startArmor);
         } else {
-            ChatUtils.info("工具缓存里满耐久的工具不够，先去修一轮");
+            ChatUtils.info("工具缓存里满耐久的工具不够（" + String.join("、", missing) + "），先去修一轮");
             mendTools();
         }
     }
 
-    /** 够用：去缓存把旧的放进去、每种拿一把满耐久的，回大箱子放到 1~5 格。 */
-    private void swapTools() {
+    /** 一件一件换：从缓存拿一把新的到物品栏空格 → 按位置放进大箱子对应那一格。 */
+    private void takeNewTools(int index, Runnable next) {
+        List<Map.Entry<Integer, MineToolRules.Kind>> entries = new ArrayList<>(tiredSlots.entrySet());
+        if (index >= entries.size()) {
+            next.run();
+            return;
+        }
+        int chestSlot = entries.get(index).getKey();
+        MineToolRules.Kind kind = entries.get(index).getValue();
+
         MineTaskStationData.ContainerInfo cache = data.firstContainer(MineStationPart.TOOL_CACHE);
         if (cache == null) {
             fail("没有工具缓存");
             return;
         }
-
-        goToAccess(cache, () -> run(
-            new MineTaskContainerAction(cache, MineTaskContainerAction.Mode.TO_CONTAINER,
-                TIRED_TOOL, 0, Set.of(), "把要换的工具放进缓存"),
-            () -> takeTools(cache, 0, () -> goToAccess(inventoryTemp, () -> run(
-                new MineTaskContainerAction(inventoryTemp,
-                    MineTaskContainerAction.Mode.SYNC_TO_CONTAINER, ANY, 0,
-                    MineTaskContainerAction.slots(SingleStageCtx.SPARE_START,
-                        SingleStageCtx.SPARE_START + 4),
-                    "把新工具放进大箱子 1~5 格"),
-                this::startArmor)))));
-    }
-
-    /** 每种要换的工具拿一把满耐久的（放进背包 1~5 对应的位置）。 */
-    private void takeTools(MineTaskStationData.ContainerInfo cache, int index, Runnable next) {
-        if (index >= toolKinds.size()) {
-            next.run();
+        LocalPlayer player = Minecraft.getInstance().player;
+        int free = player == null ? -1 : firstFreeSlotForTool(player);
+        if (free < 0) {
+            fail("物品栏没有空格，拿不了新的" + kind.label());
             return;
         }
-        MineToolRules.Kind kind = toolKinds.get(index);
-        run(new MineTaskTakeAction(cache, SingleStageCtx.SPARE_START + kind.ordinal(),
-            stack -> MineToolRules.kindOf(stack) == kind && MineToolRules.isLegal(stack)
-                && MineToolRules.isUsable(stack),
-            kind.label()),
-            () -> takeTools(cache, index + 1, next));
+
+        goToAccess(cache, () -> run(
+            new MineTaskTakeAction(cache, free,
+                stack -> MineToolRules.kindOf(stack) == kind && MineToolRules.isLegal(stack)
+                    && MineToolRules.isUsable(stack),
+                kind.label()),
+            () -> goToAccess(inventoryTemp, () -> run(
+                new MineTaskPutSlotAction(inventoryTemp, free, chestSlot, kind.label()),
+                () -> takeNewTools(index + 1, next)))));
     }
 
     /** 不够用：把所有不满的工具拿去 mend，修好再放回来，反复直到没有要修的。 */
@@ -873,31 +1119,20 @@ public class MineTaskResupplyAction extends Action {
         });
     }
 
-    /** 修完了：拿每种要换的工具各一把，借来的剑放回去，然后回大箱子放到 1~5 格。 */
+    /** 修完了：借来的剑放回去，然后按位置把新工具换进大箱子。 */
     private void finishMend(MineTaskStationData.ContainerInfo cache) {
-        goToAccess(cache, () -> takeTools(cache, 0, () -> {
-            if (!borrowedSword) {
-                goToAccess(inventoryTemp, this::putToolsIntoTemp);
-                return;
-            }
-            goToAccess(cache, () -> run(
-                new MineTaskContainerAction(cache, MineTaskContainerAction.Mode.TO_CONTAINER,
-                    stack -> stack.is(Items.DIAMOND_SWORD) || stack.is(Items.NETHERITE_SWORD),
-                    1, MineTaskContainerAction.slots(0, 0), "把借来的剑放回去"),
-                () -> {
-                    borrowedSword = false;
-                    goToAccess(inventoryTemp, this::putToolsIntoTemp);
-                }));
-        }));
-    }
-
-    private void putToolsIntoTemp() {
-        run(new MineTaskContainerAction(inventoryTemp,
-            MineTaskContainerAction.Mode.SYNC_TO_CONTAINER, ANY, 0,
-            MineTaskContainerAction.slots(SingleStageCtx.SPARE_START,
-                SingleStageCtx.SPARE_START + 4),
-            "把新工具放进大箱子 1~5 格"),
-            this::startArmor);
+        if (!borrowedSword) {
+            takeNewTools(0, this::startArmor);
+            return;
+        }
+        goToAccess(cache, () -> run(
+            new MineTaskContainerAction(cache, MineTaskContainerAction.Mode.TO_CONTAINER,
+                stack -> stack.is(Items.DIAMOND_SWORD) || stack.is(Items.NETHERITE_SWORD),
+                1, MineTaskContainerAction.slots(0, 0), "把借来的剑放回去"),
+            () -> {
+                borrowedSword = false;
+                takeNewTools(0, this::startArmor);
+            }));
     }
 
     // ------------------------------------------------------------------
@@ -1165,6 +1400,25 @@ public class MineTaskResupplyAction extends Action {
 
     private static int firstEmptyInvSlot(LocalPlayer player) {
         for (int slot = 0; slot <= 35; slot++) {
+            if (player.getInventory().getItem(slot).isEmpty()) return slot;
+        }
+        return -1;
+    }
+
+    /**
+     * 换工具时临时放物品栏哪一格。
+     *
+     * <p>优先背包 22~27（那几格「随便」），其次别的空格；<b>0 号格不用</b> ——
+     * 那是 mend 借剑的位置（{@code MineTaskMendAction} 要求快捷栏第 1 格是剑）。
+     */
+    private static int firstFreeSlotForTool(LocalPlayer player) {
+        for (int slot = SingleStageCtx.FILLER_START; slot <= SingleStageCtx.FILLER_END; slot++) {
+            if (player.getInventory().getItem(slot).isEmpty()) return slot;
+        }
+        for (int slot = 9; slot <= 35; slot++) {
+            if (player.getInventory().getItem(slot).isEmpty()) return slot;
+        }
+        for (int slot = 1; slot <= 8; slot++) {
             if (player.getInventory().getItem(slot).isEmpty()) return slot;
         }
         return -1;

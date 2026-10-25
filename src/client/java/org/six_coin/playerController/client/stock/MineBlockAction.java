@@ -35,11 +35,23 @@ public class MineBlockAction extends Action {
     /** 挖一个方块最多等这么多 tick（潜影盒用钻石镐大概 8 tick）。 */
     private static final int MAX_MINE_TICKS = 200;
 
+    /** 快挖：隔这么多 tick 还没掉就再发一次（26.3 服务端 STOP 直接碎，正常一次就完）。 */
+    private static final int FAST_RETRY_TICKS = 3;
+
+    /** 快挖：最多发几次，还挖不掉就报错。 */
+    private static final int FAST_MAX_TRIES = 10;
+
     private final BlockPos pos;
     private final int hotbarIndex;
 
+    /** 快挖：同一 tick 发 START + 挥手 + STOP（不等进度），要求手上是空的。 */
+    private final boolean fast;
+
     private Direction side = Direction.UP;
     private int mineTicks;
+    private int fastTries;
+    /** 快挖时实际用的那一格快捷栏（-1 = 还没定）。 */
+    private int hand = -1;
 
     /**
      * 挖之前那一格是什么方块。
@@ -50,13 +62,39 @@ public class MineBlockAction extends Action {
     private Block original;
 
     public MineBlockAction(BlockPos pos, int hotbarIndex) {
+        this(pos, hotbarIndex, false);
+    }
+
+    private MineBlockAction(BlockPos pos, int hotbarIndex, boolean fast) {
         this.pos = pos.immutable();
         this.hotbarIndex = hotbarIndex;
+        this.fast = fast;
+    }
+
+    /**
+     * 快挖：<b>同一 tick 发 START + 挥手 + STOP</b>，不累进度、不等它自己碎。
+     *
+     * <p>26.3 服务端改过（用户实测）：STOP 一到就直接把方块打掉，不看进度。所以连强化深板岩
+     * 都能空手 2 个/tick，潜影盒这种硬度 2 的更是随便挖。
+     *
+     * <p>手上的东西必须<b>空</b>（空手挖不吃耐久）；{@code hotbarIndex} 那一格要是空的，
+     * 调用方负责。
+     */
+    public static MineBlockAction fastEmpty(BlockPos pos, int hotbarIndex) {
+        return new MineBlockAction(pos, hotbarIndex, true);
+    }
+
+    /**
+     * 快挖，自己挑一格空的快捷栏当「空手」（优先手上本来就是空的，其次快捷栏 6~8，再其次 0~8）。
+     */
+    public static MineBlockAction fastEmpty(BlockPos pos) {
+        return new MineBlockAction(pos, -1, true);
     }
 
     @Override
     public String name() {
-        return "挖掉 " + pos.toShortString() + "（用快捷栏第 " + (hotbarIndex + 1) + " 格）";
+        return (fast ? "快挖 " : "挖掉 ") + pos.toShortString()
+            + (fast ? "（空手）" : "（用快捷栏第 " + (hotbarIndex + 1) + " 格）");
     }
 
     // ------------------------------------------------------------------
@@ -87,18 +125,31 @@ public class MineBlockAction extends Action {
             return;
         }
 
-        if (!HotbarManager.get().request(Owner.STOCK, hotbarIndex)) {
-            fail("快捷栏第 " + (hotbarIndex + 1) + " 格现在不让切过去（别的功能在用）");
+        int slot = fast ? handSlot(player) : hotbarIndex;
+        if (slot < 0) {
+            fail("快捷栏 1~9 都占着，没法空手挖 " + pos.toShortString()
+                + "（挖潜影盒要用空手）");
+            return;
+        }
+        if (!HotbarManager.get().request(Owner.STOCK, slot)) {
+            fail("快捷栏第 " + (slot + 1) + " 格现在不让切过去（别的功能在用）");
             return;
         }
 
-        ItemStack tool = player.getInventory().getItem(hotbarIndex);
+        ItemStack tool = player.getInventory().getItem(slot);
         side = PlayerUtils.facingSide(pos);
         RotateManager.get().rotateTo(Owner.STOCK, pos);
 
         original = state.getBlock();
-        ChatUtils.debug("开始挖 %s（%s，面 %s，手上 %s）",
+        ChatUtils.debug("%s %s（%s，面 %s，手上 %s）", fast ? "快挖" : "开始挖",
             pos.toShortString(), BuiltInRegistries.BLOCK.getKey(state.getBlock()), side.getName(), describe(tool));
+
+        if (fast) {
+            hand = slot;
+            breakNow(mc, player, pos);
+            fastTries = 1;
+            return;
+        }
         if (!mc.gameMode.startDestroyBlock(pos, side)) {
             fail("挖不动 " + pos.toShortString() + "（够不着？）");
         }
@@ -117,6 +168,21 @@ public class MineBlockAction extends Action {
             ChatUtils.debug(pos.toShortString() + " 已经挖掉了（用了 " + mineTicks + " tick，现在是 "
                 + BuiltInRegistries.BLOCK.getKey(state.getBlock()) + "）");
             finish();
+            return;
+        }
+
+        if (fast) {
+            // 服务端没认（延迟 / 打偏了）：隔几 tick 再发一次，别一直傻等
+            if (++mineTicks % FAST_RETRY_TICKS != 0) return;
+            if (++fastTries > FAST_MAX_TRIES) {
+                fail("快挖 " + pos.toShortString() + " 失败（发了 " + fastTries + " 次，还是 "
+                    + BuiltInRegistries.BLOCK.getKey(state.getBlock()) + "）");
+                return;
+            }
+            ChatUtils.debug("快挖 %s 没碎，再发一次（第 %d 次）", pos.toShortString(), fastTries);
+            // 这中间 mine simple 可能把快捷栏抢回去了，重新切一次再发
+            if (hand >= 0) HotbarManager.get().request(Owner.STOCK, hand);
+            breakNow(mc, mc.player, pos);
             return;
         }
 
@@ -139,6 +205,35 @@ public class MineBlockAction extends Action {
         if (!broken(mc.level.getBlockState(pos))) {
             mc.gameMode.stopDestroyBlock();
         }
+    }
+
+    /**
+     * 快挖时用哪一格当「空手」。
+     *
+     * <p>指定了格子（{@code hotbarIndex >= 0}）就只用那一格，不是空的就返回 -1
+     * （空手挖必须真空手，拿着东西会掉耐久）；没指定就优先「手上本来就是空的」，
+     * 其次快捷栏 6~8，再其次 0~8 里第一个空的。
+     *
+     * <p>快捷栏真的塞满了（卸完货物品栏是满的）就退一步用一格**不会掉耐久**的东西
+     * （方块、食物之类）—— 服务端 STOP 直接碎，拿着什么不影响，只有会掉耐久的工具不能用。
+     */
+    private int handSlot(LocalPlayer player) {
+        if (hotbarIndex >= 0) {
+            return player.getInventory().getItem(hotbarIndex).isEmpty() ? hotbarIndex : -1;
+        }
+        int selected = player.getInventory().getSelectedSlot();
+        if (player.getInventory().getItem(selected).isEmpty()) return selected;
+        for (int slot = 5; slot <= 7; slot++) {
+            if (player.getInventory().getItem(slot).isEmpty()) return slot;
+        }
+        for (int slot = 0; slot <= 8; slot++) {
+            if (player.getInventory().getItem(slot).isEmpty()) return slot;
+        }
+        for (int slot = 0; slot <= 8; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty() && !stack.isDamageableItem()) return slot;
+        }
+        return -1;
     }
 
     /**

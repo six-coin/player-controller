@@ -6,6 +6,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.jetbrains.annotations.Nullable;
+import org.six_coin.playerController.client.mine.MineTools;
 import org.six_coin.playerController.client.mine.complex.single.SingleStageCheck;
 import org.six_coin.playerController.client.mine.complex.single.SingleStageCtx;
 import org.six_coin.playerController.client.mine.station.MineStationPart;
@@ -27,10 +28,10 @@ import java.util.function.Predicate;
  *
  * <p>格子编号和 {@link SingleStageCtx} 里那套常量一致（{@code PlayerInventory} 下标）：
  * <pre>
- *   0~4    快捷栏 1~5：剑 镐 斧 铲 锄（满耐久）
+ *   0~4    快捷栏 1~5：剑 镐 斧 铲 锄（斧头 / 锄头剩 ≥1200 耐久即可，别的不管耐久）
  *   5~7    快捷栏 6~8：空着
  *   8      快捷栏 9：熟猪排（≥16）
- *   9~13   背包 1~5：备用工具（耐久满）
+ *   9~13   背包 1~5：备用剑 / 备用镐 / 备用镐 / 备用铲 / 备用镐（耐久满）
  *   14~16  背包 6~8：圆石盒（满 / ≥5 组 / 随便）
  *   17~19  背包 9~11：黏液块盒（满 / ≥5 组 / 随便）
  *   20     背包 12：熔岩桶
@@ -73,14 +74,15 @@ public final class MineTaskKit {
     public static List<Slot> slots() {
         List<Slot> list = new ArrayList<>();
 
-        // 快捷栏 1~5：五类工具，可用的就行
+        // 快捷栏 1~5：剑 镐 斧 铲 锄。斧头 / 锄头只要剩 ≥1200 耐久就行，别的有备用、不看耐久
         MineToolRules.Kind[] kinds = {MineToolRules.Kind.SWORD, MineToolRules.Kind.PICKAXE,
             MineToolRules.Kind.AXE, MineToolRules.Kind.SHOVEL, MineToolRules.Kind.HOE};
         for (int i = 0; i < kinds.length; i++) {
             MineToolRules.Kind kind = kinds[i];
             list.add(new Slot(i, kind.label(), MineStationPart.TOOL_CACHE,
                 stack -> MineToolRules.kindOf(stack) == kind
-                    && MineToolRules.isLegal(stack) && MineToolRules.isUsable(stack),
+                    && MineToolRules.isLegal(stack)
+                    && MineTools.remaining(stack) >= MineToolRules.minDurability(kind),
                 toolId(kind)));
         }
 
@@ -89,15 +91,12 @@ public final class MineTaskKit {
             stack -> stack.is(Items.COOKED_PORKCHOP) && stack.getCount() >= FOOD_MIN,
             id -> id.equals("minecraft:cooked_porkchop")));
 
-        // 背包 1~5：备用工具，耐久必须满
-        for (int i = 0; i < kinds.length; i++) {
-            MineToolRules.Kind kind = kinds[i];
-            list.add(new Slot(SingleStageCtx.SPARE_START + i, "备用" + kind.label(),
-                MineStationPart.TOOL_CACHE,
-                stack -> MineToolRules.kindOf(stack) == kind && MineToolRules.isLegal(stack)
-                    && stack.getDamageValue() == 0,
-                toolId(kind)));
-        }
+        // 背包 1~5：备用剑 / 备用镐 ×3 / 备用铲，耐久必须满
+        list.add(spare(SingleStageCtx.SPARE_SWORD, MineToolRules.Kind.SWORD));
+        list.add(spare(SingleStageCtx.SPARE_PICKAXE_1, MineToolRules.Kind.PICKAXE));
+        list.add(spare(SingleStageCtx.SPARE_PICKAXE_2, MineToolRules.Kind.PICKAXE));
+        list.add(spare(SingleStageCtx.SPARE_SHOVEL, MineToolRules.Kind.SHOVEL));
+        list.add(spare(SingleStageCtx.SPARE_PICKAXE_3, MineToolRules.Kind.PICKAXE));
 
         // 背包 6~8：圆石盒（满 / ≥5 组 / 随便）
         list.add(new Slot(SingleStageCtx.COBBLE_BOX_A, "装满圆石的潜影盒",
@@ -127,6 +126,14 @@ public final class MineTaskKit {
     // ------------------------------------------------------------------
     // 玩家自带的两样东西（预检查里已经验过位置）
     // ------------------------------------------------------------------
+
+    /** 背包 1~5 里的一件备用工具：种类对、合法、耐久必须满。 */
+    private static Slot spare(int index, MineToolRules.Kind kind) {
+        return new Slot(index, "备用" + kind.label(), MineStationPart.TOOL_CACHE,
+            stack -> MineToolRules.kindOf(stack) == kind && MineToolRules.isLegal(stack)
+                && stack.getDamageValue() == 0,
+            toolId(kind));
+    }
 
     /** 9 个空潜影盒：从快捷栏 1~9 搬到背包 13~21。 */
     public static List<MineTaskInventoryMoveAction.Move> boxesToCollectSlots() {

@@ -805,8 +805,8 @@ class SingleStageStage1 extends SingleStageStep {
         ChatUtils.info(phase() + "：盒子里的粘液块不够了，把 " + swapSpot.toShortString()
             + " 换成背包第 " + swapReserve + " 格那盒");
 
-        swapQueue.child("挖掉 " + swapSpot.toShortString(),
-            () -> new MineBlockAction(swapSpot, SingleStageCtx.HOTBAR_PICKAXE));
+        swapQueue.child("快挖掉 " + swapSpot.toShortString(),
+            () -> MineBlockAction.fastEmpty(swapSpot));
         swapQueue.child("snap 到 " + swapSpot.toShortString(),
             () -> new SingleStageSnapAction(ctx, swapSpot));
         swapQueue.child("等物品栏吸到盒子",

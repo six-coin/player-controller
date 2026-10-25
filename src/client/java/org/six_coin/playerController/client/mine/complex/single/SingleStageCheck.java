@@ -41,6 +41,9 @@ public final class SingleStageCheck {
     /** 这个功能要求的 `actions.reach` 下限。 */
     public static final double MIN_REACH = 5.0;
 
+    /** {@link #toolSlot} 的「必须满耐久」。 */
+    private static final int TOOL_FULL = -1;
+
     /** 潜影盒的三种装满程度。 */
     public enum Fill {
         EMPTY("空"),
@@ -153,12 +156,15 @@ public final class SingleStageCheck {
         SingleStageData data = ctx.data;
         List<String> problems = new ArrayList<>();
 
-        // 快捷栏 1~5：剑镐斧铲锄，不要求耐久
-        toolSlot(data, problems, SingleStageCtx.HOTBAR_SWORD, MineToolRules.Kind.SWORD, "快捷栏 1", false);
-        toolSlot(data, problems, SingleStageCtx.HOTBAR_PICKAXE, MineToolRules.Kind.PICKAXE, "快捷栏 2", false);
-        toolSlot(data, problems, SingleStageCtx.HOTBAR_AXE, MineToolRules.Kind.AXE, "快捷栏 3", false);
-        toolSlot(data, problems, SingleStageCtx.HOTBAR_SHOVEL, MineToolRules.Kind.SHOVEL, "快捷栏 4", false);
-        toolSlot(data, problems, SingleStageCtx.HOTBAR_HOE, MineToolRules.Kind.HOE, "快捷栏 5", false);
+        // 快捷栏 1~5：剑镐斧铲锄。剑 / 镐 / 铲有备用，不管耐久；
+        // 斧头 / 锄头没有备用（用得太少），要求剩 ≥1200 耐久
+        toolSlot(data, problems, SingleStageCtx.HOTBAR_SWORD, MineToolRules.Kind.SWORD, "快捷栏 1", 0);
+        toolSlot(data, problems, SingleStageCtx.HOTBAR_PICKAXE, MineToolRules.Kind.PICKAXE, "快捷栏 2", 0);
+        toolSlot(data, problems, SingleStageCtx.HOTBAR_AXE, MineToolRules.Kind.AXE, "快捷栏 3",
+            MineToolRules.AXE_HOE_MIN_DURABILITY);
+        toolSlot(data, problems, SingleStageCtx.HOTBAR_SHOVEL, MineToolRules.Kind.SHOVEL, "快捷栏 4", 0);
+        toolSlot(data, problems, SingleStageCtx.HOTBAR_HOE, MineToolRules.Kind.HOE, "快捷栏 5",
+            MineToolRules.AXE_HOE_MIN_DURABILITY);
 
         // 快捷栏 6~8：必须是空的
         emptySlot(data, problems, SingleStageCtx.HOTBAR_FREE_1, "快捷栏 6");
@@ -181,12 +187,12 @@ public final class SingleStageCheck {
             problems.add("副手是 " + SingleStageData.idOf(offhand) + "，要放不死图腾");
         }
 
-        // 背包 1~5：替换工具，耐久必须满
-        toolSlot(data, problems, SingleStageCtx.SPARE_START, MineToolRules.Kind.SWORD, "背包 1", true);
-        toolSlot(data, problems, SingleStageCtx.SPARE_START + 1, MineToolRules.Kind.PICKAXE, "背包 2", true);
-        toolSlot(data, problems, SingleStageCtx.SPARE_START + 2, MineToolRules.Kind.AXE, "背包 3", true);
-        toolSlot(data, problems, SingleStageCtx.SPARE_START + 3, MineToolRules.Kind.SHOVEL, "背包 4", true);
-        toolSlot(data, problems, SingleStageCtx.SPARE_START + 4, MineToolRules.Kind.HOE, "背包 5", true);
+        // 背包 1~5：备用剑 / 备用镐 ×3 / 备用铲，耐久必须满
+        toolSlot(data, problems, SingleStageCtx.SPARE_SWORD, MineToolRules.Kind.SWORD, "背包 1", TOOL_FULL);
+        toolSlot(data, problems, SingleStageCtx.SPARE_PICKAXE_1, MineToolRules.Kind.PICKAXE, "背包 2", TOOL_FULL);
+        toolSlot(data, problems, SingleStageCtx.SPARE_PICKAXE_2, MineToolRules.Kind.PICKAXE, "背包 3", TOOL_FULL);
+        toolSlot(data, problems, SingleStageCtx.SPARE_SHOVEL, MineToolRules.Kind.SHOVEL, "背包 4", TOOL_FULL);
+        toolSlot(data, problems, SingleStageCtx.SPARE_PICKAXE_3, MineToolRules.Kind.PICKAXE, "背包 5", TOOL_FULL);
 
         // 背包 6~8：圆石。9~11：黏液块 / 树脂块。两组规则一样：
         // 第一盒必须满（1728）、第二盒至少 5 组（320）、第三盒不要求；
@@ -271,8 +277,14 @@ public final class SingleStageCheck {
 
     // ------------------------------------------------------------------
 
+    /**
+     * 一格工具：种类 / 附魔 / 耐久。
+     *
+     * @param minRemaining {@code 0} = 不管耐久；{@link #TOOL_FULL} = 必须满耐久；
+     *                     其他 = 剩余耐久不能低于这个数
+     */
     private static void toolSlot(SingleStageData data, List<String> problems, int index,
-                                 MineToolRules.Kind kind, String label, boolean requireFull) {
+                                 MineToolRules.Kind kind, String label, int minRemaining) {
         ItemStack stack = data.stack(index);
         if (stack.isEmpty()) {
             problems.add(label + " 是空的，要放" + kind.label());
@@ -288,9 +300,19 @@ public final class SingleStageCheck {
         if (MineToolRules.level(stack, Enchantments.UNBREAKING) < 3) {
             problems.add(label + " 的" + kind.label() + "没有耐久 III");
         }
-        if (requireFull && stack.getDamageValue() > 0) {
-            problems.add(label + " 的" + kind.label() + "耐久不是满的（剩 "
-                + (stack.getMaxDamage() - stack.getDamageValue()) + "/" + stack.getMaxDamage() + "）");
+        if (minRemaining == TOOL_FULL) {
+            if (stack.getDamageValue() > 0) {
+                problems.add(label + " 的" + kind.label() + "耐久不是满的（剩 "
+                    + (stack.getMaxDamage() - stack.getDamageValue()) + "/" + stack.getMaxDamage() + "）");
+            }
+            return;
+        }
+        if (minRemaining > 0) {
+            int remaining = stack.getMaxDamage() - stack.getDamageValue();
+            if (remaining < minRemaining) {
+                problems.add(label + " 的" + kind.label() + "只剩 " + remaining + "/"
+                    + stack.getMaxDamage() + " 耐久（要 ≥" + minRemaining + "）");
+            }
         }
     }
 

@@ -10,6 +10,8 @@ import org.jetbrains.annotations.Nullable;
 import org.six_coin.playerController.client.action.Action;
 import org.six_coin.playerController.client.config.PlayerControllerConfig;
 import org.six_coin.playerController.client.mine.MineManager;
+import org.six_coin.playerController.client.mine.MineTools;
+import org.six_coin.playerController.client.mine.station.MineToolRules;
 import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 
@@ -30,7 +32,8 @@ import java.util.List;
  *
  * <p>**并行**做工具耐久检查：每
  * {@code mine_complex_tool_durability_check_interval_ticks} tick 看一次手上那件工具，
- * 耐久低于 {@value #LOW_DURABILITY} 就把它和背包里同种类的备用工具换过来。
+ * 耐久低于 {@value #LOW_DURABILITY} 就把它和背包里的备用工具换过来（镐子有背包 2 / 3 / 5
+ * 三把，挑剩得最多的那把；斧头 / 锄头没有备用，靠补货整把换）。
  */
 class SingleStageStage2 extends SingleStageStep {
 
@@ -91,6 +94,8 @@ class SingleStageStage2 extends SingleStageStep {
     private int quietTicks;
     private int settledTicks;
     private int sinceDurabilityCheck;
+    /** 上一次「没有备用工具」报的是哪一格（同一格只报一次）。 */
+    private int lastWarnSlot = -1;
     private int index;
     private boolean mineStarted;
     private boolean warnedNoBlocks;
@@ -345,21 +350,72 @@ class SingleStageStage2 extends SingleStageStep {
         if (selected < 0 || selected > 4) return;          // 只管剑镐斧铲锄这五格
 
         ItemStack held = player.getInventory().getItem(selected);
-        if (held.isEmpty() || !held.isDamageableItem()) return;
+        if (held.isEmpty() || !held.isDamageableItem()) {
+            // 手上那把已经用没了：从备用格里顶一把上来（不然这一格就一直空着）
+            if (held.isEmpty()) refillBroken(player, selected);
+            return;
+        }
 
         int remaining = held.getMaxDamage() - held.getDamageValue();
         if (remaining >= LOW_DURABILITY) return;
 
-        int spare = SingleStageCtx.SPARE_START + selected;
-        ItemStack spareStack = player.getInventory().getItem(spare);
-        if (spareStack.isEmpty()) {
-            ChatUtils.error("快捷栏第 " + (selected + 1) + " 格的工具只剩 " + remaining
-                + " 耐久，但背包 " + (selected + 1) + " 格没有备用工具了");
+        int spare = spareSlotFor(player, selected, remaining);
+        if (spare < 0) {
+            // 同一格只报一次，别每 N tick 刷一行
+            if (lastWarnSlot != selected) {
+                lastWarnSlot = selected;
+                ChatUtils.error("快捷栏第 " + (selected + 1) + " 格的工具只剩 " + remaining
+                    + " 耐久，但没有更好的备用工具了（斧头 / 锄头本来就没有备用，补货会整把换）");
+            }
             return;
         }
+        lastWarnSlot = -1;
 
         if (SingleStageInventoryAction.swapNow(player, spare, selected)) {
-            ChatUtils.info("工具只剩 " + remaining + " 耐久，已换成背包 " + (selected + 1) + " 格的备用工具");
+            ChatUtils.info("工具只剩 " + remaining + " 耐久，已换成背包第 " + (spare - SingleStageCtx.SPARE_START + 1)
+                + " 格的备用工具");
         }
+    }
+
+    /** 手上那一格空了（工具用没了）：从备用格里拿一把上来。 */
+    private void refillBroken(LocalPlayer player, int selected) {
+        int spare = spareSlotFor(player, selected, 0);
+        if (spare < 0) return;
+        if (SingleStageInventoryAction.swapNow(player, spare, selected)) {
+            ChatUtils.info("快捷栏第 " + (selected + 1) + " 格的工具用没了，从背包第 "
+                + (spare - SingleStageCtx.SPARE_START + 1) + " 格顶上一把");
+        }
+    }
+
+    /**
+     * 这一格工具的备用格（{@code PlayerInventory} 下标）；没有更好的就返回 -1。
+     *
+     * <ul>
+     *   <li><b>镐子</b>：背包 2 / 3 / 5 三把里<b>剩得最多</b>的那把 —— 用坏一把换下一把，
+     *       换下来的坏镐子就占着它原来那一格，所以不能写死「背包 2」；</li>
+     *   <li>剑 / 铲：背包 1 / 背包 4 的固定那一格；</li>
+     *   <li>斧头 / 锄头：<b>没有备用</b>（用得太少，掉到 1200 以下补货整把换）。</li>
+     * </ul>
+     *
+     * @param remaining 手上那把还剩多少耐久（挑备用的时候要比它好）
+     */
+    private static int spareSlotFor(LocalPlayer player, int selected, int remaining) {
+        if (selected == SingleStageCtx.HOTBAR_PICKAXE) {
+            int best = -1;
+            int bestRemaining = remaining;
+            for (int slot : SingleStageCtx.SPARE_PICKAXES) {
+                ItemStack stack = player.getInventory().getItem(slot);
+                if (MineToolRules.kindOf(stack) != MineToolRules.Kind.PICKAXE) continue;
+                int left = MineTools.remaining(stack);
+                if (left > bestRemaining) {
+                    bestRemaining = left;
+                    best = slot;
+                }
+            }
+            return best;
+        }
+        if (selected == SingleStageCtx.HOTBAR_SWORD) return SingleStageCtx.SPARE_SWORD;
+        if (selected == SingleStageCtx.HOTBAR_SHOVEL) return SingleStageCtx.SPARE_SHOVEL;
+        return -1;
     }
 }

@@ -51,8 +51,25 @@ public final class SingleStageCtx {
     /** 快捷栏 9：食物（熟猪排）。 */
     public static final int HOTBAR_FOOD = 8;
 
-    /** 背包 1~5：替换用的剑 / 镐 / 斧 / 铲 / 锄（耐久必须满）。 */
+    /**
+     * 背包 1~5：替换用的剑 / 镐 / 镐 / 铲 / 镐（耐久必须满）。
+     *
+     * <p>镐子用得最多，所以备<b>三把</b>：快捷栏那把掉到 100 耐久以下就换下一把，
+     * 换下来的坏镐子就占着原来那一格（补货时按格换新）。
+     */
     public static final int SPARE_START = 9;
+    /** 背包 1：备用剑。 */
+    public static final int SPARE_SWORD = SPARE_START;
+    /** 背包 2：备用镐子（第一把）。 */
+    public static final int SPARE_PICKAXE_1 = SPARE_START + 1;
+    /** 背包 3：备用镐子（第二把）。 */
+    public static final int SPARE_PICKAXE_2 = SPARE_START + 2;
+    /** 背包 4：备用铲子。 */
+    public static final int SPARE_SHOVEL = SPARE_START + 3;
+    /** 背包 5：备用镐子（第三把）。 */
+    public static final int SPARE_PICKAXE_3 = SPARE_START + 4;
+    /** 三把备用镐子的格子（换的时候挑剩得最多的那一把）。 */
+    public static final int[] SPARE_PICKAXES = {SPARE_PICKAXE_1, SPARE_PICKAXE_2, SPARE_PICKAXE_3};
     /** 背包 6：**装满**圆石的潜影盒（1728）。 */
     public static final int COBBLE_BOX_A = 14;
     /** 背包 7：圆石盒，空 / 半满 / 满都行（内容不能比背包 8 少）。 */

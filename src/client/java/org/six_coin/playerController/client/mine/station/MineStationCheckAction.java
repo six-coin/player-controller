@@ -77,7 +77,8 @@ import java.util.Set;
  *   <li>任务前物品暂存处：不要求空，但<em>一个潜影盒都不能有</em>，
  *       而且所有容器加起来至少 {@value #ITEM_TEMP_MIN_FREE_SLOTS} 个空闲格子（报告里记详细内容）；</li>
  *   <li>工具缓存：每个容器里只有合法工具（见 {@link MineToolRules}），
- *       而且<em>每个容器</em>里五类工具各至少 {@value MineToolRules#REQUIRED_PER_KIND} 件可用；</li>
+ *       而且<em>每个容器</em>里五类工具各至少 {@value MineToolRules#REQUIRED_PER_KIND} 件可用
+ *       （镐子要 {@value MineToolRules#REQUIRED_PICKAXES} 件 —— 挖掘要用 1 + 3 把）；</li>
  *   <li>黏液块缓存：每一格都是装满一整盒（{@value #FULL_BOX} 个）的潜影盒，
  *       而且<em>整个缓存只能用一种</em> —— 要么全是黏液块、要么全是树脂块，不许混；</li>
  *   <li>圆石缓存：每一格都是装满一整盒的圆石，一盒必须正好 {@value #FULL_BOX} 个；</li>
@@ -895,9 +896,12 @@ public class MineStationCheckAction extends Action {
             }
             for (MineToolRules.Kind kind : MineToolRules.Kind.values()) {
                 int count = usable.getOrDefault(kind, 0);
-                if (count < MineToolRules.REQUIRED_PER_KIND) {
+                // 镐子用得最多：快捷栏 1 把 + 背包 3 把备用，缓存里至少得备 4 把
+                int need = kind == MineToolRules.Kind.PICKAXE
+                    ? MineToolRules.REQUIRED_PICKAXES : MineToolRules.REQUIRED_PER_KIND;
+                if (count < need) {
                     addProblem(describe(MineStationPart.TOOL_CACHE, survey) + " 里可用的" + kind.label()
-                        + "只有 " + count + " 件（每个容器要 ≥" + MineToolRules.REQUIRED_PER_KIND + "）");
+                        + "只有 " + count + " 件（每个容器要 ≥" + need + "）");
                 }
             }
         }
