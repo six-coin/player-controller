@@ -85,9 +85,14 @@ public final class SingleStageCheck {
                 + "）—— 先站到一个全是空气的子区块里");
         }
 
+        // 只查**要挖的那一段**：levels 不够 8 的时候子区块下面那截根本不挖（下面是基岩 /
+        // 挖掘区外面），拿它当「挖不掉的方块」会把整个任务拦下来
+        int fromY = ctx.lowestMinedY();
+        int toY = ctx.targetMin.getY() + 15;
+
         int blocked = 0;
         List<String> samples = new ArrayList<>();
-        for (BlockPos pos : cells(ctx.targetMin)) {
+        for (BlockPos pos : cells(ctx.targetMin, fromY, toY)) {
             BlockState state = level.getBlockState(pos);
             if (state.isAir()) continue;
             String why = notMineable(ctx, state);
@@ -96,8 +101,9 @@ public final class SingleStageCheck {
             if (samples.size() < 5) samples.add(pos.toShortString() + " " + why);
         }
         if (blocked > 0) {
-            problems.add("目标子区块 " + ctx.targetMin.toShortString() + " 里有 " + blocked
-                + " 个方块挖不掉（例如 " + String.join("、", samples) + "）—— 这个子区块没法整块清空");
+            problems.add("目标子区块 " + ctx.targetMin.toShortString() + " 的 y " + fromY + "~" + toY
+                + " 里有 " + blocked + " 个方块挖不掉（例如 " + String.join("、", samples)
+                + "）—— 这一段没法整块清空");
         }
         return problems;
     }
@@ -116,11 +122,16 @@ public final class SingleStageCheck {
     }
 
     private static List<BlockPos> cells(BlockPos min) {
+        return cells(min, min.getY(), min.getY() + CHUNK - 1);
+    }
+
+    /** 这个子区块里 y 在 {@code fromY ~ toY} 之间的格子（两端都算）。 */
+    private static List<BlockPos> cells(BlockPos min, int fromY, int toY) {
         List<BlockPos> cells = new ArrayList<>(CHUNK * CHUNK * CHUNK);
         for (int x = 0; x < CHUNK; x++) {
-            for (int y = 0; y < CHUNK; y++) {
+            for (int y = fromY; y <= toY; y++) {
                 for (int z = 0; z < CHUNK; z++) {
-                    cells.add(new BlockPos(min.getX() + x, min.getY() + y, min.getZ() + z));
+                    cells.add(new BlockPos(min.getX() + x, y, min.getZ() + z));
                 }
             }
         }

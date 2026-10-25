@@ -332,6 +332,17 @@ public final class SingleStageCtx {
         return targetMin.getY() + 14 - 2 * iteration;
     }
 
+    /**
+     * 这个子区块里**最下面要挖的那一层**的 y。
+     *
+     * <p>{@code levels} 不够 8 的时候（挖掘区底 y1 落在子区块中间），子区块下面那一段
+     * **根本不挖**（那下面是基岩 / 挖掘区外面），所以任何「整块清空」的检查都必须从这一层开始，
+     * 不然会拿基岩当「挖不掉的方块」把整个任务拦下来。
+     */
+    public int lowestMinedY() {
+        return regionBottom(lastIteration());
+    }
+
     public int regionTop(int iteration) {
         return regionBottom(iteration) + 1;
     }
