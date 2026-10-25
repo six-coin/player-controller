@@ -726,11 +726,13 @@ public class MineTaskResupplyAction extends Action {
                         + " 盒" + material.label() + "（要 3 盒）");
                     return;
                 }
-                if (!containsAny(count.counted(), filter)) {
+                if (!containsAny(count.counted(), filter)
+                    && !containsAny(count.countedBoxContents(), filter)) {
                     // 缓存是「整份只有一种」的：盒子要的是另一种，再搬也没用
                     failAtSafePoint(material.cache().display() + " 里没有能装进这个盒子的"
-                        + material.label() + "（缓存里是 " + MineTaskContainerAction.describeItems(count.counted())
-                        + "）—— 盒子里的那一种和缓存对不上");
+                        + material.label() + "（缓存里是 "
+                        + MineTaskContainerAction.describeItems(count.countedBoxContents()) + "）"
+                        + " —— 盒子里的那一种和缓存对不上");
                     return;
                 }
                 ChatUtils.info("item_temp 里没" + material.label() + "了：从"

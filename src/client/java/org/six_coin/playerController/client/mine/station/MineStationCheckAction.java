@@ -30,6 +30,7 @@ import org.six_coin.playerController.client.util.ChatUtils;
 import org.six_coin.playerController.client.util.DimensionUtils;
 import org.six_coin.playerController.client.util.PlayerUtils;
 import org.six_coin.playerController.client.util.ShulkerUtils;
+import org.six_coin.playerController.client.mine.complex.task.MineTaskSnapNetworkAction;
 import org.six_coin.playerController.client.waypoint.PathPlanner;
 import org.six_coin.playerController.client.waypoint.Waypoint;
 import org.six_coin.playerController.client.waypoint.WaypointGraph;
@@ -191,7 +192,14 @@ public class MineStationCheckAction extends Action {
         this.checkedTask = checkedTask;
     }
 
+    /** 「不在路径点网络上 → snap 回网络」最多试几次（防止死循环）。 */
+    private static final int MAX_NETWORK_SNAPS = 5;
+
     private int index;
+    /** 已经 snap 回网络几次。 */
+    private int networkSnaps;
+    /** 现在跑的这个「移动」其实是 snap 回网络（跑完要重新规划，而不是当成到了）。 */
+    private boolean snappingBack;
     private Stage stage = Stage.MOVING;
     @Nullable
     private Target current;
@@ -374,6 +382,18 @@ public class MineStationCheckAction extends Action {
 
             PathPlanner.Plan plan = PathPlanner.toPosition(target.access(), target.place().dimension());
             if (!plan.ok()) {
+                // 人不在路径点网络上（走到潜影盒摆放处往下掉过、或者被怪推开了）：
+                // 先 snap 回最近的路径点，再重新规划 —— 这不是错误，别记成问题
+                if (plan.error() != null && plan.error().contains("你现在所在的")
+                    && networkSnaps < MAX_NETWORK_SNAPS) {
+                    networkSnaps++;
+                    ChatUtils.info("挖掘站检查：现在不在路径点网络上，先 snap 到最近的路径点再走（第 "
+                        + networkSnaps + " 次）");
+                    snappingBack = true;
+                    moveAction = new MineTaskSnapNetworkAction();
+                    moveAction.start();
+                    return;
+                }
                 addProblem("走不到 " + describe(target.part(), target.place()) + " 的落点 "
                     + target.access().toShortString() + "：" + plan.error());
                 index++;
@@ -486,7 +506,14 @@ public class MineStationCheckAction extends Action {
         if (failure != null) {
             addProblem("走到 " + (current == null ? "？" : current.access().toShortString())
                 + " 失败：" + failure);
+            snappingBack = false;
             nextTarget();
+            return;
+        }
+        if (snappingBack) {
+            // snap 回网络了：重新规划同一个目标
+            snappingBack = false;
+            beginMove();
             return;
         }
         arrive();
@@ -606,8 +633,23 @@ public class MineStationCheckAction extends Action {
             return;
         }
         PathPlanner.Plan plan = PathPlanner.toPosition(safe.pos(), safe.dimension());
-        if (!plan.ok() || plan.alreadyThere()) {
-            if (!plan.ok()) ChatUtils.error("检查完了，但走不回安全点：" + plan.error());
+        if (!plan.ok()) {
+            // 最后又掉出网络了（潜影盒摆放处下面没东西）：先 snap 回去再试一次，不算检查失败
+            if (plan.error() != null && plan.error().contains("你现在所在的")
+                && networkSnaps < MAX_NETWORK_SNAPS) {
+                networkSnaps++;
+                ChatUtils.info("挖掘站检查：现在不在路径点网络上，先 snap 到最近的路径点再回安全点（第 "
+                    + networkSnaps + " 次）");
+                snappingBack = true;
+                moveAction = new MineTaskSnapNetworkAction();
+                moveAction.start();
+                return;
+            }
+            ChatUtils.error("检查完了，但走不回安全点：" + plan.error());
+            finish();
+            return;
+        }
+        if (plan.alreadyThere()) {
             finish();
             return;
         }
@@ -629,6 +671,12 @@ public class MineStationCheckAction extends Action {
         String failure = moveAction.failureReason();
         moveAction.cleanup();
         moveAction = null;
+        if (snappingBack) {
+            // 刚才那一步是 snap 回网络：重新规划回安全点
+            snappingBack = false;
+            finishAll();
+            return;
+        }
         if (failure != null) {
             ChatUtils.error("检查完了，但走回安全点失败：" + failure);
         } else {

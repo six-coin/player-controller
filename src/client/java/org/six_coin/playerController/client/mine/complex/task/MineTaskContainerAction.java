@@ -87,6 +87,13 @@ public class MineTaskContainerAction extends Action {
     private boolean inventoryFull;
 
     private final Map<String, Integer> counted = new LinkedHashMap<>();
+    /**
+     * {@link Mode#COUNT}：**潜影盒里面**的东西加起来（{@link #counted} 只算盒子本身那 1 个）。
+     *
+     * <p>缓存里的潜影盒装的是圆石 / 黏液块，光看 {@link #counted} 只会看到
+     * 「minecraft:shulker_box x27」—— 想知道缓存里到底是哪种材料必须看这个。
+     */
+    private final Map<String, Integer> countedBoxContents = new LinkedHashMap<>();
     private int countedSlots;
     private int countedEmpty;
     /** {@link Mode#COUNT}：里面有几个潜影盒。 */
@@ -184,6 +191,11 @@ public class MineTaskContainerAction extends Action {
     /** {@link Mode#COUNT}：里面有几个潜影盒。 */
     public int countedBoxes() {
         return countedBoxes;
+    }
+
+    /** {@link Mode#COUNT}：潜影盒**里面**的东西加起来（盒子里的圆石 / 黏液块）。 */
+    public Map<String, Integer> countedBoxContents() {
+        return countedBoxContents;
     }
 
     /** {@link Mode#COUNT}：这种工具满耐久的有几件。 */
@@ -300,6 +312,10 @@ public class MineTaskContainerAction extends Action {
 
             if (ShulkerUtils.isShulkerBox(stack)) {
                 countedBoxes++;
+                for (ItemStack inner : ShulkerUtils.contents(stack)) {
+                    countedBoxContents.merge(BuiltInRegistries.ITEM.getKey(inner.getItem()).toString(),
+                        inner.getCount(), Integer::sum);
+                }
                 continue;
             }
             MineToolRules.Kind kind = MineToolRules.kindOf(stack);

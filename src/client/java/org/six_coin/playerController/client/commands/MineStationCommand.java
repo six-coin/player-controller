@@ -57,6 +57,7 @@ import java.util.concurrent.CompletableFuture;
  * /pc mine station item_collector del &lt;item_id&gt;
  * /pc mine station item_collector del &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt;
  * /pc mine station item_collector del_target
+ *     （同一个产物只能有一个收集点：给某个产物设新的，旧的会被自动替换掉）
  *
  * /pc mine station tool_cache add &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | add_target
  *                          del &lt;x&gt; &lt;y&gt; &lt;z&gt; &lt;dim&gt; | del_target | list
@@ -366,6 +367,13 @@ public final class MineStationCommand {
             if (id == null || BuiltInRegistries.ITEM.getOptional(id).isEmpty()) {
                 source.sendError(Component.literal("没有这个物品：" + itemId));
                 return 0;
+            }
+
+            // 一个产物只能有一个收集点：给某个产物设新的，就把旧的替换掉
+            int replaced = MineStationManager.get().removeByItemId(part, itemId);
+            if (replaced > 0) {
+                source.sendFeedback(Component.literal("产物 §f" + itemId + "§r 原来那个收集点已经替换掉了"
+                    + "（删了 " + replaced + " 条）"));
             }
         }
 

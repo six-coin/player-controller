@@ -1,5 +1,9 @@
 package org.six_coin.playerController.client.mine.debug;
 
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.Item;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -100,7 +104,7 @@ public final class DebugInventory {
      * 「什么都要补货」的物品栏（用来测补货流程）：
      * <ul>
      *   <li>快捷栏 1~5：五类工具，耐久全满；6~8 空；9：熟猪排 8；</li>
-     *   <li>背包 1~5：同样五类工具，但耐久都是 99（damage=99）；</li>
+     *   <li>背包 1~5：同样五类工具，但耐久只剩 99（damage = 总耐久 - 99）；</li>
      *   <li>背包 6：半盒圆石，7 / 8：空盒；9：半盒黏液块，10 / 11：空盒；</li>
      *   <li>背包 12：熔岩桶；</li>
      *   <li>背包 13：装满深板岩；14：装满青金石；15：2 组方解石 + 2 组紫水晶块；16~21：空盒；</li>
@@ -171,17 +175,36 @@ public final class DebugInventory {
         }
     }
 
-    /** 一把钻石工具：经验修补 + 耐久 III + 效率 V（剑再加锋利 V）；{@code damage > 0} 就带损伤。 */
-    private static String tool(String kind, int damage) {
-        StringBuilder sb = new StringBuilder("minecraft:diamond_").append(kind).append('[');
+    /**
+     * 一把钻石工具：经验修补 + 耐久 III + 效率 V（剑再加锋利 V）。
+     *
+     * @param remaining 要**剩多少耐久**；{@code <= 0} = 满耐久（不带 damage 组件）。
+     *                  {@code minecraft:damage} 记的是「已经损耗了多少」，所以这里要换算成
+     *                  {@code 总耐久 - remaining} —— 写 99 是「损耗 99」而不是「剩 99」。
+     */
+    private static String tool(String kind, int remaining) {
+        String itemId = "minecraft:diamond_" + kind;
+        StringBuilder sb = new StringBuilder(itemId).append('[');
         sb.append("minecraft:enchantments={");
         sb.append("\"minecraft:mending\":1");
         sb.append(",\"minecraft:unbreaking\":3");
         sb.append(",\"minecraft:efficiency\":5");
         if ("sword".equals(kind)) sb.append(",\"minecraft:sharpness\":5");
         sb.append('}');
+
+        int damage = damageFor(itemId, remaining);
         if (damage > 0) sb.append(",minecraft:damage=").append(damage);
         return sb.append(']').toString();
+    }
+
+    /** 「还剩 {@code remaining}」对应的 {@code minecraft:damage}（总耐久 - remaining）。 */
+    private static int damageFor(String itemId, int remaining) {
+        if (remaining <= 0) return 0;
+        Identifier id = Identifier.tryParse(itemId);
+        Item item = id == null ? null : BuiltInRegistries.ITEM.getOptional(id).orElse(null);
+        // 查不到就按钻石工具的 1561 算
+        int max = item == null ? 1561 : item.getDefaultInstance().getMaxDamage();
+        return Math.max(0, max - remaining);
     }
 
     /** 一盒装满的东西：27 格 × 64。 */
