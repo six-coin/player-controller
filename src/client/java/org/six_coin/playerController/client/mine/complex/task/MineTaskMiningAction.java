@@ -81,7 +81,7 @@ public class MineTaskMiningAction extends Action {
     /** 区块一直没加载的话，最多等这么久（30 秒）。 */
     private static final int CHUNK_LOAD_WAIT_TICKS = 20 * 30;
 
-    /** 「不在路径点网络上 → snap 回网络」最多试几次。 */
+    /** 「不在路径点网络上 → snap 回网络」**连着**最多试几次（规划成功就清零）。 */
     private static final int MAX_NETWORK_SNAPS = 5;
 
     /** 盔甲耐久低于这个数就去补货（修装备）。 */
@@ -558,6 +558,7 @@ public class MineTaskMiningAction extends Action {
             fail("走不到挖掘区起始点 " + regionStart.toShortString() + "：" + plan.error());
             return;
         }
+        networkSnaps = 0;
         if (plan.alreadyThere()) {
             next.run();
             return;

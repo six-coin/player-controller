@@ -143,7 +143,13 @@ public class MineTaskResupplyAction extends Action {
     private int mendRounds;
     /** 每个产物收集盒连着「满了」几次（活塞一直不换新的就报错）。 */
     private final Map<String, Integer> collectorRetries = new LinkedHashMap<>();
-    /** 「不在路径点网络上 → snap 回网络」用了几次（防止死循环）。 */
+    /**
+     * 「不在路径点网络上 → snap 回网络」**连着**用了几次（防止死循环）。
+     *
+     * <p>规划成功就清零：补货一路要经过 9 个卸货位 + 6 个补充位 + 3 个临时位，
+     * 每一个都是浮空的潜影盒，站上去会被顶高半格 → 每次都要 snap 一次。
+     * 如果这是个「一辈子用几次」的计数，第 6 个摆放处就会直接报错。
+     */
     private int networkSnaps;
     /** 自己挂起 / 恢复容器缓存的自动刷新（挖掘主控已经挂起过了，那边不用这个）。 */
     private boolean ownsCacheSuspend;
@@ -1335,6 +1341,7 @@ public class MineTaskResupplyAction extends Action {
             fail("走不到 " + target.toShortString() + "：" + plan.error());
             return;
         }
+        networkSnaps = 0;
         if (plan.alreadyThere()) {
             next.run();
             return;
@@ -1351,7 +1358,19 @@ public class MineTaskResupplyAction extends Action {
         goTo(access, container.dimension(), next);
     }
 
+    /**
+     * 走到摆放处（站到它上面那一格）。
+     *
+     * <p>**已经在触及范围内就不走了**：潜影盒是浮空的，站上去 / 拆放的时候人会被顶高半格，
+     * 于是 {@code PathPlanner} 会报「你现在所在的 X 既不是路径点」—— 明明伸手就够得着，
+     * 没必要为此先 snap 回网络再飞回来。够不着才走（走的时候如果发现不在网络上，{@link #goTo}
+     * 会先 snap 回最近的路径点）。
+     */
     private void goToPlacement(MineTaskStationData.Placement spot, Runnable next) {
+        if (PlayerUtils.isWithinReach(spot.pos())) {
+            next.run();
+            return;
+        }
         BlockPos target = spot.access() != null ? spot.access() : spot.pos().above();
         goTo(target, spot.dimension(), next);
     }

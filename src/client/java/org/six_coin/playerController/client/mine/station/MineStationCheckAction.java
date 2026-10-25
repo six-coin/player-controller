@@ -192,7 +192,7 @@ public class MineStationCheckAction extends Action {
         this.checkedTask = checkedTask;
     }
 
-    /** 「不在路径点网络上 → snap 回网络」最多试几次（防止死循环）。 */
+    /** 「不在路径点网络上 → snap 回网络」**连着**最多试几次（规划成功就清零）。 */
     private static final int MAX_NETWORK_SNAPS = 5;
 
     private int index;
@@ -399,6 +399,7 @@ public class MineStationCheckAction extends Action {
                 index++;
                 continue;
             }
+            networkSnaps = 0;
             if (plan.alreadyThere()) {
                 arrive();
                 return;
